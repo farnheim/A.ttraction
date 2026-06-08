@@ -72,6 +72,7 @@
 ~ungApplyDefaults = { |layer|
     layer = layer.asSymbol;
     ~ungSpecOf.(layer).params.do { |p| ~setParam.(layer, p.key, p.spec.default) };
+    ~ungSyncAll.(layer);                     // авторитетный pull-resync GUI <- ~ungVals
 };
 
 
@@ -82,6 +83,7 @@
         // p[\group] (НЕ p.group): .group — это метод Object, перекрывает ключ
         if(p[\group] == group) { ~setParam.(layer, p.key, p.spec.map(1.0.rand)) };
     };
+    ~ungSyncAll.(layer);                     // авторитетный pull-resync GUI <- ~ungVals
 };
 ~rndFreq   = { |layer| ~rndGroup.(layer, \freq) };   // «частоты»
 ~rndParams = { |layer| ~rndGroup.(layer, \tone) };   // «параметры тембра»
@@ -128,6 +130,7 @@
         e = path.load;                       // event-литерал из файла
         if(e.isKindOf(Event)) {
             e.keysValuesDo { |k, v| ~setParam.(layer, k, v) };
+            ~ungSyncAll.(layer);             // авторитетный pull-resync GUI <- ~ungVals
             ("preset loaded <- " ++ path.basename).postln;
             e;
         } {
@@ -174,6 +177,31 @@
     };
 };
 
+// ----- GUI: полная пересинхронизация ВСЕХ слайдеров слоя из ~ungVals --
+// Авторитетный «pull»: читает ЖИВОЙ реестр виджетов (~ungTunerEz[layer]) и
+// текущие значения (~ungVals[layer]) и пушит их в слайдеры/ноты НАПРЯМУЮ —
+// в обход покейного ~ungTunerSync (и его гейта). Вызывается после ЛЮБОЙ
+// массовой операции (load пресета / random): даже если отдельные покейные
+// синки не сработали (краевой случай жизненного цикла окна), слайдеры
+// гарантированно встают по значениям. Идемпотентно (value_ не триггерит action).
+~ungSyncAll = { |layer|
+    layer = layer.asSymbol;
+    if(~ungTuner[layer].notNil and: { ~ungTunerEz[layer].notNil }) {
+        var spec = ~ungSpecOf.(layer);
+        if(spec.notNil) {
+            spec.params.do { |p|
+                var v  = (~ungVals[layer] !? { ~ungVals[layer][p.key] }) ? p.spec.default;
+                var ez = ~ungTunerEz[layer][p.key];
+                var t  = ~ungTunerNoteTxt[layer] !? { ~ungTunerNoteTxt[layer][p.key] };
+                {
+                    if(ez.notNil) { ez.value_(v) };
+                    if(t.notNil)  { t.string_(~ungNoteLabel.(v)) };
+                }.defer;
+            };
+        };
+    };
+};
+
 
 // ----- GUI: построение окна отстройки слоя --------------------------
 ~ungBuildTuner = { |layer|
@@ -197,9 +225,15 @@
     // разрушенный Qt-объект (.close бросил бы ошибку и оборвал бы сборку
     // ДО создания нового окна — тюнер «не открывался бы»).
     if(~ungTuner[layer].notNil) { try { ~ungTuner[layer].close } };
+    // сброс ВСЕХ слотов слоя консистентно (как делает onClose) — чтобы в
+    // зазоре пересборки не осталось ссылок на виджеты ПРОШЛОГО окна, по
+    // которым ~setParam/~ungSyncAll обновляли бы уже разрушенные слайдеры.
     ~ungTuner[layer]        = nil;
     ~ungTunerEz[layer]      = ();
     ~ungTunerNoteTxt[layer] = ();
+    ~ungTunerSync[layer]    = nil;
+    ~ungTunerPop[layer]     = nil;
+    ~ungTunerName[layer]    = nil;
 
     // ПОЗИЦИЯ ОКНА — гарантированно на экране.
     // Каскад смещений (off) стаггерит окна, НО offset рос всю сессию, и окно
@@ -217,10 +251,17 @@
         (70 + off).clip(scr.top,  scr.top  + scr.height - h),
         w, h
     );
-    win = ~ungTuner[layer] = Window(
+    // ВАЖНО: НЕ цепочкой `win = ~ungTuner[layer] = Window(...)` — в SC
+    // выражение `dict[k] = v` возвращает САМ СЛОВАРЬ (.put -> словарь), и
+    // тогда `win` биндится на Event-реестр, а не на окно. Из-за этого
+    // win.onClose_/win.close молча уходили в Event[\..] (no-op), а кнопки
+    // load/save (через popMenu/nameField, та же ловушка) падали с
+    // «Non Boolean in test» и пресет НЕ грузился. Присваиваем раздельно.
+    win = Window(
         "UNGRUND · tuner — " ++ layer ++ " (живой Ndef в App)",
         winRect
     ).background_(Color.gray(0.12));
+    ~ungTuner[layer] = win;
 
     StaticText(~ungTuner[layer], Rect(18, 10, w - 36, 22))
         .string_("отстройка слоя " ++ layer ++ " — слайдеры правят живой Ndef в общем App")
@@ -292,14 +333,19 @@
     // ----- пресеты: имя | save | список | load | refresh -----
     StaticText(~ungTuner[layer], Rect(18, py + 2, 58, 22))
         .string_("preset:").stringColor_(Color.gray(0.75)).font_(Font("Menlo", 11));
-    nameField = ~ungTunerName[layer] = TextField(~ungTuner[layer], Rect(80, py, 168, 24))
+    // раздельное присваивание (см. коммент у win): цепочка через [k]= вернула бы Event
+    nameField = TextField(~ungTuner[layer], Rect(80, py, 168, 24))
         .string_("").font_(Font("Menlo", 11));
+    ~ungTunerName[layer] = nameField;
     Button(~ungTuner[layer], Rect(254, py, 90, 24))
         .states_([["save", Color.white, Color(0.20, 0.40, 0.24)]])
         .font_(Font("Menlo", 11, true))
         .action_({ if(nameField.notNil) { ~savePreset.(layer, nameField.string) } });
-    popMenu = ~ungTunerPop[layer] = PopUpMenu(~ungTuner[layer], Rect(352, py, 200, 24))
+    // раздельное присваивание (см. коммент у win): иначе popMenu = Event-реестр,
+    // и кнопка load падала на `idx < items.size` (idx был Event) → пресет не грузился.
+    popMenu = PopUpMenu(~ungTuner[layer], Rect(352, py, 200, 24))
         .font_(Font("Menlo", 11));
+    ~ungTunerPop[layer] = popMenu;
     Button(~ungTuner[layer], Rect(560, py, 90, 24))
         .states_([["load", Color.white, Color(0.20, 0.34, 0.44)]])
         .font_(Font("Menlo", 11, true))
