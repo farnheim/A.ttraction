@@ -19,6 +19,7 @@ Implement SuperCollider programs from a composition sketch or a direct spec. Pro
 3. `prototype.scd` and any existing `.scd` / `.sc` files — match style and idiom
 4. `.claude/CLAUDE.md` — project conventions
 5. `docs/rulus.md` — pipelines this agent participates in
+6. `docs/architecture.md` — UNGRUND app layout. **The eight sound-class layers are named with Greek letters** `alpha`…`theta` (see the §1 legend mapping each to its `reference_v2.md` §C premise). Filename, `Ndef(\<class>)` symbol and `~spec_<class>` all share that name (`alpha.scd` → `Ndef(\alpha)` → `~spec_alpha`).
 
 **Pipeline 2** has no `docs/task.md` — implement directly from `docs/reference.md` and call out architectural choices in the output. If a choice feels load-bearing or DSP-risky, ask the orchestrator to invoke the analyst before pushing further.
 
@@ -231,3 +232,4 @@ All Critical/High: RESOLVED
 - ALWAYS wrap async allocation (`Buffer.read`, large SynthDef batches) in `s.waitForBoot` and follow with `s.sync` before playing.
 - ALWAYS leave a working cleanup block at the bottom of every `.scd` so re-evaluation does not leak Pdefs, Ndefs, OSCdefs, or Buffers.
 - ALWAYS smoothing on user-facing controls: `Lag.kr` / `VarLag.kr` on `\name.kr(default)` inputs that can jump.
+- ALWAYS name UNGRUND sound-class layers with their Greek letter (`alpha`…`theta`) — file, `Ndef` symbol and `~spec_*` must match. Never reintroduce the old German names (`monade`, `riß`, …) outside a `reference_v2.md` §C citation.

@@ -36,7 +36,7 @@
 (
 // Единая панель управления приложением. Флип одного флага меняет режим.
 ~cfg_app = (
-    layers:          nil,     // nil = все synths/*.scd; либо [\monade, \firnis] — грузить только эти
+    layers:          nil,     // nil = все synths/*.scd; либо [\alpha, \theta] — грузить только эти
     autoPreset:      true,    // авто-загрузка пресета "_default" слоя, если он есть в App/presets/<layer>/
     enableEffects:   true,    // tape reverb + ping-pong delay (6_effects.scd)
     enableMixer:     true,    // маршрутизация слоёв + мастер (2_mixer.scd)

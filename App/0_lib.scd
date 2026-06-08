@@ -178,6 +178,8 @@
 // ----- GUI: построение окна отстройки слоя --------------------------
 ~ungBuildTuner = { |layer|
     var spec, freqs, tones, rows, y0, rowH, slBottom, by, py, w, h, off, mkSlider;
+    var nameField, popMenu, win;   // захват в локали: closures не зависят от реестра
+    var scr, winRect;              // экран + итоговый прямоугольник окна (кламп в экран)
     layer = layer.asSymbol;
     spec  = ~ungSpecOf.(layer);
 
@@ -191,15 +193,33 @@
     py = by + 46;                   // строка пресетов
     w  = 964; h = py + 24 + 16;
 
-    if(~ungTuner[layer].notNil) { ~ungTuner[layer].close };
+    // закрыть прошлое окно best-effort: ссылка может указывать на уже
+    // разрушенный Qt-объект (.close бросил бы ошибку и оборвал бы сборку
+    // ДО создания нового окна — тюнер «не открывался бы»).
+    if(~ungTuner[layer].notNil) { try { ~ungTuner[layer].close } };
+    ~ungTuner[layer]        = nil;
     ~ungTunerEz[layer]      = ();
     ~ungTunerNoteTxt[layer] = ();
 
-    off = (~ungTunerOffset * 26);
+    // ПОЗИЦИЯ ОКНА — гарантированно на экране.
+    // Каскад смещений (off) стаггерит окна, НО offset рос всю сессию, и окно
+    // «открывалось» далеко за краем экрана — выглядело как «не открывается».
+    // Лечим двумя слоями: (1) wrap каскада по модулю; (2) ЖЁСТКИЙ кламп
+    // прямоугольника в видимую область экрана (Window.availableBounds) —
+    // окно физически не может уехать за край независимо от offset.
+    off = ((~ungTunerOffset % 12) * 26);
     ~ungTunerOffset = ~ungTunerOffset + 1;
-    ~ungTuner[layer] = Window(
+    scr = Window.availableBounds;
+    w   = w.min(scr.width);                                  // влезть и по ширине
+    h   = h.min(scr.height);                                 // и по высоте (мелкий экран)
+    winRect = Rect(
+        (70 + off).clip(scr.left, scr.left + scr.width  - w),
+        (70 + off).clip(scr.top,  scr.top  + scr.height - h),
+        w, h
+    );
+    win = ~ungTuner[layer] = Window(
         "UNGRUND · tuner — " ++ layer ++ " (живой Ndef в App)",
-        Rect(70 + off, 70 + off, w, h)
+        winRect
     ).background_(Color.gray(0.12));
 
     StaticText(~ungTuner[layer], Rect(18, 10, w - 36, 22))
@@ -272,21 +292,21 @@
     // ----- пресеты: имя | save | список | load | refresh -----
     StaticText(~ungTuner[layer], Rect(18, py + 2, 58, 22))
         .string_("preset:").stringColor_(Color.gray(0.75)).font_(Font("Menlo", 11));
-    ~ungTunerName[layer] = TextField(~ungTuner[layer], Rect(80, py, 168, 24))
+    nameField = ~ungTunerName[layer] = TextField(~ungTuner[layer], Rect(80, py, 168, 24))
         .string_("").font_(Font("Menlo", 11));
     Button(~ungTuner[layer], Rect(254, py, 90, 24))
         .states_([["save", Color.white, Color(0.20, 0.40, 0.24)]])
         .font_(Font("Menlo", 11, true))
-        .action_({ ~savePreset.(layer, ~ungTunerName[layer].string) });
-    ~ungTunerPop[layer] = PopUpMenu(~ungTuner[layer], Rect(352, py, 200, 24))
+        .action_({ if(nameField.notNil) { ~savePreset.(layer, nameField.string) } });
+    popMenu = ~ungTunerPop[layer] = PopUpMenu(~ungTuner[layer], Rect(352, py, 200, 24))
         .font_(Font("Menlo", 11));
     Button(~ungTuner[layer], Rect(560, py, 90, 24))
         .states_([["load", Color.white, Color(0.20, 0.34, 0.44)]])
         .font_(Font("Menlo", 11, true))
         .action_({
             var items = ~listPresets.(layer);
-            var idx = ~ungTunerPop[layer].value;
-            if(items.notEmpty and: { idx < items.size }) {
+            var idx = popMenu !? { popMenu.value };
+            if(idx.notNil and: { items.notEmpty } and: { idx < items.size }) {
                 ~loadPreset.(layer, items[idx]);
             };
         });
@@ -297,19 +317,35 @@
     Button(~ungTuner[layer], Rect(w - 90, py, 72, 24))
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
-        .action_({ ~ungTuner[layer].close });
+        .action_({ if(win.notNil) { win.close } });
 
     ~ungRefreshPresets.(layer);
 
-    ~ungTuner[layer].onClose_({
-        ~ungTuner[layer]        = nil;
-        ~ungTunerEz[layer]      = nil;
-        ~ungTunerNoteTxt[layer] = nil;
-        ~ungTunerSync[layer]    = nil;
-        ~ungTunerPop[layer]     = nil;
-        ~ungTunerName[layer]    = nil;
+    // ВАЖНО: чистим реестр ТОЛЬКО если это всё ещё текущее окно слоя.
+    // Иначе отложенный onClose старого окна (при close->reopen) затирает
+    // слоты, зарегистрированные уже НОВЫМ окном, и ~setParam перестаёт
+    // двигать слайдеры (загрузка пресета меняет звук, но не UI).
+    win.onClose_({
+        if(~ungTuner[layer] === win) {
+            ~ungTuner[layer]        = nil;
+            ~ungTunerEz[layer]      = nil;
+            ~ungTunerNoteTxt[layer] = nil;
+            ~ungTunerSync[layer]    = nil;
+            ~ungTunerPop[layer]     = nil;
+            ~ungTunerName[layer]    = nil;
+        };
     });
-    ~ungTuner[layer].front;
+    // ПОКАЗ ОКНА — ОДНО отложенное событие, не цикл.
+    // ПРИЧИНА (проверено в реальном IDE): тяжёлое окно тюнера Qt раскладывает не
+    // мгновенно; `win.front` сразу после сборки попадает ДО раскладки и не
+    // показывает окно (окно создано, но не видно). РОВНО поэтому срабатывала
+    // твоя РУЧНАЯ ~ungTuner[\layer].bounds_(...).front — отдельное ПОЗДНЕЕ
+    // событие, между которым цикл событий Qt доработал раскладку. Плотный
+    // retry-цикл наоборот ВРЕДЕН: front; wait на AppClock не отдаёт время Qt,
+    // раскладка не завершается, ни один front не показывает окно.
+    // Поэтому: один .defer с задержкой (Qt успевает разложить) → один
+    // bounds_+front по глобальному слоту — точная копия рабочей ручной команды.
+    { ~ungTuner[layer].bounds_(winRect).front }.defer(0.3);
 };
 
 // открыть окно отстройки слоя (с defer на AppClock для GUI)

@@ -1,6 +1,6 @@
 // =====================================================================
-// App/synths/schliere.scd
-// UNGRUND · звуковой класс 5/8 — `schliere` (drifting comb-filtered noise)
+// App/synths/epsilon.scd
+// UNGRUND · звуковой класс 5/8 — `epsilon` (drifting comb-filtered noise)
 //
 // СТАТУС: ЗАГЛУШКА — минимальный, но СЛЫШИМЫЙ слой.  // TODO: iterate this layer
 //   Премиса §C.5: allpass-сеть диффузии (6 AllpassC с LFNoise2-
@@ -12,7 +12,7 @@
 
 // ===== CONFIG — edit here ============================================
 (
-~cfg_schliere = (
+~cfg_epsilon = (
     freqLo: 200,    // нижняя точка дрейфа гребёнки, Hz
     freqHi: 800,    // верхняя точка дрейфа, Hz (200 Hz – 2 kHz)
     period: 90,     // период дрейфа, s (20–240)
@@ -21,7 +21,7 @@
 
 
 // ===== LOGIC — synthesis =============================================
-Ndef(\schliere, { |freqLo = 200, freqHi = 800, period = 90, amp = 0.14|
+Ndef(\epsilon, { |freqLo = 200, freqHi = 800, period = 90, amp = 0.14|
     var src, diff, sweepHz, combTime, sig, shimmer;
     src  = WhiteNoise.ar(0.3);
 
@@ -48,9 +48,9 @@ Ndef(\schliere, { |freqLo = 200, freqHi = 800, period = 90, amp = 0.14|
     Pan2.ar(sig, 0)                        // §C.5: центр
 });
 
-Ndef(\schliere).set(
-    \freqLo, ~cfg_schliere.freqLo, \freqHi, ~cfg_schliere.freqHi,
-    \period, ~cfg_schliere.period, \amp, ~cfg_schliere.amp
+Ndef(\epsilon).set(
+    \freqLo, ~cfg_epsilon.freqLo, \freqHi, ~cfg_epsilon.freqHi,
+    \period, ~cfg_epsilon.period, \amp, ~cfg_epsilon.amp
 );
-Ndef(\schliere).fadeTime = 6;   // §C.5: фейд-ин ≥ 4 с
+Ndef(\epsilon).fadeTime = 6;   // §C.5: фейд-ин ≥ 4 с
 )

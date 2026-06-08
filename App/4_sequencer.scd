@@ -8,8 +8,8 @@
 // планировщик на TempoClock (серверное время, НЕ SystemClock/Thread).
 //
 // Демонстрационный таймлайн ниже — компактный (~80 c) набросок в духе
-// ungrund.0001 (schicht/substratumwalk/94 Hz): monade-Grund держится,
-// firnis-глазурь входит, riß-события эпизодически, zäsur в конце.
+// ungrund.0001 (schicht/substratumwalk/94 Hz): alpha-Grund держится,
+// theta-глазурь входит, beta-события эпизодически, eta в конце.
 // НЕ зациклен бесконечно — по последнему блоку вызывает ~seqStop.
 //
 // УПРАВЛЕНИЕ:  ~seqStart.()  — запустить таймлайн с t=0
@@ -33,16 +33,16 @@
     //   set    — опциональные правки параметров слоёв: [\layer, \param, value]
     // Слои, не упомянутые в блоке, сохраняют прежнее состояние.
     timeline: [
-        ( t: 0,   active: [\monade],                 gone: [\riss, \flockung, \binde, \schliere, \kratzer, \firnis],
-          set: [[\monade, \amp, 0.22]] ),
-        ( t: 4,   active: [\firnis],                 gone: [] ),                       // §0001: firnis с t=4
-        ( t: 20,  active: [\riss],                   gone: [] ),                       // riß-события
-        ( t: 36,  active: [\binde],                  gone: [],
-          set: [[\binde, \freq, 188]] ),                                              // 94×2 = F#3
-        ( t: 52,  active: [\schliere],               gone: [\binde] ),
-        ( t: 68,  active: [],                         gone: [\schliere, \riss, \firnis] ),
-        ( t: 72,  active: [\zaesur],                 gone: [\monade] ),               // zäsur: цезура
-        ( t: 80,  active: [],                         gone: [\zaesur], finish: true )  // конец таймлайна
+        ( t: 0,   active: [\alpha],                 gone: [\beta, \gamma, \delta, \epsilon, \zeta, \theta],
+          set: [[\alpha, \amp, 0.22]] ),
+        ( t: 4,   active: [\theta],                 gone: [] ),                       // §0001: theta с t=4
+        ( t: 20,  active: [\beta],                   gone: [] ),                       // beta-события
+        ( t: 36,  active: [\delta],                  gone: [],
+          set: [[\delta, \freq, 188]] ),                                              // 94×2 = F#3
+        ( t: 52,  active: [\epsilon],               gone: [\delta] ),
+        ( t: 68,  active: [],                         gone: [\epsilon, \beta, \theta] ),
+        ( t: 72,  active: [\eta],                 gone: [\alpha] ),               // eta: цезура
+        ( t: 80,  active: [],                         gone: [\eta], finish: true )  // конец таймлайна
     ]
 );
 

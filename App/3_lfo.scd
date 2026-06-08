@@ -27,21 +27,21 @@
 // посылов \fxsend param \send_<layer> (см. 2_mixer.scd).
 ~cfg_lfo = (
     lines: [
-        // monade: очень медленное дыхание громкости (§C.1 «дышит»)
-        ( target: \monade,   param: \amp,    shape: \noise,  rate: 0.03, min: 0.16, max: 0.24 ),
+        // alpha: очень медленное дыхание громкости (§C.1 «дышит»)
+        ( target: \alpha,   param: \amp,    shape: \noise,  rate: 0.03, min: 0.16, max: 0.24 ),
 
-        // binde: медленный дрейф добротности (внутреннее биение, §C.4)
-        ( target: \binde,    param: \rq,     shape: \sine,   rate: 0.05, min: 0.015, max: 0.03 ),
+        // delta: медленный дрейф добротности (внутреннее биение, §C.4)
+        ( target: \delta,    param: \rq,     shape: \sine,   rate: 0.05, min: 0.015, max: 0.03 ),
 
-        // schliere: дрейф верхней точки развёртки гребёнки (§C.5)
-        ( target: \schliere, param: \freqHi, shape: \noise,  rate: 0.012, min: 600, max: 1000 ),
+        // epsilon: дрейф верхней точки развёртки гребёнки (§C.5)
+        ( target: \epsilon, param: \freqHi, shape: \noise,  rate: 0.012, min: 600, max: 1000 ),
 
-        // firnis: медленный дрейф частоты AM (сцинтилляция, §C.8)
-        ( target: \firnis,   param: \lfnRate, shape: \tri,   rate: 0.02, min: 0.08, max: 0.16 ),
+        // theta: медленный дрейф частоты AM (сцинтилляция, §C.8)
+        ( target: \theta,   param: \lfnRate, shape: \tri,   rate: 0.02, min: 0.08, max: 0.16 ),
 
-        // микшер: медленное дыхание посыла firnis в реверб (глазурь дышит)
-        // цель — агрегатор посылов \fxsend, его именованный control \send_firnis
-        ( target: \fxsend, param: \send_firnis, shape: \sine, rate: 0.025, min: 0.45, max: 0.70 )
+        // микшер: медленное дыхание посыла theta в реверб (глазурь дышит)
+        // цель — агрегатор посылов \fxsend, его именованный control \send_theta
+        ( target: \fxsend, param: \send_theta, shape: \sine, rate: 0.025, min: 0.45, max: 0.70 )
     ]
 );
 

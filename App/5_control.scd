@@ -28,16 +28,16 @@
 ~cfg_ctrl = (
     channel: nil,    // nil = любой MIDI-канал
     map: [
-        // CC 1 (mod wheel) -> громкость monade
-        ( cc: 1,  type: \mixVol,  target: \monade,            min: 0.0,  max: 1.0 ),
+        // CC 1 (mod wheel) -> громкость alpha
+        ( cc: 1,  type: \mixVol,  target: \alpha,            min: 0.0,  max: 1.0 ),
         // CC 7 -> мастер-уровень
         ( cc: 7,  type: \master,                              min: 0.0,  max: 1.0 ),
-        // CC 21 -> частота binde (пример прямого параметра слоя)
-        ( cc: 21, type: \layer,   target: \binde, param: \freq, min: 100, max: 2000 ),
-        // CC 22 -> посыл firnis в реверб
-        ( cc: 22, type: \mixSend, target: \firnis,            min: 0.0,  max: 1.0 ),
-        // CC 23 -> частота развёртки schliere
-        ( cc: 23, type: \layer,   target: \schliere, param: \freqHi, min: 300, max: 2000 ),
+        // CC 21 -> частота delta (пример прямого параметра слоя)
+        ( cc: 21, type: \layer,   target: \delta, param: \freq, min: 100, max: 2000 ),
+        // CC 22 -> посыл theta в реверб
+        ( cc: 22, type: \mixSend, target: \theta,            min: 0.0,  max: 1.0 ),
+        // CC 23 -> частота развёртки epsilon
+        ( cc: 23, type: \layer,   target: \epsilon, param: \freqHi, min: 300, max: 2000 ),
         // CC 24 -> частота первого LFO (lfo-индекс 0)
         ( cc: 24, type: \lfoRate, target: 0,                  min: 0.005, max: 0.2 )
     ]

@@ -1,6 +1,6 @@
 // =====================================================================
-// App/synths/flockung.scd
-// UNGRUND · звуковой класс 3/8 — `flockung` (granular cluster of sines)
+// App/synths/gamma.scd
+// UNGRUND · звуковой класс 3/8 — `gamma` (granular cluster of sines)
 //
 // СТАТУС: ЗАГЛУШКА — минимальный, но СЛЫШИМЫЙ слой.  // TODO: iterate this layer
 //   Премиса §C.3: счётное облако коротких синус-зёрен в соседних
@@ -12,7 +12,7 @@
 
 // ===== CONFIG — edit here ============================================
 (
-~cfg_flockung = (
+~cfg_gamma = (
     fund:     220,                  // фундамент, Hz (80 Hz – 1.2 kHz)
     partials: [5, 7, 9, 11, 13],    // §C.3 гармонические позиции
     rate:     6,                    // плотность зёрен, /s
@@ -22,7 +22,7 @@
 
 
 // ===== LOGIC — synthesis =============================================
-Ndef(\flockung, { |fund = 220, rate = 6, grainDur = 0.12, amp = 0.14|
+Ndef(\gamma, { |fund = 220, rate = 6, grainDur = 0.12, amp = 0.14|
     var partials, breathe, sig;
     partials = #[5, 7, 9, 11, 13];
     breathe  = LFNoise2.kr(0.6).range(0.3, 1.0);   // дыхание облака
@@ -39,9 +39,9 @@ Ndef(\flockung, { |fund = 220, rate = 6, grainDur = 0.12, amp = 0.14|
     sig
 });
 
-Ndef(\flockung).set(
-    \fund, ~cfg_flockung.fund, \rate, ~cfg_flockung.rate,
-    \grainDur, ~cfg_flockung.grainDur, \amp, ~cfg_flockung.amp
+Ndef(\gamma).set(
+    \fund, ~cfg_gamma.fund, \rate, ~cfg_gamma.rate,
+    \grainDur, ~cfg_gamma.grainDur, \amp, ~cfg_gamma.amp
 );
-Ndef(\flockung).fadeTime = 1;
+Ndef(\gamma).fadeTime = 1;
 )

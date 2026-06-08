@@ -1,6 +1,6 @@
 // =====================================================================
-// App/synths/monade.scd
-// UNGRUND · звуковой класс 1/8 — `monade` (sustained sine / Grund)
+// App/synths/alpha.scd
+// UNGRUND · звуковой класс 1/8 — `alpha` (sustained sine / Grund)
 //
 // СТАТУС: РЕАЛЬНЫЙ СЛОЙ (портирован из Tests/test_monade.scd).
 //   Физическая модель «связка из 10 пружин в масле», адаптированная из
@@ -8,22 +8,22 @@
 //   Согласованная связка по умолчанию (композитор, 2026-05-22).
 //
 // ОТСТРОЙКА В APP (вместо отдельного теста — см. 0_lib.scd):
-//   ~openTuner.(\monade)         — окно слайдеров по живому Ndef;
-//   ~rndFreq.(\monade)           — рандом 10 тонов (группа \freq);
-//   ~rndParams.(\monade)         — рандом параметров тембра (группа \tone);
-//   ~savePreset.(\monade,"имя")  — сохранить пресет в App/presets/monade/;
-//   ~loadPreset.(\monade,"имя")  — загрузить пресет обратно.
+//   ~openTuner.(\alpha)         — окно слайдеров по живому Ndef;
+//   ~rndFreq.(\alpha)           — рандом 10 тонов (группа \freq);
+//   ~rndParams.(\alpha)         — рандом параметров тембра (группа \tone);
+//   ~savePreset.(\alpha,"имя")  — сохранить пресет в App/presets/alpha/;
+//   ~loadPreset.(\alpha,"имя")  — загрузить пресет обратно.
 //
-// СПЕЦИФИКАЦИЯ ~spec_monade — единый источник правды: из неё строятся
+// СПЕЦИФИКАЦИЯ ~spec_alpha — единый источник правды: из неё строятся
 //   слайдеры, рандомайзеры и пресеты. Расширить управление = добавить
-//   строку в ~spec_monade.params И соответствующий аргумент в Ndef.
+//   строку в ~spec_alpha.params И соответствующий аргумент в Ndef.
 //
-// ИНТЕРФЕЙС Ndef(\monade):
+// ИНТЕРФЕЙС Ndef(\alpha):
 //   — пишет стерео в свой выход (его читает 2_mixer.scd через Ndef-роутинг);
 //   — посыл в эффекты выполняет МИКШЕР (через .send), а не сам слой.
 //   — управляемые параметры (\set / LFO / MIDI / tuner): см. CONFIG ниже.
 //
-// Итерировать этот слой = править ~spec_monade и тело Ndef(\monade).
+// Итерировать этот слой = править ~spec_alpha и тело Ndef(\alpha).
 // =====================================================================
 
 
@@ -32,8 +32,8 @@
 // Спецификация параметров. group \freq — тоны (рандом «частоты»);
 // group \tone — тембр/среда (рандом «параметры»). spec задаёт диапазон,
 // варп и ДЕФОЛТ (он же значение, применяемое при загрузке слоя).
-~spec_monade = (
-    name: \monade,
+~spec_alpha = (
+    name: \alpha,
     params: [
         // --- группа \freq: 10 тонов пружин (MIDI-ноты, дробные = микротон) ---
         ( key: \n1,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 29.91) ),
@@ -72,7 +72,7 @@
 
 
 // ===== LOGIC — synthesis =============================================
-Ndef(\monade, { |amp = 0.30, density = 8.65, contact = 0.464,
+Ndef(\alpha, { |amp = 0.30, density = 8.65, contact = 0.464,
                  decay = 3.74, disperse = 0.605, oil = 0.725, muffle = 0.204,
                  bright = 2800, metalAmt = 0.22, bodyLevel = 0.12, drive = 1.2,
                  sprGain = 4.6, swayRate = 0.1, cutTop = 5400, cutOil = 3800,
@@ -165,14 +165,14 @@ Ndef(\monade, { |amp = 0.30, density = 8.65, contact = 0.464,
 //  для интерактивных рандома/пресетов/GUI после полной загрузки App.)
 ~ungSpecs = ~ungSpecs ? ();
 ~ungVals  = ~ungVals  ? ();
-~ungSpecs[\monade] = ~spec_monade;
-~ungVals[\monade]  = ();
-~spec_monade.params.do { |p|
-    Ndef(\monade).set(p.key, p.spec.default);
-    ~ungVals[\monade][p.key] = p.spec.default;
+~ungSpecs[\alpha] = ~spec_alpha;
+~ungVals[\alpha]  = ();
+~spec_alpha.params.do { |p|
+    Ndef(\alpha).set(p.key, p.spec.default);
+    ~ungVals[\alpha][p.key] = p.spec.default;
 };
-Ndef(\monade).fadeTime = 6;   // §0001: atk/rel framing ~6 s
+Ndef(\alpha).fadeTime = 6;   // §0001: atk/rel framing ~6 s
 
-("synths/monade — spec зарегистрирован ("
-    ++ ~spec_monade.params.size ++ " параметров); ~openTuner.(\\monade)").postln;
+("synths/alpha — spec зарегистрирован ("
+    ++ ~spec_alpha.params.size ++ " параметров); ~openTuner.(\\alpha)").postln;
 )

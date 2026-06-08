@@ -1,6 +1,6 @@
 // =====================================================================
-// App/synths/binde.scd
-// UNGRUND · звуковой класс 4/8 — `binde` (narrow-band noise)
+// App/synths/delta.scd
+// UNGRUND · звуковой класс 4/8 — `delta` (narrow-band noise)
 //
 // СТАТУС: ЗАГЛУШКА — минимальный, но СЛЫШИМЫЙ слой.  // TODO: iterate this layer
 //   Премиса §C.4: формантный кластер — PinkNoise через 4 параллельных
@@ -12,7 +12,7 @@
 
 // ===== CONFIG — edit here ============================================
 (
-~cfg_binde = (
+~cfg_delta = (
     freq:  1100,    // центр, Hz (100 Hz – 6 kHz)
     rq:    0.02,    // базовая добротность (0.005–0.05)
     amp:   0.18     // §K.4: было 0.25
@@ -20,7 +20,7 @@
 
 
 // ===== LOGIC — synthesis =============================================
-Ndef(\binde, { |freq = 1100, rq = 0.02, amp = 0.18|
+Ndef(\delta, { |freq = 1100, rq = 0.02, amp = 0.18|
     var src, mults, rqs, rates, bands, sig;
     src   = PinkNoise.ar;
     mults = #[1.0, 1.003, 0.998, 1.005];
@@ -38,6 +38,6 @@ Ndef(\binde, { |freq = 1100, rq = 0.02, amp = 0.18|
     Pan2.ar(sig, 0)                        // §C.4: ≤ ±0.3, держим центр
 });
 
-Ndef(\binde).set(\freq, ~cfg_binde.freq, \rq, ~cfg_binde.rq, \amp, ~cfg_binde.amp);
-Ndef(\binde).fadeTime = 3;
+Ndef(\delta).set(\freq, ~cfg_delta.freq, \rq, ~cfg_delta.rq, \amp, ~cfg_delta.amp);
+Ndef(\delta).fadeTime = 3;
 )

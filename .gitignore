@@ -1,1 +1,5 @@
-.claude/settings.local.json
+# Ignore everything except App/ and docs/
+/*
+!/.gitignore
+!/App/
+!/docs/

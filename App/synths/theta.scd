@@ -1,6 +1,6 @@
 // =====================================================================
-// App/synths/firnis.scd
-// UNGRUND · звуковой класс 8/8 — `firnis` (ultrasonic shimmer / ceiling)
+// App/synths/theta.scd
+// UNGRUND · звуковой класс 8/8 — `theta` (ultrasonic shimmer / ceiling)
 //
 // СТАТУС: ЗАГЛУШКА — минимальный, но СЛЫШИМЫЙ слой.  // TODO: iterate this layer
 //   Премиса §C.8: 9-голосный шиммер на фикс. ультразвуковых частотах,
@@ -15,7 +15,7 @@
 
 // ===== CONFIG — edit here ============================================
 (
-~cfg_firnis = (
+~cfg_theta = (
     freqs:   [12640, 13110, 14790, 16030, 17880, 12900, 13500, 15200, 16800], // 9 голосов, Hz
     ampEach: 0.010,    // §K.4: было 0.015 — на голос
     lfnRate: 0.12,     // базовая частота AM, Hz (0.05–0.16)
@@ -24,7 +24,7 @@
 
 
 // ===== LOGIC — synthesis =============================================
-Ndef(\firnis, { |ampEach = 0.010, lfnRate = 0.12, width = 0.55|
+Ndef(\theta, { |ampEach = 0.010, lfnRate = 0.12, width = 0.55|
     var freqs, voices, sig;
     freqs = #[12640, 13110, 14790, 16030, 17880, 12900, 13500, 15200, 16800];
     voices = freqs.collect { |f, i|
@@ -43,9 +43,9 @@ Ndef(\firnis, { |ampEach = 0.010, lfnRate = 0.12, width = 0.55|
     sig
 });
 
-Ndef(\firnis).set(
-    \ampEach, ~cfg_firnis.ampEach, \lfnRate, ~cfg_firnis.lfnRate,
-    \width, ~cfg_firnis.width
+Ndef(\theta).set(
+    \ampEach, ~cfg_theta.ampEach, \lfnRate, ~cfg_theta.lfnRate,
+    \width, ~cfg_theta.width
 );
-Ndef(\firnis).fadeTime = 8;   // §F: attack ≥ 8 s
+Ndef(\theta).fadeTime = 8;   // §F: attack ≥ 8 s
 )

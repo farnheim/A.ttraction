@@ -1,6 +1,6 @@
 // =====================================================================
-// App/synths/riss.scd
-// UNGRUND · звуковой класс 2/8 — `riß` (broadband impulse)
+// App/synths/beta.scd
+// UNGRUND · звуковой класс 2/8 — `beta` (broadband impulse)
 //
 // СТАТУС: ЗАГЛУШКА — минимальный, но СЛЫШИМЫЙ слой.  // TODO: iterate this layer
 //   Премиса §C.2: мягкое гранулярное облако коротких синус-зёрен,
@@ -15,7 +15,7 @@
 
 // ===== CONFIG — edit here ============================================
 (
-~cfg_riss = (
+~cfg_beta = (
     rate:     0.18,    // частота вспышек, /s (анти-ритм; в реале — по порогу)
     centre:   520,     // центр частоты зёрен, Hz
     scatter:  4,       // разброс ±полутонов
@@ -26,7 +26,7 @@
 
 
 // ===== LOGIC — synthesis =============================================
-Ndef(\riss, { |rate = 0.18, centre = 520, scatter = 4, grainDur = 0.025,
+Ndef(\beta, { |rate = 0.18, centre = 520, scatter = 4, grainDur = 0.025,
                amp = 0.32, hpf = 200|
     var trig, swell, freq, sig;
     trig  = Dust.ar(rate.lag(0.5).clip(0.01, 8));
@@ -41,9 +41,9 @@ Ndef(\riss, { |rate = 0.18, centre = 520, scatter = 4, grainDur = 0.025,
     sig
 });
 
-Ndef(\riss).set(
-    \rate, ~cfg_riss.rate, \centre, ~cfg_riss.centre, \scatter, ~cfg_riss.scatter,
-    \grainDur, ~cfg_riss.grainDur, \amp, ~cfg_riss.amp, \hpf, ~cfg_riss.hpf
+Ndef(\beta).set(
+    \rate, ~cfg_beta.rate, \centre, ~cfg_beta.centre, \scatter, ~cfg_beta.scatter,
+    \grainDur, ~cfg_beta.grainDur, \amp, ~cfg_beta.amp, \hpf, ~cfg_beta.hpf
 );
-Ndef(\riss).fadeTime = 1;
+Ndef(\beta).fadeTime = 1;
 )

@@ -23,7 +23,7 @@
 //   на каждый слой + мастер. GUI синхронизируется с ~mixSet через
 //   ~mixerGuiSync (живая правка из MIDI/solo подтягивает фейдеры).
 //
-// Зависимости: синт-слои (Ndef(\monade) ...), эффекты (6_effects.scd),
+// Зависимости: синт-слои (Ndef(\alpha) ...), эффекты (6_effects.scd),
 //   шины ~busDry / ~busFxSend / ~busFxReturn (создаёт 1_app.scd),
 //   ~activeLayers (1_app.scd). Итерировать сведение = править таблицу levels.
 // =====================================================================
@@ -39,14 +39,14 @@
 
     levels: (
         //            vol    send  (send из §K.1 tape reverb)
-        monade:   ( vol: 0.85, send: 0.55 ),
-        riss:     ( vol: 0.90, send: 0.30 ),
-        flockung: ( vol: 0.80, send: 0.35 ),
-        binde:    ( vol: 0.80, send: 0.45 ),
-        schliere: ( vol: 0.85, send: 0.15 ),
-        kratzer:  ( vol: 0.75, send: 0.15 ),
-        zaesur:   ( vol: 0.00, send: 0.00 ),          // тишина — без уровня
-        firnis:   ( vol: 0.70, send: 0.60 )
+        alpha:   ( vol: 0.85, send: 0.55 ),
+        beta:     ( vol: 0.90, send: 0.30 ),
+        gamma: ( vol: 0.80, send: 0.35 ),
+        delta:    ( vol: 0.80, send: 0.45 ),
+        epsilon: ( vol: 0.85, send: 0.15 ),
+        zeta:  ( vol: 0.75, send: 0.15 ),
+        eta:   ( vol: 0.00, send: 0.00 ),          // тишина — без уровня
+        theta:   ( vol: 0.70, send: 0.60 )
     )
 );
 
@@ -56,7 +56,7 @@
 
 // ===== LOGIC — routers + master + GUI ================================
 // порядок слоёв = реально загруженные слои (1_app.scd), иначе все 8.
-~mixerLayers = ~activeLayers ? [\monade, \riss, \flockung, \binde, \schliere, \kratzer, \zaesur, \firnis];
+~mixerLayers = ~activeLayers ? [\alpha, \beta, \gamma, \delta, \epsilon, \zeta, \eta, \theta];
 
 // гарантировать запись уровней для каждого активного слоя (fallback)
 ~mixerLayers.do { |layer|
@@ -122,8 +122,8 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
 ~mixerGuiSync = ~mixerGuiSync;   // notNil только когда окно построено
 
 // --- удобный сеттер для живой правки / MIDI / sequencer -------------
-// ~mixSet.(\monade, \vol, 0.5)  — громкость слоя в мастер
-// ~mixSet.(\firnis, \send, 0.8) — посыл слоя в эффекты (агрегатор \fxsend)
+// ~mixSet.(\alpha, \vol, 0.5)  — громкость слоя в мастер
+// ~mixSet.(\theta, \send, 0.8) — посыл слоя в эффекты (агрегатор \fxsend)
 ~mixSet = { |layer, which = \vol, value|
     if(~cfg_mixer.levels[layer].isNil) { ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy };
     if(which == \send) {
@@ -140,7 +140,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
 };
 
 // --- solo / unsolo для отстройки одного слоя в полном тракте ---------
-// ~mixSolo.(\monade)  — звучит только monade (через реверб + мастер);
+// ~mixSolo.(\alpha)  — звучит только alpha (через реверб + мастер);
 //                       остальные слои глушатся (vol=0, send=0).
 // ~mixUnsolo.value    — восстановить уровни/посылы всех слоёв из CONFIG.
 // Уровни читаются из ~cfg_mixer (не перетираются нулями), поэтому возврат
