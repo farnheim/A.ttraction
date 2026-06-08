@@ -13,7 +13,7 @@
 //       lfo/control — после микшера; секвенсор — последним). Каждый модуль,
 //       кроме synths, грузится ТОЛЬКО если включён своим флагом в ~cfg_app;
 //   5. s.sync между асинхронными батчами;
-//   6. авто-загрузка пресета "_default" каждого слоя (если файл существует);
+//   6. авто-загрузка пресета "default" каждого слоя (App/presets/<layer>/default.scd, если есть);
 //   7. окно микшера (~openMixer) и опционально окно визуализации (~openViz).
 //
 // ФАЗА САУНД-ДИЗАЙНА (умолчания ниже): сервер бутится, все synths/*.scd
@@ -37,7 +37,7 @@
 // Единая панель управления приложением. Флип одного флага меняет режим.
 ~cfg_app = (
     layers:          nil,     // nil = все synths/*.scd; либо [\alpha, \theta] — грузить только эти
-    autoPreset:      true,    // авто-загрузка пресета "_default" слоя, если он есть в App/presets/<layer>/
+    autoPreset:      true,    // авто-загрузка пресета "default" слоя, если есть App/presets/<layer>/default.scd
     enableEffects:   true,    // tape reverb + ping-pong delay (6_effects.scd)
     enableMixer:     true,    // маршрутизация слоёв + мастер (2_mixer.scd)
     enableMixerGui:  true,    // открыть окно микшера после загрузки
@@ -119,13 +119,16 @@ s.waitForBoot({
     };
     s.sync;
 
-    // --- 2b. авто-загрузка пресета "_default" слоя (если файл существует) ---
+    // --- 2b. авто-загрузка пресета "default" слоя (если файл существует) ---
     //   ~loadPreset работает без spec (просто ~setParam по ключам) — безопасно
     //   и для заглушек. Пропускаем молча, если пресета нет.
     if(~cfg_app.autoPreset) {
         ~activeLayers.do { |layer|
-            if(~listPresets.(layer).includes("_default")) {
-                ~loadPreset.(layer, "_default");
+            // .any (value-сравнение), НЕ .includes: Array:includes сверяет по
+            // ИДЕНТИЧНОСТИ (===), а два разных String с тем же содержимым не
+            // идентичны — поэтому .includes("default") всегда давал false.
+            if(~listPresets.(layer).any { |n| n == "default" }) {
+                ~loadPreset.(layer, "default");
             };
         };
     };

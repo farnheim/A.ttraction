@@ -19,7 +19,9 @@
 //     unit: " Hz", disp: \note )       // unit/disp — опционально
 //   group: \freq — тоны/высоты (рандомайзер «частоты»);
 //          \tone — тембр/среда (рандомайзер «параметры»).
-//   disp: \note — слайдер показывает имя ноты (для тонов в MIDI-нотах).
+//   disp: \note — слайдер показывает имя ноты (для тонов в MIDI-нотах);
+//        \hz   — значение в Гц, рядом показываем ближайшую ноту+центы
+//                (.cpsmidi) — для шумовых слоёв без «нот» (zeta).
 //
 // Пресеты: App/presets/<layer>/<name>.scd — каждый файл это event-литерал
 //   ( amp: 0.22, density: 8.65, ... ), который ГРУЗИТСЯ обратно (.load).
@@ -157,6 +159,18 @@
         " " ++ if(cents > 0, { "+" }, { "" }) ++ cents ++ "¢"
     });
 };
+// надпись «нота+центы» для параметра по его disp:
+//   disp \note — значение УЖЕ в MIDI-нотах (alpha);
+//   disp \hz   — значение в Гц, конвертируем .cpsmidi (zeta: края фильтра,
+//                резонансный банк — у них нет «ноты», показываем ближайшую).
+~ungDispNote = #[\note, \hz];   // disp-режимы, дающие колонку «нота+центы»
+~ungDispLabel = { |p, v|
+    switch(p[\disp],
+        \note, { ~ungNoteLabel.(v) },
+        \hz,   { if(v > 0) { ~ungNoteLabel.(v.cpsmidi) } { "" } },
+        { "" }
+    );
+};
 
 // параметр под LFO-маппингом? (тогда .set игнорируется — пометить в GUI)
 ~isMapped = { |layer, key|
@@ -195,7 +209,7 @@
                 var t  = ~ungTunerNoteTxt[layer] !? { ~ungTunerNoteTxt[layer][p.key] };
                 {
                     if(ez.notNil) { ez.value_(v) };
-                    if(t.notNil)  { t.string_(~ungNoteLabel.(v)) };
+                    if(t.notNil)  { t.string_(~ungDispLabel.(p, v)) };
                 }.defer;
             };
         };
@@ -291,10 +305,10 @@
         ez.labelView.stringColor_(if(mapped) { Color(0.6, 0.6, 0.45) } { Color.white });
         ez.round_(0.001);
         ~ungTunerEz[layer][p.key] = ez;
-        if(isFreq and: { p[\disp] == \note }) {
+        if(isFreq and: { ~ungDispNote.includes(p[\disp]) }) {
             var t = StaticText(~ungTuner[layer], Rect(x + sw + 8, y, 120, 24))
                 .stringColor_(Color.gray(0.88)).font_(Font("Menlo", 11, true))
-                .string_(~ungNoteLabel.(v0));
+                .string_(~ungDispLabel.(p, v0));
             ~ungTunerNoteTxt[layer][p.key] = t;
         };
     };
@@ -307,8 +321,9 @@
         {
             var ez = ~ungTunerEz[layer] !? { ~ungTunerEz[layer][key] };
             var t  = ~ungTunerNoteTxt[layer] !? { ~ungTunerNoteTxt[layer][key] };
+            var p  = ~ungSpecOf.(layer).params.detect { |e| e.key == key };
             if(ez.notNil) { ez.value_(v) };
-            if(t.notNil)  { t.string_(~ungNoteLabel.(v)) };
+            if(t.notNil and: { p.notNil }) { t.string_(~ungDispLabel.(p, v)) };
         }.defer;
     };
 

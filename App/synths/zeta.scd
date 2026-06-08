@@ -42,13 +42,15 @@
     name: \zeta,
     params: [
         // --- группа \freq: окно фильтра + резонансный банк облака ---
-        ( key: \hpf, group: \freq, unit: " Hz", spec: ControlSpec(800,  14000, \exp, 0, 5000)  ),  // низ среза облака
-        ( key: \lpf, group: \freq, unit: " Hz", spec: ControlSpec(4000, 20000, \exp, 0, 16000) ),  // потолок облака
-        ( key: \r1,  group: \freq, unit: " Hz", spec: ControlSpec(2000, 16000, \exp, 0, 4200)  ),  // резонанс-шиммер 1
-        ( key: \r2,  group: \freq, unit: " Hz", spec: ControlSpec(2000, 16000, \exp, 0, 6300)  ),  // резонанс-шиммер 2
-        ( key: \r3,  group: \freq, unit: " Hz", spec: ControlSpec(2000, 16000, \exp, 0, 8400)  ),  // резонанс-шиммер 3
-        ( key: \r4,  group: \freq, unit: " Hz", spec: ControlSpec(2000, 16000, \exp, 0, 10500) ),  // резонанс-шиммер 4
-        ( key: \r5,  group: \freq, unit: " Hz", spec: ControlSpec(2000, 16000, \exp, 0, 12600) ),  // резонанс-шиммер 5
+        // disp: \hz — у шума нет «нот», но рядом со слайдером показываем
+        //   ближайшую ноту+центы (Гц -> .cpsmidi), как тоны alpha.
+        ( key: \hpf, group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(800,  14000, \exp, 0, 5000)  ),  // низ среза облака
+        ( key: \lpf, group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(4000, 20000, \exp, 0, 16000) ),  // потолок облака
+        ( key: \r1,  group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(2000, 16000, \exp, 0, 4200)  ),  // резонанс-шиммер 1
+        ( key: \r2,  group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(2000, 16000, \exp, 0, 6300)  ),  // резонанс-шиммер 2
+        ( key: \r3,  group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(2000, 16000, \exp, 0, 8400)  ),  // резонанс-шиммер 3
+        ( key: \r4,  group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(2000, 16000, \exp, 0, 10500) ),  // резонанс-шиммер 4
+        ( key: \r5,  group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(2000, 16000, \exp, 0, 12600) ),  // резонанс-шиммер 5
 
         // --- группа \tone: текстура и среда ---
         ( key: \amp,          group: \tone,             spec: ControlSpec(0.0,    0.5,  \lin, 0, 0.16)   ),
