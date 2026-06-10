@@ -1,0 +1,27 @@
+// UNGRUND preset · delta · default · 260610
+(
+    f1: 48.71,
+    f2: 53.71,
+    f3: 60.72,
+    f4: 65.71,
+    f5: 72.72,
+    amp: 0.18,
+    windForce: 0.6,
+    turbulence: 0.45,
+    gustRate: 0.08,
+    flutter: 0.12,
+    edge: 0.18,
+    edgeRatio: 7.0,
+    metal: 0.55,
+    plateQ: 0.9,
+    plateBright: 1.0,
+    plateSpread: 0.015,
+    vowelMix: 0.7,
+    vowelSel: 0.5,
+    formRq: 0.09,
+    formScale: 1.0,
+    beatRate: 0.15,
+    voiceLevel: 0.7,
+    panWidth: 0.22,
+    panRate: 0.06
+)

@@ -40,13 +40,13 @@
     levels: (
         //            vol    send  (send из §K.1 tape reverb)
         alpha:   ( vol: 0.85, send: 0.55 ),
-        beta:     ( vol: 0.90, send: 0.30 ),
-        gamma: ( vol: 0.80, send: 0.35 ),
-        delta:    ( vol: 0.80, send: 0.45 ),
-        epsilon: ( vol: 0.85, send: 0.15 ),
-        zeta:  ( vol: 0.75, send: 0.15 ),
-        eta:   ( vol: 0.00, send: 0.00 ),          // тишина — без уровня
-        theta:   ( vol: 0.70, send: 0.60 )
+        beta:    ( vol: 0.00, send: 0.00 ),          // заглушка — выключена
+        gamma:   ( vol: 0.00, send: 0.00 ),          // заглушка — выключена
+        delta:   ( vol: 0.80, send: 0.45 ),
+        epsilon: ( vol: 0.00, send: 0.00 ),          // заглушка — выключена
+        zeta:    ( vol: 0.75, send: 0.15 ),
+        eta:     ( vol: 0.00, send: 0.00 ),          // тишина — без уровня
+        theta:   ( vol: 0.00, send: 0.00 )           // заглушка — выключена
     )
 );
 
