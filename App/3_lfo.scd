@@ -47,12 +47,26 @@
 
 
 // ===== LOGIC — automation engine =====================================
-// чистим прежние LFO-Ndef'ы (идемпотентность при перезагрузке файла)
-Ndef.all.keys.do { |k|
-    if(k.asString.beginsWith("lfo_")) { Ndef(k).clear };
+// Идемпотентность при перезагрузке файла: чистим ПРОШЛЫЙ прогон по
+// собственному реестру ~lfoActive (key/target/param на строку).
+// ВАЖНО: Ndef.all — словарь «имя сервера -> ProxySpace», его ключи — имена
+// СЕРВЕРОВ, а не ключи прокси; перебирать их в поисках "lfo_*" бесполезно.
+// Строки, чей ключ есть и в новом конфиге, НЕ трогаем — их перезапишет
+// Ndef ниже без разрыва маппинга (звук не прерывается). Снимаем только
+// исчезнувшие/перенумерованные: unmap цели + clear kr-прокси (именно в
+// этом порядке: clear до unmap оставил бы цель замапленной на чужую шину).
+~lfoNewKeys = ~cfg_lfo.lines.collect { |line, i|
+    ("lfo_" ++ i ++ "_" ++ line.target ++ "_" ++ line.param).asSymbol;
+};
+(~lfoActive ? []).do { |e|
+    if(~lfoNewKeys.includes(e[\key]).not) {
+        Ndef(e[\target]).unmap(e[\param]);
+        Ndef(e[\key]).clear;
+    };
 };
 
-~lfoKeys = [];   // реестр созданных ключей (для очистки/инспекции)
+~lfoKeys   = [];   // публичный реестр ключей (его читают 5_control и 7_viz)
+~lfoActive = [];   // key/target/param текущего прогона (для очистки выше)
 
 ~cfg_lfo.lines.do { |line, i|
     var lfoKey = ("lfo_" ++ i ++ "_" ++ line.target ++ "_" ++ line.param).asSymbol;
@@ -77,7 +91,10 @@ Ndef.all.keys.do { |k|
     // .set принимает только скаляры -> "can't set a control to a UGen".
     Ndef(line.target.asSymbol).map(line.param, Ndef(lfoKey));
 
-    ~lfoKeys = ~lfoKeys.add(lfoKey);
+    ~lfoKeys   = ~lfoKeys.add(lfoKey);
+    ~lfoActive = ~lfoActive.add((
+        key: lfoKey, target: line.target.asSymbol, param: line.param.asSymbol
+    ));
 };
 
 ("3_lfo — активно строк автоматизации: " ++ ~lfoKeys.size).postln;

@@ -62,6 +62,15 @@
     Pdef.all.do(_.clear);
     MIDIdef.all.do(_.free);
     Ndef.all.do(_.clear);
+    // секвенсорный TempoClock перманентен (живёт сквозь Cmd-.) — гасим явно,
+    // иначе клоки копились бы от прогона к прогону (4_sequencer.scd его
+    // переиспользует и сам никогда не останавливает)
+    if(~seqClock.notNil) {
+        ~seqClock.clear;
+        ~seqClock.permanent_(false);
+        ~seqClock.stop;
+        ~seqClock = nil;
+    };
     if(~busDry.notNil)      { ~busDry.free;      ~busDry = nil };
     if(~busFxSend.notNil)   { ~busFxSend.free;   ~busFxSend = nil };
     if(~busFxReturn.notNil) { ~busFxReturn.free; ~busFxReturn = nil };

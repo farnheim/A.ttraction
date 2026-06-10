@@ -48,15 +48,27 @@
 
 
 // ===== LOGIC — Tdef scheduler ========================================
-~seqClock = TempoClock.new(~cfg_seq.tempo).permanent_(true);
+// ОДИН клок на сессию: повторное выполнение файла НЕ создаёт новый
+// (permanent-клок переживает Cmd-., плодить их = утечка планировщиков).
+// Освобождает клок только ~appCleanup (1_app.scd).
+~seqClock = ~seqClock ?? { TempoClock.new(~cfg_seq.tempo).permanent_(true) };
+~seqClock.tempo = ~cfg_seq.tempo;
 
+// громкость слоя — НАПРЯМУЮ в Ndef-роутер, НЕ через ~mixSet: ~mixSet пишет
+// значение в ~cfg_mixer.levels, и прогон секвенсора перетирал бы исходное
+// сведение нулями (~mixUnsolo после этого «восстанавливал» бы нули).
+// Как у ~mixSolo: runtime-громкость отдельно, CONFIG-сведение неприкосновенно.
+~seqSetVol = { |layer, v|
+    Ndef(("mix_" ++ layer).asSymbol).set(\vol, v);
+    if(~mixerGuiSync.notNil) { ~mixerGuiSync.(layer, \vol, v) };
+};
 // поднять слой до рабочей громкости из таблицы микшера
 ~seqRaise = { |layer|
     var lv = ~cfg_mixer.levels[layer];
-    if(lv.notNil) { ~mixSet.(layer, \vol, lv.vol) };
+    if(lv.notNil) { ~seqSetVol.(layer, lv.vol) };
 };
 // опустить слой в тишину
-~seqMute = { |layer| ~mixSet.(layer, \vol, 0) };
+~seqMute = { |layer| ~seqSetVol.(layer, 0) };
 
 // применить один блок таймлайна
 ~seqApplyBlock = { |block|

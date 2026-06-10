@@ -96,7 +96,10 @@ Ndef(\fxsend, {
     Ndef(\fxsend).set(("send_" ++ layer).asSymbol, ~cfg_mixer.levels[layer].send);
 };
 Ndef(\fxsend).fadeTime = 1;
-Ndef(\fxsend).play(out: ~busFxSend.index, numChannels: 2);
+// БЕЗ .play: в ~busFxSend уже пишет ReplaceOut в теле прокси (Ndef-синт
+// работает сразу после определения, монитор для этого не нужен).
+// .play(out: ~busFxSend) добавлял бы ВТОРОГО писателя той же шины —
+// монитор подмешивал бы содержимое пустого прокси-баса поверх ReplaceOut.
 
 // --- мастер: сумма (сухой + возврат эффектов), LeakDC, Limiter ------
 Ndef(\master, { |amp = 0.9|
@@ -185,19 +188,28 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
 
 ~ungBuildMixer = {
     var layers, rowH, y0, w, h, by, mkRow, masterEz;
+    var win;   // захват в локаль: closures (onClose/кнопки) не зависят от слота
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
     by = y0 + (layers.size * rowH) + 14;   // строка мастера/кнопок
     w  = 812; h = by + 40 + 40;
 
-    if(~mixerWin.notNil) { ~mixerWin.close };
+    // закрыть прошлое окно best-effort: ссылка может указывать на уже
+    // разрушенный Qt-объект (.close без try оборвал бы сборку нового окна) —
+    // тот же паттерн, что у тюнера в 0_lib.
+    if(~mixerWin.notNil) { try { ~mixerWin.close } };
+    // сброс ВСЕХ слотов консистентно: в зазоре пересборки никто не должен
+    // дёргать виджеты ПРОШЛОГО окна через ~mixerGuiSync/~mixerEz.
+    ~mixerWin     = nil;
+    ~mixerGuiSync = nil;
     ~mixerEz      = ();
     ~mixerSoloBtn = ();
 
-    ~mixerWin = Window(
+    win = Window(
         "UNGRUND · mixer — живое сведение слоёв (App)",
         Rect(60, 60, w, h)
     ).background_(Color.gray(0.12));
+    ~mixerWin = win;
 
     StaticText(~mixerWin, Rect(18, 10, w - 36, 22))
         .string_("сведение слоёв — vol в мастер · send в эффекты · solo · tuner (живой Ndef)")
@@ -270,7 +282,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     Button(~mixerWin, Rect(694, by, 100, 24))
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
-        .action_({ ~mixerWin.close });
+        .action_({ win.close });   // локальный win: всегда СВОЁ окно
 
     // --- хук синхронизации GUI <- ~mixSet/~masterSet ---
     ~mixerGuiSync = { |layer, which, v|
@@ -284,13 +296,20 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
         }.defer;
     };
 
-    ~mixerWin.onClose_({
-        ~mixerGuiSync = nil;
-        ~mixerEz      = ();
-        ~mixerSoloBtn = ();
-        ~mixerWin     = nil;
+    // Чистим реестры, только если это всё ещё ТЕКУЩЕЕ окно — либо окно уже
+    // снято ~appCleanup'ом (он нилит ~mixerWin ДО отложенного close).
+    // Иначе отложенный onClose СТАРОГО окна при close->reopen затирал бы
+    // слоты, зарегистрированные уже НОВЫМ окном (та же ловушка, что была
+    // у тюнера — см. guard в 0_lib).
+    win.onClose_({
+        if(~mixerWin.isNil or: { ~mixerWin === win }) {
+            ~mixerGuiSync = nil;
+            ~mixerEz      = ();
+            ~mixerSoloBtn = ();
+            ~mixerWin     = nil;
+        };
     });
-    ~mixerWin.front;
+    win.front;
 };
 
 // открыть окно микшера (с defer на AppClock для GUI)
