@@ -1,97 +1,63 @@
-// =====================================================================
-// App/2_mixer.scd
-// UNGRUND · MIXER — уровни слоёв, посылы в эффекты, мастер + окно микшера
-//
-// Микшер — единственное место, где сводятся синт-слои. Для каждого слоя:
-//   vol  — громкость сухого сигнала в мастер;
-//   send — доля сигнала, уходящая в ~busFxSend (вход эффектов, §K).
-//
-// СИГНАЛ-ФЛОУ:
-//   Ndef(\<class>)  --vol-->  ~busDry  -----\
-//                  \--send-->  ~busFxSend     >--> Ndef(\master) --> out 0
-//   Ndef(\tape_reverb)/(\ping_delay) --> ~busFxReturn --/
-//
-// Реализация: на каждый слой создаётся Ndef(\mix_<class>) — роутер,
-//   читающий сухой слой и пишущий его × vol в ~busDry; один агрегатор
-//   Ndef(\fxsend) суммирует все слои × send и пишет в ~busFxSend.
-//
-// ВАЖНО: маршрутизируются ТОЛЬКО реально загруженные слои — список берётся
-//   из ~activeLayers (его ставит 1_app.scd по факту загрузки synths/*.scd).
-//   Так выбор подмножества слоёв (~cfg_app.layers) не тянет пустые Ndef'ы.
-//
-// ОКНО МИКШЕРА: ~openMixer.value — фейдеры vol/send, solo и кнопка tuner
-//   на каждый слой + мастер. GUI синхронизируется с ~mixSet через
-//   ~mixerGuiSync (живая правка из MIDI/solo подтягивает фейдеры).
-//
-// РЕКОРДЕР: кнопка ● rec в строке мастера (и ~mixRecToggle без GUI) пишет
-//   стерео-сумму мастера С ЭФФЕКТАМИ (шина 0 после default-группы) в
-//   recordings/ungrund_<штамп>.wav — формат в ~cfg_recorder.
-//
-// Зависимости: синт-слои (Ndef(\alpha) ...), эффекты (6_effects.scd),
-//   шины ~busDry / ~busFxSend / ~busFxReturn (создаёт 1_app.scd),
-//   ~activeLayers (1_app.scd). Итерировать сведение = править таблицу levels.
-// =====================================================================
+// App/2_mixer.scd — UNGRUND · MIXER: per-layer vol/send routing, fx-send
+// aggregator, master (LeakDC + Limiter), solo, recorder, mixer window.
+// Routes only layers listed in ~activeLayers (set by 1_app.scd).
+// Signal flow: docs/architecture.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// Таблица уровней, ключ = имя слоя. vol = громкость в мастер,
-// send = посыл в эффекты (§K.1/K.2 рекомендуемые уровни как старт).
-// Может содержать ВСЕ 8 слоёв — лишние (не загруженные) просто игнорируются.
+// Level table, key = layer name. vol = level into master, send = fx send
+// (§K.1/K.2 recommended levels as a start). Entries for unloaded layers
+// are simply ignored.
 ~cfg_mixer = (
-    master:  0.9,                                    // мастер-уровень
+    master:  0.9,
 
     levels: (
-        //            vol    send  (send из §K.1 tape reverb)
+        //            vol    send
         alpha:   ( vol: 0.85, send: 0.55 ),
-        beta:    ( vol: 0.00, send: 0.00 ),          // заглушка — выключена
-        gamma:   ( vol: 0.00, send: 0.00 ),          // заглушка — выключена
+        beta:    ( vol: 0.00, send: 0.00 ),          // stub — off
+        gamma:   ( vol: 0.00, send: 0.00 ),          // stub — off
         delta:   ( vol: 0.80, send: 0.45 ),
-        epsilon: ( vol: 0.00, send: 0.00 ),          // заглушка — выключена
+        epsilon: ( vol: 0.00, send: 0.00 ),          // stub — off
         zeta:    ( vol: 0.75, send: 0.15 ),
-        eta:     ( vol: 0.00, send: 0.00 ),          // тишина — без уровня
-        theta:   ( vol: 0.00, send: 0.00 )           // заглушка — выключена
+        eta:     ( vol: 0.00, send: 0.00 ),          // silence — no level
+        theta:   ( vol: 0.00, send: 0.00 )           // stub — off
     )
 );
 
-// уровни по умолчанию для слоя, которого нет в таблице (новый synths/*.scd)
+// fallback levels for a layer missing from the table (new synths/*.scd)
 ~mixerDefaultLevel = ( vol: 0.7, send: 0.0 );
 
-// рекордер мастер-суммы: формат файла и папка (от корня проекта)
+// master-sum recorder: file format and dir (relative to project root)
 ~cfg_recorder = ( header: "wav", sample: "int24", dir: "recordings" );
 
 
 // ===== LOGIC — routers + master + GUI ================================
-// порядок слоёв = реально загруженные слои (1_app.scd), иначе все 8.
 ~mixerLayers = ~activeLayers ? [\alpha, \beta, \gamma, \delta, \epsilon, \zeta, \eta, \theta];
 
-// гарантировать запись уровней для каждого активного слоя (fallback)
+// ensure a level entry for every active layer
 ~mixerLayers.do { |layer|
     if(~cfg_mixer.levels[layer].isNil) {
         ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy;
     };
 };
 
-// --- роутер на каждый слой: только сухой -> ~busDry -----------------
-// (посылы в эффекты собирает один агрегатор ~busFxSend ниже — чтобы
-//  send-шина имела РОВНО одного писателя через ReplaceOut и никогда не
-//  накапливалась между блоками. Так порядок узлов не критичен.)
+// per-layer router: dry only -> ~busDry (fx sends are collected by the
+// single aggregator below so the send bus has exactly ONE writer)
 ~mixerLayers.do { |layer|
     var routerKey = ("mix_" ++ layer).asSymbol;
     var lv = ~cfg_mixer.levels[layer];
     Ndef(routerKey, { |vol = 0|
-        var src = Ndef(layer.asSymbol).ar(2);        // читаем сухой слой
-        src * vol.lag(0.1)                            // сухой -> ~busDry
+        var src = Ndef(layer.asSymbol).ar(2);
+        src * vol.lag(0.1)
     });
     Ndef(routerKey).set(\vol, lv.vol);
     Ndef(routerKey).fadeTime = 1;
     Ndef(routerKey).play(out: ~busDry.index, numChannels: 2);
 };
 
-// --- агрегатор посылов: сумма всех слоёв × send -> ~busFxSend --------
-// Единственный писатель send-шины. ReplaceOut => без накопления.
-// send-доли хранятся как именованные controls \send_<layer>.
-// Тело читает ~mixerLayers (тот же отфильтрованный список) при сборке Ndef.
+// send aggregator: sum of all layers × send -> ~busFxSend.
+// Sole writer of the send bus; ReplaceOut => no accumulation across blocks.
 Ndef(\fxsend, {
     var sends = ~mixerLayers.collect { |layer|
         var amt = NamedControl.kr(("send_" ++ layer).asSymbol, 0);
@@ -103,17 +69,14 @@ Ndef(\fxsend, {
     Ndef(\fxsend).set(("send_" ++ layer).asSymbol, ~cfg_mixer.levels[layer].send);
 };
 Ndef(\fxsend).fadeTime = 1;
-// БЕЗ .play: в ~busFxSend уже пишет ReplaceOut в теле прокси (Ndef-синт
-// работает сразу после определения, монитор для этого не нужен).
-// .play(out: ~busFxSend) добавлял бы ВТОРОГО писателя той же шины —
-// монитор подмешивал бы содержимое пустого прокси-баса поверх ReplaceOut.
+// NO .play: the proxy body already writes via ReplaceOut; a monitor would
+// add a SECOND writer mixing the empty proxy bus on top of ReplaceOut
 
-// --- мастер: сумма (сухой + возврат эффектов), LeakDC, Limiter ------
+// master: (dry + fx return), LeakDC, Limiter
 Ndef(\master, { |amp = 0.9|
     var dry, fx, sig;
-    // InFeedback (НЕ In): читает шины НЕЗАВИСИМО от порядка узлов — роутеры
-    // mix_* и эффекты могут стоять в графе позже мастера. In.ar здесь давал
-    // тишину (мастер читал ~busDry до того, как роутеры туда писали).
+    // InFeedback (NOT In): reads buses regardless of node order — routers
+    // and effects may sit later in the graph than the master
     dry = InFeedback.ar(~busDry.index, 2);
     fx  = InFeedback.ar(~busFxReturn.index, 2);
     sig = dry + fx;
@@ -124,16 +87,13 @@ Ndef(\master, { |amp = 0.9|
 });
 Ndef(\master).set(\amp, ~cfg_mixer.master);
 Ndef(\master).fadeTime = 1;
-Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный выход
+Ndef(\master).play(out: 0, numChannels: 2);
 
-// --- хук синхронизации GUI <- ~mixSet (ставится окном микшера) -------
-//   { |layer, which, v| ... } — обновляет соответствующий фейдер.
-//   nil, пока окно не открыто (живёт без GUI).
-~mixerGuiSync = ~mixerGuiSync;   // notNil только когда окно построено
+// GUI sync hook <- ~mixSet (set by the mixer window; nil without GUI)
+~mixerGuiSync = ~mixerGuiSync;
 
-// --- удобный сеттер для живой правки / MIDI / sequencer -------------
-// ~mixSet.(\alpha, \vol, 0.5)  — громкость слоя в мастер
-// ~mixSet.(\theta, \send, 0.8) — посыл слоя в эффекты (агрегатор \fxsend)
+// live setters for editing / MIDI / sequencer:
+// ~mixSet.(\alpha, \vol, 0.5) / ~mixSet.(\theta, \send, 0.8) / ~masterSet.(v)
 ~mixSet = { |layer, which = \vol, value|
     if(~cfg_mixer.levels[layer].isNil) { ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy };
     if(which == \send) {
@@ -149,12 +109,8 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(\master, \amp, value) };
 };
 
-// --- solo / unsolo для отстройки одного слоя в полном тракте ---------
-// ~mixSolo.(\alpha)  — звучит только alpha (через реверб + мастер);
-//                       остальные слои глушатся (vol=0, send=0).
-// ~mixUnsolo.value    — восстановить уровни/посылы всех слоёв из CONFIG.
-// Уровни читаются из ~cfg_mixer (не перетираются нулями), поэтому возврат
-// возвращает исходное сведение.
+// solo / unsolo: levels are read from ~cfg_mixer (never overwritten with
+// zeros), so unsolo restores the original mix
 ~mixSolo = { |layer|
     ~mixerLayers.do { |l|
         var on = (l == layer);
@@ -174,18 +130,16 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     ~mixSoloCur = nil;
     if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
 };
-// тумблер solo: повторное нажатие на тот же слой снимает solo
+// pressing solo on the same layer again removes solo
 ~mixSoloToggle = { |layer|
     if(~mixSoloCur == layer) { ~mixUnsolo.value } { ~mixSolo.(layer) };
 };
 
-// --- рекордер: стерео-сумма мастера С ЭФФЕКТАМИ -> recordings/ -------
-// Пишется аппаратная шина 0: узел записи (Recorder) встаёт в ХВОСТ корневой
-// группы, т.е. ПОСЛЕ default-группы с Ndef(\master) — в файл попадает ровно
-// то, что слышно (dry + fx-return, LeakDC, Limiter, master amp).
-// ~mixRecToggle.value — старт/стоп и без GUI; кнопка ● rec зовёт его же.
-~mixRecOn   = ~mixRecOn ? false;   // флаг переживает перезагрузку файла
-~mixRecPath = ~mixRecPath;         // путь текущей/последней записи
+// recorder: records hardware bus 0 — the Recorder node sits at the TAIL of
+// the root group, i.e. AFTER Ndef(\master), so the file gets exactly what
+// is heard (dry + fx, LeakDC, Limiter, master amp)
+~mixRecOn   = ~mixRecOn ? false;   // survives file reload
+~mixRecPath = ~mixRecPath;
 
 ~mixRecToggle = {
     if(~mixRecOn) {
@@ -206,7 +160,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     ~mixerRecSync.value;
 };
 
-// обновить визуал кнопки записи по ~mixRecOn (no-op без окна)
+// update record-button visual from ~mixRecOn (no-op without window)
 ~mixerRecSync = {
     { if(~mixerRecBtn.notNil) {
         ~mixerRecBtn.value_(if(~mixRecOn) { 1 } { 0 });
@@ -214,13 +168,13 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
 };
 
 
-// ===== GUI — окно микшера ============================================
-// реестры виджетов (идемпотентно при перезагрузке файла)
+// ===== GUI — mixer window ============================================
+// widget registries (idempotent on file reload)
 ~mixerEz      = ();    // layer -> ( \vol: EZSlider, \send: EZSlider ); \master -> EZSlider
 ~mixerSoloBtn = ();    // layer -> Button (solo)
-~mixSoloCur   = ~mixSoloCur;   // текущий соло-слой (или nil), переживает реоткрытие
+~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
 
-// обновить визуал всех solo-кнопок по ~mixSoloCur
+// update all solo-button visuals from ~mixSoloCur
 ~mixerRefreshSolo = {
     { ~mixerSoloBtn.keysValuesDo { |layer, btn|
         if(btn.notNil) { btn.value_(if(~mixSoloCur == layer.asSymbol) { 1 } { 0 }) };
@@ -229,18 +183,16 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
 
 ~ungBuildMixer = {
     var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
-    var win;   // захват в локаль: closures (onClose/кнопки) не зависят от слота
+    var win;   // local capture: closures must not depend on the global slot
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
-    by = y0 + (layers.size * rowH) + 14;   // строка мастера/кнопок
+    by = y0 + (layers.size * rowH) + 14;
     w  = 812; h = by + 40 + 40;
 
-    // закрыть прошлое окно best-effort: ссылка может указывать на уже
-    // разрушенный Qt-объект (.close без try оборвал бы сборку нового окна) —
-    // тот же паттерн, что у тюнера в 0_lib.
+    // close previous window best-effort (reference may be a destroyed Qt
+    // object; .close without try would abort the rebuild — same as tuner)
     if(~mixerWin.notNil) { try { ~mixerWin.close } };
-    // сброс ВСЕХ слотов консистентно: в зазоре пересборки никто не должен
-    // дёргать виджеты ПРОШЛОГО окна через ~mixerGuiSync/~mixerEz.
+    // reset all slots so nothing touches old widgets during the rebuild gap
     ~mixerWin     = nil;
     ~mixerGuiSync = nil;
     ~mixerEz      = ();
@@ -257,13 +209,12 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
         .string_("сведение слоёв — vol в мастер · send в эффекты · solo · tuner (живой Ndef)")
         .stringColor_(Color.gray(0.92)).font_(Font("Menlo", 13, true));
 
-    // заголовки колонок
     StaticText(~mixerWin, Rect(112, 50, 250, 16)).string_("vol -> master")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
     StaticText(~mixerWin, Rect(372, 50, 250, 16)).string_("send -> fx")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
 
-    // одна строка на слой
+    // one row per layer
     mkRow = { |layer, i|
         var y = y0 + (i * rowH);
         var lv = ~cfg_mixer.levels[layer] ? ~mixerDefaultLevel;
@@ -298,7 +249,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
             .font_(Font("Menlo", 11, true))
             .action_({ ~openTuner.(layer) });
         if(hasSpec.not) {
-            // нет spec (заглушка) — tuner недоступен, отметим серым
+            // no spec (stub) — tuner unavailable
             tunBtn.states_([["tuner —", Color.gray(0.4), Color.gray(0.18)]])
                 .enabled_(false);
         };
@@ -308,7 +259,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     };
     layers.do { |layer, i| mkRow.(layer, i) };
 
-    // --- строка мастера + кнопки ---
+    // --- master row + buttons ---
     StaticText(~mixerWin, Rect(16, by, 92, 24))
         .string_("master").stringColor_(Color.white).font_(Font("Menlo", 12, true));
     masterEz = EZSlider(~mixerWin, Rect(112, by, 250, 24), "amp",
@@ -322,8 +273,8 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
         .font_(Font("Menlo", 11, true))
         .action_({ ~mixUnsolo.value });
 
-    // запись мастер-суммы (с эффектами) — состояние живёт в ~mixRecOn,
-    // поэтому кнопка корректна и после close/reopen окна во время записи
+    // record button state lives in ~mixRecOn, so it stays correct after
+    // close/reopen while recording
     recBtn = Button(~mixerWin, Rect(512, by, 110, 24))
         .states_([
             ["● rec",  Color.gray(0.9), Color.gray(0.26)],
@@ -336,9 +287,9 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     Button(~mixerWin, Rect(694, by, 100, 24))
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
-        .action_({ win.close });   // локальный win: всегда СВОЁ окно
+        .action_({ win.close });
 
-    // --- хук синхронизации GUI <- ~mixSet/~masterSet ---
+    // GUI sync hook <- ~mixSet/~masterSet
     ~mixerGuiSync = { |layer, which, v|
         {
             if(layer == \master) {
@@ -350,11 +301,10 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
         }.defer;
     };
 
-    // Чистим реестры, только если это всё ещё ТЕКУЩЕЕ окно — либо окно уже
-    // снято ~appCleanup'ом (он нилит ~mixerWin ДО отложенного close).
-    // Иначе отложенный onClose СТАРОГО окна при close->reopen затирал бы
-    // слоты, зарегистрированные уже НОВЫМ окном (та же ловушка, что была
-    // у тюнера — см. guard в 0_lib).
+    // clear registries only if this is still the CURRENT window (or it was
+    // already taken down by ~appCleanup, which nils ~mixerWin before the
+    // deferred close) — otherwise the deferred onClose of an OLD window
+    // would wipe slots registered by the NEW one (same trap as the tuner)
     win.onClose_({
         if(~mixerWin.isNil or: { ~mixerWin === win }) {
             ~mixerGuiSync = nil;
@@ -367,7 +317,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     win.front;
 };
 
-// открыть окно микшера (с defer на AppClock для GUI)
+// open the mixer window (deferred to AppClock)
 ~openMixer = { { ~ungBuildMixer.value }.defer };
 
 "2_mixer — маршрутизация + сеттеры + окно микшера (~openMixer).".postln;

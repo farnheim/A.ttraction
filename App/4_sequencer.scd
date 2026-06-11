@@ -1,87 +1,61 @@
-// =====================================================================
-// App/4_sequencer.scd
-// UNGRUND · SEQUENCER — блок-форма во времени (Tdef на TempoClock)
-//
-// Логика воспроизведения. CONFIG = блочный таймлайн в стиле UNGRUND
-// (archives/scheme.md): список блоков, у каждого время старта (s),
-// активные слои и опциональные правки параметров. Логика = Tdef-
-// планировщик на TempoClock (серверное время, НЕ SystemClock/Thread).
-//
-// Демонстрационный таймлайн ниже — компактный (~80 c) набросок в духе
-// ungrund.0001 (schicht/substratumwalk/94 Hz): alpha-Grund держится,
-// theta-глазурь входит, beta-события эпизодически, eta в конце.
-// НЕ зациклен бесконечно — по последнему блоку вызывает ~seqStop.
-//
-// УПРАВЛЕНИЕ:  ~seqStart.()  — запустить таймлайн с t=0
-//              ~seqStop.()   — остановить, погасить все слои
-// Старт делает 1_app.scd в самом конце загрузки.
-//
-// Зависимости: микшер (~mixSet, ~mixerLayers), синт-слои. Загружать
-//   последним (см. 1_app.scd).
-// =====================================================================
+// App/4_sequencer.scd — UNGRUND · SEQUENCER: block timeline as a Tdef on
+// a TempoClock. ~seqStart / ~seqStop. The demo timeline (~80 s) sketches
+// ungrund.0001; it ends itself via the finish flag. Load last.
 
 
 // ===== CONFIG — edit here ============================================
 (
 ~cfg_seq = (
-    tempo: 1.0,    // ударов в секунду TempoClock (1 = время в секундах)
+    tempo: 1.0,    // TempoClock beats per second (1 = time in seconds)
 
-    // Блочный таймлайн. Каждый блок:
-    //   t      — момент старта блока, s (от начала)
-    //   active — слои, поднятые до своей рабочей громкости
-    //   gone   — слои, опущенные в тишину (vol 0)
-    //   set    — опциональные правки параметров слоёв: [\layer, \param, value]
-    // Слои, не упомянутые в блоке, сохраняют прежнее состояние.
+    // Each block: t (start, s), active (layers raised to working volume),
+    // gone (layers muted), set (optional [\layer, \param, value] triples).
+    // Layers not mentioned keep their previous state.
     timeline: [
         ( t: 0,   active: [\alpha],                 gone: [\beta, \gamma, \delta, \epsilon, \zeta, \theta],
           set: [[\alpha, \amp, 0.22]] ),
-        ( t: 4,   active: [\theta],                 gone: [] ),                       // §0001: theta с t=4
-        ( t: 20,  active: [\beta],                   gone: [] ),                       // beta-события
+        ( t: 4,   active: [\theta],                 gone: [] ),
+        ( t: 20,  active: [\beta],                   gone: [] ),
         ( t: 36,  active: [\delta],                  gone: [],
-          set: [[\delta, \freq, 188]] ),                                              // 94×2 = F#3
+          set: [[\delta, \freq, 188]] ),
         ( t: 52,  active: [\epsilon],               gone: [\delta] ),
         ( t: 68,  active: [],                         gone: [\epsilon, \beta, \theta] ),
-        ( t: 72,  active: [\eta],                 gone: [\alpha] ),               // eta: цезура
-        ( t: 80,  active: [],                         gone: [\eta], finish: true )  // конец таймлайна
+        ( t: 72,  active: [\eta],                 gone: [\alpha] ),
+        ( t: 80,  active: [],                         gone: [\eta], finish: true )
     ]
 );
 
 
 // ===== LOGIC — Tdef scheduler ========================================
-// ОДИН клок на сессию: повторное выполнение файла НЕ создаёт новый
-// (permanent-клок переживает Cmd-., плодить их = утечка планировщиков).
-// Освобождает клок только ~appCleanup (1_app.scd).
+// ONE clock per session: re-running the file must NOT create another
+// (a permanent clock survives Cmd-.). Only ~appCleanup frees it.
 ~seqClock = ~seqClock ?? { TempoClock.new(~cfg_seq.tempo).permanent_(true) };
 ~seqClock.tempo = ~cfg_seq.tempo;
 
-// громкость слоя — НАПРЯМУЮ в Ndef-роутер, НЕ через ~mixSet: ~mixSet пишет
-// значение в ~cfg_mixer.levels, и прогон секвенсора перетирал бы исходное
-// сведение нулями (~mixUnsolo после этого «восстанавливал» бы нули).
-// Как у ~mixSolo: runtime-громкость отдельно, CONFIG-сведение неприкосновенно.
+// set layer volume DIRECTLY on the router Ndef, NOT via ~mixSet: ~mixSet
+// writes into ~cfg_mixer.levels and a sequencer run would overwrite the
+// original mix with zeros (runtime volume vs CONFIG mix, as in ~mixSolo)
 ~seqSetVol = { |layer, v|
     Ndef(("mix_" ++ layer).asSymbol).set(\vol, v);
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(layer, \vol, v) };
 };
-// поднять слой до рабочей громкости из таблицы микшера
 ~seqRaise = { |layer|
     var lv = ~cfg_mixer.levels[layer];
     if(lv.notNil) { ~seqSetVol.(layer, lv.vol) };
 };
-// опустить слой в тишину
 ~seqMute = { |layer| ~seqSetVol.(layer, 0) };
 
-// применить один блок таймлайна
+// apply one timeline block
 ~seqApplyBlock = { |block|
     (block.active   ? []).do { |l| ~seqRaise.(l) };
     (block.gone     ? []).do { |l| ~seqMute.(l) };
-    // block[\set] (НЕ block.set): .set — это метод Event, перекрывает ключ
+    // block[\set] (NOT block.set): .set is an Event method shadowing the key
     (block[\set]    ? []).do { |triple|
         Ndef(triple[0].asSymbol).set(triple[1], triple[2]);
     };
 };
 
-// состояние для окна визуализации (7_viz.scd): индекс текущего блока и
-// момент старта таймлайна (для расчёта playhead). nil, пока не запущен.
+// state for the viz window (7_viz.scd): current block index + start time
 ~seqCurrentBlock = ~seqCurrentBlock ? nil;
 ~seqStartTime    = ~seqStartTime    ? nil;
 
@@ -92,7 +66,7 @@ Tdef(\ung_sequencer, {
         var wait = (block.t - prevT).max(0);
         if(wait > 0) { wait.wait };
         prevT = block.t;
-        ~seqCurrentBlock = i;                          // для виз-окна
+        ~seqCurrentBlock = i;
         ("seq @ " ++ block.t ++ "s  block " ++ i).postln;
         ~seqApplyBlock.(block);
         if(block.finish == true) {
@@ -102,12 +76,12 @@ Tdef(\ung_sequencer, {
     };
 }).clock_(~seqClock).quant_(0);
 
-// --- старт / стоп ---------------------------------------------------
+// --- start / stop -----------------------------------------------------
 ~seqStart = {
-    // исходное состояние: все слои в тишину, затем блок t=0 поднимет нужные
+    // initial state: mute all layers, block t=0 raises the needed ones
     ~mixerLayers.do { |l| ~seqMute.(l) };
     ~seqCurrentBlock = nil;
-    ~seqStartTime    = Main.elapsedTime;     // отметка для playhead виз-окна (wall-clock)
+    ~seqStartTime    = Main.elapsedTime;     // wall-clock mark for viz playhead
     Tdef(\ung_sequencer).stop;
     Tdef(\ung_sequencer).play(~seqClock);
     "seq — старт таймлайна.".postln;

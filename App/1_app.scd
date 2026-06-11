@@ -1,71 +1,41 @@
-// =====================================================================
-// App/1_app.scd
-// UNGRUND · APP — оркестратор: бутстрап, загрузка слоёв, запуск, очистка
-//
-// ЕДИНАЯ ТОЧКА ВХОДА. Весь файл — ОДИН блок ( ... ). Выполнить целиком
-// (Cmd-A, затем Shift-Return) — или поставить курсор внутрь блока и Cmd-Enter:
-//   1. boot сервера;
-//   2. установка базовой директории (thisProcess.nowExecutingPath);
-//   3. аллокация шин (~busDry, ~busFxSend, ~busFxReturn);
-//   4. загрузка остальных файлов в ПОРЯДКЕ ЗАВИСИМОСТЕЙ:
-//        synths/*  -> 6_effects -> 2_mixer -> 3_lfo -> 5_control -> 4_sequencer
-//      (синты и эффекты определяются ДО того, как микшер их маршрутизирует;
-//       lfo/control — после микшера; секвенсор — последним). Каждый модуль,
-//       кроме synths, грузится ТОЛЬКО если включён своим флагом в ~cfg_app;
-//   5. s.sync между асинхронными батчами;
-//   6. авто-загрузка пресета "default" каждого слоя (App/presets/<layer>/default.scd, если есть);
-//   7. окно микшера (~openMixer) и опционально окно визуализации (~openViz).
-//
-// ФАЗА САУНД-ДИЗАЙНА (умолчания ниже): сервер бутится, все synths/*.scd
-//   звучат на уровнях микшера, эффекты включены, открыто окно микшера —
-//   БЕЗ секвенсора, БЕЗ LFO, БЕЗ MIDI. Включение любого из них — флип
-//   одного флага в ~cfg_app.
-//
-// ОСТАНОВКА:  Cmd-.  безопасен (оставляет чистый сервер при перезапуске
-//   Ndef'ов с fadeTime). Полная очистка (шины/Ndef/Tdef/MIDIdef/окна) —
-//   выполнить `~appCleanup.value(true)` (раскомментировать блок CLEANUP
-//   внизу файла и выполнить, либо набрать вызов в post-окне).
-//
-// КАЖДЫЙ файл идемпотентен при перезагрузке: Ndef/Tdef/MIDIdef-ключи
-//   ЗАМЕНЯЮТСЯ, не стакаются — любой слой можно итерировать отдельно,
-//   просто перевыполнив его файл.
-// =====================================================================
+// App/1_app.scd — UNGRUND · APP: single entry point (boot, buses, module
+// loading by ~cfg_app flags, auto-presets, master cleanup ~appCleanup).
+// Run the whole block; stop with Cmd-., full reset: ~appCleanup.value(true).
+// Load order, signal flow, conventions: docs/architecture.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// Единая панель управления приложением. Флип одного флага меняет режим.
 ~cfg_app = (
-    layers:          nil,     // nil = все synths/*.scd; либо [\alpha, \theta] — грузить только эти
-    autoPreset:      true,    // авто-загрузка пресета "default" слоя, если есть App/presets/<layer>/default.scd
-    enableEffects:   true,    // tape reverb + ping-pong delay (6_effects.scd)
-    enableMixer:     true,    // маршрутизация слоёв + мастер (2_mixer.scd)
-    enableMixerGui:  true,    // открыть окно микшера после загрузки
-    enableLfo:       false,   // ВЫКЛ на фазе саунд-дизайна (3_lfo.scd)
-    enableControl:   false,   // MIDI — ВЫКЛ по умолчанию (5_control.scd)
-    enableSequencer: false,   // ВЫКЛ — блочный таймлайн (4_sequencer.scd)
-    enableVizGui:    false,    // окно визуализации seq+LFO (имеет смысл только при enableLfo/Sequencer)
-    autostart:       false,    // не запускать таймлайн (секвенсор) автоматически
-    sortSynths:      true      // грузить synths/*.scd в алфавитном порядке
+    layers:          nil,     // nil = all synths/*.scd; or e.g. [\alpha, \theta]
+    autoPreset:      true,    // auto-load preset "default" per layer if present
+    enableEffects:   true,    // 6_effects.scd
+    enableMixer:     true,    // 2_mixer.scd
+    enableMixerGui:  true,    // open mixer window after load
+    enableLfo:       false,   // 3_lfo.scd
+    enableControl:   false,   // 5_control.scd (MIDI)
+    enableSequencer: false,   // 4_sequencer.scd
+    enableVizGui:    false,    // 7_viz.scd (only useful with enableLfo/Sequencer)
+    autostart:       false,    // start timeline automatically
+    sortSynths:      true      // load synths/*.scd alphabetically
 );
 
 
 // ===== LOGIC — boot, load, wire, start ===============================
-~appDir = thisProcess.nowExecutingPath.dirname;   // база = папка App/
+~appDir = thisProcess.nowExecutingPath.dirname;
 
-// --- master cleanup (идемпотентно) ----------------------------------
+// master cleanup (idempotent)
 ~appCleanup = { |verbose = true|
-    if(~mixRecOn == true) { s.stopRecording; ~mixRecOn = false };   // рекордер микшера
-    if(~ungCloseTuners.notNil) { ~ungCloseTuners.value };   // окна отстройки
-    if(~vizClose.notNil)       { ~vizClose.value };         // окно визуализации
+    if(~mixRecOn == true) { s.stopRecording; ~mixRecOn = false };
+    if(~ungCloseTuners.notNil) { ~ungCloseTuners.value };
+    if(~vizClose.notNil)       { ~vizClose.value };
     if(~mixerWin.notNil)       { { ~mixerWin.close }.defer; ~mixerWin = nil };
     Tdef.all.do(_.clear);
     Pdef.all.do(_.clear);
     MIDIdef.all.do(_.free);
     Ndef.all.do(_.clear);
-    // секвенсорный TempoClock перманентен (живёт сквозь Cmd-.) — гасим явно,
-    // иначе клоки копились бы от прогона к прогону (4_sequencer.scd его
-    // переиспользует и сам никогда не останавливает)
+    // the sequencer TempoClock is permanent (survives Cmd-.) — stop it
+    // explicitly, otherwise clocks would pile up run after run
     if(~seqClock.notNil) {
         ~seqClock.clear;
         ~seqClock.permanent_(false);
@@ -81,27 +51,24 @@
 
 s.waitForBoot({
 
-    // --- 0a. общий инструментарий отстройки (specs/пресеты/рандом/GUI) ---
-    //   грузится ПЕРВЫМ: synths/*.scd регистрируют свои spec в ~ungSpecs.
+    // 0a. tuning infrastructure first: synths/*.scd register specs in ~ungSpecs
     (~appDir +/+ "0_lib.scd").load;
 
-    // --- 0b. чистый старт ---
+    // 0b. clean start
     ~appCleanup.value(false);
 
-    // --- 1. шины (никаких магических индексов) ---
-    ~busDry      = Bus.audio(s, 2);   // сухой сум слоёв -> мастер
-    ~busFxSend   = Bus.audio(s, 2);   // посыл слоёв -> эффекты (§K)
-    ~busFxReturn = Bus.audio(s, 2);   // возврат эффектов -> мастер (§K)
+    // 1. buses
+    ~busDry      = Bus.audio(s, 2);   // dry layer sum -> master
+    ~busFxSend   = Bus.audio(s, 2);   // layer sends -> effects (§K)
+    ~busFxReturn = Bus.audio(s, 2);   // effect returns -> master (§K)
     s.sync;
 
-    // --- 2. синт-слои: глоб App/synths/*.scd (опц. фильтр по ~cfg_app.layers) ---
+    // 2. synth layers (optional filter via ~cfg_app.layers)
     ~synthFiles = (~appDir +/+ "synths" +/+ "*.scd").pathMatch;
     if(~cfg_app.sortSynths) { ~synthFiles = ~synthFiles.sort };
 
-    // фильтр выбора слоёв: если layers задан — грузим только перечисленные
     if(~cfg_app.layers.notNil) {
         var want = ~cfg_app.layers.collect(_.asSymbol);
-        // предупредить о запрошенных слоях без файла
         var have = ~synthFiles.collect { |p| PathName(p).fileNameWithoutExtension.asSymbol };
         want.do { |l|
             if(have.includes(l).not) {
@@ -117,8 +84,8 @@ s.waitForBoot({
         "UNGRUND app — НЕ найдено ни одного синт-слоя для загрузки.".warn;
     };
 
-    // ~activeLayers — единственный источник правды о загруженных слоях.
-    // Микшер и виз читают его. Ставим ДО загрузки микшера.
+    // ~activeLayers — single source of truth about loaded layers; mixer and
+    // viz read it, so set it BEFORE loading the mixer
     ~activeLayers = ~synthFiles.collect { |p|
         PathName(p).fileNameWithoutExtension.asSymbol;
     };
@@ -129,21 +96,18 @@ s.waitForBoot({
     };
     s.sync;
 
-    // --- 2b. авто-загрузка пресета "default" слоя (если файл существует) ---
-    //   ~loadPreset работает без spec (просто ~setParam по ключам) — безопасно
-    //   и для заглушек. Пропускаем молча, если пресета нет.
+    // 2b. auto-load per-layer preset "default" if present
     if(~cfg_app.autoPreset) {
         ~activeLayers.do { |layer|
-            // .any (value-сравнение), НЕ .includes: Array:includes сверяет по
-            // ИДЕНТИЧНОСТИ (===), а два разных String с тем же содержимым не
-            // идентичны — поэтому .includes("default") всегда давал false.
+            // .any with == (value compare), NOT .includes: Array:includes
+            // compares by identity (===) and two equal Strings are not identical
             if(~listPresets.(layer).any { |n| n == "default" }) {
                 ~loadPreset.(layer, "default");
             };
         };
     };
 
-    // --- 3. эффекты (читают ~busFxSend, пишут ~busFxReturn) ---
+    // 3. effects (read ~busFxSend, write ~busFxReturn)
     if(~cfg_app.enableEffects) {
         (~appDir +/+ "6_effects.scd").load;
         s.sync;
@@ -151,11 +115,10 @@ s.waitForBoot({
         "UNGRUND app — эффекты ВЫКЛ (enableEffects=false).".postln;
     };
 
-    // --- 4. микшер (маршрутизирует слои + мастер) ---
+    // 4. mixer (routes layers + master)
     if(~cfg_app.enableMixer) {
         (~appDir +/+ "2_mixer.scd").load;
         s.sync;
-        // окно микшера — на AppClock
         if(~cfg_app.enableMixerGui and: { ~openMixer.notNil }) {
             { ~openMixer.value }.defer;
         };
@@ -163,7 +126,7 @@ s.waitForBoot({
         "UNGRUND app — микшер ВЫКЛ (enableMixer=false) — слои не маршрутизированы.".warn;
     };
 
-    // --- 5. lfo (автоматизация — после микшера) ---
+    // 5. lfo (after mixer)
     if(~cfg_app.enableLfo) {
         (~appDir +/+ "3_lfo.scd").load;
         s.sync;
@@ -171,7 +134,7 @@ s.waitForBoot({
         "UNGRUND app — LFO ВЫКЛ (enableLfo=false).".postln;
     };
 
-    // --- 6. control (MIDI — после микшера/lfo) ---
+    // 6. control (MIDI — after mixer/lfo)
     if(~cfg_app.enableControl) {
         (~appDir +/+ "5_control.scd").load;
         s.sync;
@@ -179,7 +142,7 @@ s.waitForBoot({
         "UNGRUND app — MIDI ВЫКЛ (enableControl=false).".postln;
     };
 
-    // --- 7. секвенсор (последним) ---
+    // 7. sequencer (last)
     if(~cfg_app.enableSequencer) {
         (~appDir +/+ "4_sequencer.scd").load;
         s.sync;
@@ -187,7 +150,7 @@ s.waitForBoot({
         "UNGRUND app — секвенсор ВЫКЛ (enableSequencer=false).".postln;
     };
 
-    // --- 8. визуализация (seq + LFO) — самой последней, опционально ---
+    // 8. visualization (optional, very last)
     if(~cfg_app.enableVizGui and: { ~cfg_app.enableLfo or: { ~cfg_app.enableSequencer } }) {
         (~appDir +/+ "7_viz.scd").load;
         s.sync;
@@ -196,7 +159,7 @@ s.waitForBoot({
 
     "UNGRUND app — все слои загружены и смаршрутизированы.".postln;
 
-    // --- 9. старт таймлайна (только если секвенсор включён И autostart) ---
+    // 9. start timeline (only if sequencer enabled AND autostart)
     if(~cfg_app.enableSequencer and: { ~cfg_app.autostart } and: { ~seqStart.notNil }) {
         ~seqStart.value;
         "UNGRUND app — таймлайн запущен (~seqStop для остановки).".postln;
@@ -207,11 +170,7 @@ s.waitForBoot({
 )
 
 
-// =====================================================================
-// CLEANUP — выполнить этот абзац отдельно для полного сброса.
-// (Cmd-. останавливает звук; этот блок освобождает шины/Ndef/Tdef/MIDIdef
-//  и закрывает окна микшера/визуализации/отстройки.)
-// =====================================================================
+// ===== CLEANUP — run separately for a full reset =====================
 
 // (
 // ~appCleanup.value(true);

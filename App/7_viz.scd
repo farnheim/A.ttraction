@@ -1,40 +1,23 @@
-// =====================================================================
-// App/7_viz.scd
-// UNGRUND · VIZ — окно визуализации секвенсора и LFO
-//
-// Два раздела в одном окне:
-//   1. ТАЙМЛАЙН секвенсора (~cfg_seq.timeline): блоки как сегменты на оси
-//      времени с подписями (t, active/gone), плюс playhead, если таймлайн
-//      запущен (~seqStartTime).
-//   2. LFO (~cfg_lfo.lines): по строке на автоматизацию — метка
-//      target.param / форма / rate / [min,max] и живой бар текущего
-//      значения (опрос control-шины прокси на AppClock ~10 Гц).
-//
-// УСТОЙЧИВОСТЬ: окно открывается ДАЖЕ если LFO/секвенсор не загружены —
-//   в этом случае показывает пометку «не загружен». Никаких падений.
-//   Опрос/анимация полностью останавливаются в onClose.
-//
-// Зависимости (мягкие, все nil-безопасные): ~cfg_seq, ~seqStartTime,
-//   ~seqCurrentBlock (4_sequencer.scd); ~cfg_lfo, ~lfoKeys (3_lfo.scd).
-// Грузится ПОСЛЕДНИМ из 1_app.scd при enableVizGui (и enableLfo|Seq).
-// =====================================================================
+// App/7_viz.scd — UNGRUND · VIZ: one window — sequencer timeline (blocks +
+// playhead) and live LFO values (control-bus polling ~10 Hz on AppClock).
+// All dependencies are soft/nil-safe; opens even without LFO/sequencer.
+// Loaded last by 1_app.scd when enableVizGui.
 
 
 // ===== CONFIG — edit here ============================================
 (
 ~cfg_viz = (
-    pollRate: 10,      // Гц опроса значений LFO
-    w:        720,     // ширина окна
-    seqH:     150,     // высота секции секвенсора
-    lfoRowH:  26       // высота строки LFO
+    pollRate: 10,      // LFO poll rate, Hz
+    w:        720,     // window width
+    seqH:     150,     // sequencer section height
+    lfoRowH:  26       // LFO row height
 );
 
 
-// ===== LOGIC — окно + опрос ==========================================
-~vizPollRoutine = ~vizPollRoutine;   // Routine опроса LFO (останавливаем в onClose)
+// ===== LOGIC — window + polling ======================================
+~vizPollRoutine = ~vizPollRoutine;   // stopped in onClose
 
-// безопасно прочитать текущее значение LFO-прокси (1-канальная kr-шина)
-//   результат приходит асинхронно -> через колбэк.
+// read the current LFO proxy value (async -> callback)
 ~vizReadLfo = { |lfoKey, action|
     var proxy = Ndef(lfoKey);
     if(proxy.notNil and: { proxy.bus.notNil }) {
@@ -66,7 +49,7 @@
         .string_("визуализация — таймлайн секвенсора (вверху) · значения LFO (внизу)")
         .stringColor_(Color.gray(0.9)).font_(Font("Menlo", 12, true));
 
-    // --- РАЗДЕЛ 1: таймлайн секвенсора --------------------------------
+    // --- section 1: sequencer timeline ---------------------------------
     StaticText(~vizWin, Rect(18, 38, 300, 16))
         .string_("СЕКВЕНСОР").stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10, true));
 
@@ -82,7 +65,6 @@
         seqView.background_(Color.gray(0.06));
         seqView.drawFunc_({ |uv|
             var bw = uv.bounds.width, bh = uv.bounds.height;
-            // сегменты блоков
             tl.do { |b, i|
                 var bx     = (b.t / tMax) * bw;
                 var nextT  = (i < (tl.size - 1)).if({ tl[i + 1].t }, { tMax });
@@ -103,7 +85,7 @@
                         (bx + 4) @ (bh - 26), Font("Menlo", 9), Color(0.8, 0.5, 0.5));
                 };
             };
-            // playhead (wall-clock × tempo => доли = единицы оси t)
+            // playhead (wall-clock × tempo => units of the t axis)
             if(~seqStartTime.notNil) {
                 var elapsed = (Main.elapsedTime - ~seqStartTime)
                     * (~cfg_seq.tempo ? 1);
@@ -113,10 +95,10 @@
                 Pen.line(px @ 0, px @ bh); Pen.stroke;
             };
         });
-        seqView.animate_(true);   // перерисовка для playhead
+        seqView.animate_(true);
     };
 
-    // --- РАЗДЕЛ 2: LFO -------------------------------------------------
+    // --- section 2: LFO -------------------------------------------------
     y = 60 + seqH + 16;
     StaticText(~vizWin, Rect(18, y, 300, 16))
         .string_("LFO — живые значения").stringColor_(Color.gray(0.6))
@@ -136,7 +118,7 @@
                 ++ "  " ++ line.rate ++ "Hz  [" ++ lo ++ ".." ++ hi ++ "]";
             StaticText(~vizWin, Rect(18, ry, 360, 22))
                 .string_(lbl).stringColor_(Color.gray(0.82)).font_(Font("Menlo", 10));
-            // живой бар (Slider только для отображения значения)
+            // display-only value bar
             lfoBars[i]   = Slider(~vizWin, Rect(384, ry + 4, w - 384 - 70, 14))
                 .value_(0).enabled_(false)
                 .background_(Color.gray(0.06));
@@ -145,13 +127,12 @@
         };
     };
 
-    // --- кнопка закрыть ---
     Button(~vizWin, Rect(w - 90, h - 32, 72, 24))
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
         .action_({ ~vizWin.close });
 
-    // --- опрос значений LFO на AppClock -------------------------------
+    // --- LFO value polling on AppClock ----------------------------------
     if(~vizPollRoutine.notNil) { ~vizPollRoutine.stop };
     if(~cfg_lfo.notNil and: { ~lfoKeys.notNil }) {
         ~vizPollRoutine = Routine({

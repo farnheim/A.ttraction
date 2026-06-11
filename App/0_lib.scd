@@ -1,55 +1,26 @@
-// =====================================================================
-// App/0_lib.scd
-// UNGRUND · LIB — общий инструментарий отстройки слоёв
-//
-// Здесь живёт ПОВТОРНО ИСПОЛЬЗУЕМЫЙ механизм работы со слоями:
-//   1. реестр спецификаций параметров      ~ungSpecs[\layer]
-//   2. живое хранилище текущих значений     ~ungVals[\layer]
-//   3. установка параметра (Ndef + GUI)     ~setParam.(\layer, \key, v)
-//   4. два независимых рандомайзера          ~rndFreq.(\layer) / ~rndParams.(\layer)
-//   5. пресеты: сохранение и ЗАГРУЗКА        ~savePreset / ~loadPreset / ~listPresets
-//   6. GUI-окно отстройки на слой            ~openTuner.(\layer)
-//
-// Каждый synths/<layer>.scd РЕГИСТРИРУЕТ свою спецификацию в ~ungSpecs.
-// Спецификация (~spec_<layer>) — единый источник правды: из неё строятся
-// и слайдеры, и рандомайзеры, и пресеты. Добавить слой = написать spec.
-//
-// Формат строки спецификации:
-//   ( key: \amp, group: \tone, spec: ControlSpec(lo, hi, warp, step, default),
-//     unit: " Hz", disp: \note )       // unit/disp — опционально
-//   group: \freq — тоны/высоты (рандомайзер «частоты»);
-//          \tone — тембр/среда (рандомайзер «параметры»).
-//   disp: \note — слайдер показывает имя ноты (для тонов в MIDI-нотах);
-//        \hz   — значение в Гц, рядом показываем ближайшую ноту+центы
-//                (.cpsmidi) — для шумовых слоёв без «нот» (zeta).
-//
-// Пресеты: App/presets/<layer>/<name>.scd — каждый файл это event-литерал
-//   ( amp: 0.22, density: 8.65, ... ), который ГРУЗИТСЯ обратно (.load).
-//   В отличие от старого теста (только текстовый дамп) — здесь round-trip.
-//
-// Зависимости: грузить ПЕРВЫМ (до синтов) — synths/*.scd регистрируют
-//   свои spec в ~ungSpecs, определённый здесь. См. 1_app.scd, шаг 0.
-//   GUI/пресеты используются ИНТЕРАКТИВНО после полной загрузки App.
-// =====================================================================
+// App/0_lib.scd — UNGRUND · LIB: shared layer-tuning infrastructure.
+// Spec registry ~ungSpecs, live values ~ungVals, ~setParam, randomizers,
+// presets (save/load/list), per-layer tuner GUI (~openTuner).
+// Each synths/<layer>.scd registers its spec here; load this file FIRST.
+// Spec format and details: docs/architecture.md.
 
 (
-// ----- реестры (идемпотентно: повторная загрузка не сбрасывает) ------
+// ----- registries (idempotent: reloading does not reset) -------------
 ~ungSpecs        = ~ungSpecs        ? ();   // \layer -> spec event
 ~ungVals         = ~ungVals         ? ();   // \layer -> ( key: value )
 ~ungTuner        = ~ungTuner        ? ();   // \layer -> Window
 ~ungTunerEz      = ~ungTunerEz      ? ();   // \layer -> ( key -> EZSlider )
 ~ungTunerNoteTxt = ~ungTunerNoteTxt ? ();   // \layer -> ( key -> StaticText )
 ~ungTunerSync    = ~ungTunerSync    ? ();   // \layer -> { |key, v| ... }
-~ungTunerPop     = ~ungTunerPop     ? ();   // \layer -> PopUpMenu (пресеты)
-~ungTunerName    = ~ungTunerName    ? ();   // \layer -> TextField (имя пресета)
-~ungTunerOffset  = 0;                        // смещение позиции окон
+~ungTunerPop     = ~ungTunerPop     ? ();   // \layer -> PopUpMenu (presets)
+~ungTunerName    = ~ungTunerName    ? ();   // \layer -> TextField (preset name)
+~ungTunerOffset  = 0;                        // window position stagger
 
-// корень пресетов: App/presets (рядом с этим файлом)
 ~ungPresetRoot = ((~appDir ? (thisProcess.nowExecutingPath !? (_.dirname))) ? "")
     +/+ "presets";
 
 
-// ----- спец/значения ------------------------------------------------
+// ----- spec / values --------------------------------------------------
 ~ungSpecOf = { |layer| ~ungSpecs[layer.asSymbol] };
 
 ~ungDefault = { |layer, key|
@@ -58,7 +29,7 @@
 };
 
 
-// ----- установка параметра: Ndef + хранилище + синхронизация GUI -----
+// ----- set parameter: Ndef + store + GUI sync -------------------------
 ~setParam = { |layer, key, v|
     layer = layer.asSymbol; key = key.asSymbol;
     Ndef(layer).set(key, v);
@@ -70,28 +41,28 @@
     v;
 };
 
-// применить дефолты из spec ко всему слою (вызывается из synths/<layer>.scd)
+// apply spec defaults to the whole layer (called from synths/<layer>.scd)
 ~ungApplyDefaults = { |layer|
     layer = layer.asSymbol;
     ~ungSpecOf.(layer).params.do { |p| ~setParam.(layer, p.key, p.spec.default) };
-    ~ungSyncAll.(layer);                     // авторитетный pull-resync GUI <- ~ungVals
+    ~ungSyncAll.(layer);
 };
 
 
-// ----- рандомайзеры: по группам spec --------------------------------
+// ----- randomizers by spec group --------------------------------------
 ~rndGroup = { |layer, group|
     layer = layer.asSymbol;
     ~ungSpecOf.(layer).params.do { |p|
-        // p[\group] (НЕ p.group): .group — это метод Object, перекрывает ключ
+        // p[\group] (NOT p.group): .group is an Object method shadowing the key
         if(p[\group] == group) { ~setParam.(layer, p.key, p.spec.map(1.0.rand)) };
     };
-    ~ungSyncAll.(layer);                     // авторитетный pull-resync GUI <- ~ungVals
+    ~ungSyncAll.(layer);
 };
-~rndFreq   = { |layer| ~rndGroup.(layer, \freq) };   // «частоты»
-~rndParams = { |layer| ~rndGroup.(layer, \tone) };   // «параметры тембра»
+~rndFreq   = { |layer| ~rndGroup.(layer, \freq) };
+~rndParams = { |layer| ~rndGroup.(layer, \tone) };
 
 
-// ----- пресеты: каталог, save, load, list ---------------------------
+// ----- presets: dir, save, load, list ---------------------------------
 ~ungPresetDir = { |layer|
     var root = ~ungPresetRoot, d;
     if(File.exists(root).not) { File.mkdir(root) };
@@ -129,10 +100,10 @@
     if(File.exists(path).not) {
         ("preset не найден: " ++ path).warn; nil
     } {
-        e = path.load;                       // event-литерал из файла
+        e = path.load;                       // event literal from file
         if(e.isKindOf(Event)) {
             e.keysValuesDo { |k, v| ~setParam.(layer, k, v) };
-            ~ungSyncAll.(layer);             // авторитетный pull-resync GUI <- ~ungVals
+            ~ungSyncAll.(layer);
             ("preset loaded <- " ++ path.basename).postln;
             e;
         } {
@@ -147,7 +118,7 @@
 };
 
 
-// ----- ноты: MIDI -> имя / имя+центы (для disp \note) ---------------
+// ----- notes: MIDI -> name / name+cents (for disp \note) --------------
 ~ungNoteName = { |midi|
     var names = #["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
     var n = midi.round.asInteger;
@@ -159,11 +130,9 @@
         " " ++ if(cents > 0, { "+" }, { "" }) ++ cents ++ "¢"
     });
 };
-// надпись «нота+центы» для параметра по его disp:
-//   disp \note — значение УЖЕ в MIDI-нотах (alpha);
-//   disp \hz   — значение в Гц, конвертируем .cpsmidi (zeta: края фильтра,
-//                резонансный банк — у них нет «ноты», показываем ближайшую).
-~ungDispNote = #[\note, \hz];   // disp-режимы, дающие колонку «нота+центы»
+// disp \note — value already in MIDI notes; disp \hz — value in Hz,
+// converted via .cpsmidi (noise layers show the nearest note)
+~ungDispNote = #[\note, \hz];
 ~ungDispLabel = { |p, v|
     switch(p[\disp],
         \note, { ~ungNoteLabel.(v) },
@@ -172,7 +141,7 @@
     );
 };
 
-// параметр под LFO-маппингом? (тогда .set игнорируется — пометить в GUI)
+// is the parameter under an LFO mapping? (.set is ignored then — mark in GUI)
 ~isMapped = { |layer, key|
     ~cfg_lfo.notNil and: {
         ~cfg_lfo.lines.any { |l|
@@ -182,7 +151,7 @@
 };
 
 
-// ----- GUI: обновление списка пресетов в открытом окне --------------
+// ----- GUI: refresh preset list in an open window ---------------------
 ~ungRefreshPresets = { |layer|
     layer = layer.asSymbol;
     if(~ungTunerPop[layer].notNil) {
@@ -191,13 +160,9 @@
     };
 };
 
-// ----- GUI: полная пересинхронизация ВСЕХ слайдеров слоя из ~ungVals --
-// Авторитетный «pull»: читает ЖИВОЙ реестр виджетов (~ungTunerEz[layer]) и
-// текущие значения (~ungVals[layer]) и пушит их в слайдеры/ноты НАПРЯМУЮ —
-// в обход покейного ~ungTunerSync (и его гейта). Вызывается после ЛЮБОЙ
-// массовой операции (load пресета / random): даже если отдельные покейные
-// синки не сработали (краевой случай жизненного цикла окна), слайдеры
-// гарантированно встают по значениям. Идемпотентно (value_ не триггерит action).
+// ----- GUI: authoritative pull-resync of ALL layer sliders from ~ungVals.
+// Bypasses per-key ~ungTunerSync; called after any bulk operation
+// (preset load / random) so sliders always end up matching the values.
 ~ungSyncAll = { |layer|
     layer = layer.asSymbol;
     if(~ungTuner[layer].notNil and: { ~ungTunerEz[layer].notNil }) {
@@ -217,31 +182,29 @@
 };
 
 
-// ----- GUI: построение окна отстройки слоя --------------------------
+// ----- GUI: build the per-layer tuner window --------------------------
 ~ungBuildTuner = { |layer|
     var spec, freqs, tones, rows, y0, rowH, slBottom, by, py, w, h, off, mkSlider;
-    var nameField, popMenu, win;   // захват в локали: closures не зависят от реестра
-    var scr, winRect;              // экран + итоговый прямоугольник окна (кламп в экран)
+    var nameField, popMenu, win;   // local capture: closures must not read the registry
+    var scr, winRect;
     layer = layer.asSymbol;
     spec  = ~ungSpecOf.(layer);
 
-    freqs = spec.params.select { |p| p[\group] == \freq };   // p[\group], не p.group
+    freqs = spec.params.select { |p| p[\group] == \freq };
     tones = spec.params.select { |p| p[\group] == \tone };
     rows  = max(freqs.size, tones.size);
 
     y0 = 92; rowH = 26;
     slBottom = y0 + (rows * rowH);
-    by = slBottom + 16;             // строка рандомайзеров
-    py = by + 46;                   // строка пресетов
+    by = slBottom + 16;             // randomizer row
+    py = by + 46;                   // preset row
     w  = 964; h = py + 24 + 16;
 
-    // закрыть прошлое окно best-effort: ссылка может указывать на уже
-    // разрушенный Qt-объект (.close бросил бы ошибку и оборвал бы сборку
-    // ДО создания нового окна — тюнер «не открывался бы»).
+    // close previous window best-effort: the reference may point to an
+    // already destroyed Qt object (.close without try would abort the build)
     if(~ungTuner[layer].notNil) { try { ~ungTuner[layer].close } };
-    // сброс ВСЕХ слотов слоя консистентно (как делает onClose) — чтобы в
-    // зазоре пересборки не осталось ссылок на виджеты ПРОШЛОГО окна, по
-    // которым ~setParam/~ungSyncAll обновляли бы уже разрушенные слайдеры.
+    // reset ALL layer slots consistently so nothing touches widgets of the
+    // OLD window during the rebuild gap
     ~ungTuner[layer]        = nil;
     ~ungTunerEz[layer]      = ();
     ~ungTunerNoteTxt[layer] = ();
@@ -249,28 +212,22 @@
     ~ungTunerPop[layer]     = nil;
     ~ungTunerName[layer]    = nil;
 
-    // ПОЗИЦИЯ ОКНА — гарантированно на экране.
-    // Каскад смещений (off) стаггерит окна, НО offset рос всю сессию, и окно
-    // «открывалось» далеко за краем экрана — выглядело как «не открывается».
-    // Лечим двумя слоями: (1) wrap каскада по модулю; (2) ЖЁСТКИЙ кламп
-    // прямоугольника в видимую область экрана (Window.availableBounds) —
-    // окно физически не может уехать за край независимо от offset.
+    // window position: wrap the stagger AND hard-clamp the rect into the
+    // visible screen — otherwise the offset grows all session and the window
+    // "opens" off-screen
     off = ((~ungTunerOffset % 12) * 26);
     ~ungTunerOffset = ~ungTunerOffset + 1;
     scr = Window.availableBounds;
-    w   = w.min(scr.width);                                  // влезть и по ширине
-    h   = h.min(scr.height);                                 // и по высоте (мелкий экран)
+    w   = w.min(scr.width);
+    h   = h.min(scr.height);
     winRect = Rect(
         (70 + off).clip(scr.left, scr.left + scr.width  - w),
         (70 + off).clip(scr.top,  scr.top  + scr.height - h),
         w, h
     );
-    // ВАЖНО: НЕ цепочкой `win = ~ungTuner[layer] = Window(...)` — в SC
-    // выражение `dict[k] = v` возвращает САМ СЛОВАРЬ (.put -> словарь), и
-    // тогда `win` биндится на Event-реестр, а не на окно. Из-за этого
-    // win.onClose_/win.close молча уходили в Event[\..] (no-op), а кнопки
-    // load/save (через popMenu/nameField, та же ловушка) падали с
-    // «Non Boolean in test» и пресет НЕ грузился. Присваиваем раздельно.
+    // NOTE: do NOT chain `win = ~ungTuner[layer] = Window(...)` — in SC
+    // `dict[k] = v` returns the DICT, so win would bind to the registry Event
+    // (onClose/close become no-ops, buttons fail). Assign separately.
     win = Window(
         "UNGRUND · tuner — " ++ layer ++ " (живой Ndef в App)",
         winRect
@@ -292,7 +249,7 @@
         .string_("ТЕМБР И СРЕДА (random «параметры»)")
         .stringColor_(Color.gray(0.62)).font_(Font("Menlo", 10, true));
 
-    // конструктор одного слайдера (freq: с именем ноты; tone: обычный)
+    // one-slider constructor (freq rows get a note label)
     mkSlider = { |p, x, y, sw, isFreq|
         var v0, lbl, mapped, ez;
         v0     = (~ungVals[layer] !? { ~ungVals[layer][p.key] }) ? p.spec.default;
@@ -316,7 +273,7 @@
     freqs.do { |p, i| mkSlider.(p, 18,  y0 + (i * rowH), 300, true) };
     tones.do { |p, i| mkSlider.(p, 470, y0 + (i * rowH), 470, false) };
 
-    // функция синхронизации GUI <- ~setParam (рандом/пресеты)
+    // GUI sync hook <- ~setParam (random/presets)
     ~ungTunerSync[layer] = { |key, v|
         {
             var ez = ~ungTunerEz[layer] !? { ~ungTunerEz[layer][key] };
@@ -327,7 +284,7 @@
         }.defer;
     };
 
-    // ----- рандомайзеры -----
+    // ----- randomizers -----
     if(freqs.notEmpty) {
         Button(~ungTuner[layer], Rect(18, by, 220, 38))
             .states_([["random — частоты", Color.white, Color(0.18, 0.34, 0.44)]])
@@ -345,10 +302,10 @@
         .font_(Font("Menlo", 12, true))
         .action_({ ~ungApplyDefaults.(layer) });
 
-    // ----- пресеты: имя | save | список | load | refresh -----
+    // ----- presets: name | save | list | load | refresh -----
     StaticText(~ungTuner[layer], Rect(18, py + 2, 58, 22))
         .string_("preset:").stringColor_(Color.gray(0.75)).font_(Font("Menlo", 11));
-    // раздельное присваивание (см. коммент у win): цепочка через [k]= вернула бы Event
+    // separate assignment (see comment at win): chaining via [k]= returns the Event
     nameField = TextField(~ungTuner[layer], Rect(80, py, 168, 24))
         .string_("").font_(Font("Menlo", 11));
     ~ungTunerName[layer] = nameField;
@@ -356,8 +313,6 @@
         .states_([["save", Color.white, Color(0.20, 0.40, 0.24)]])
         .font_(Font("Menlo", 11, true))
         .action_({ if(nameField.notNil) { ~savePreset.(layer, nameField.string) } });
-    // раздельное присваивание (см. коммент у win): иначе popMenu = Event-реестр,
-    // и кнопка load падала на `idx < items.size` (idx был Event) → пресет не грузился.
     popMenu = PopUpMenu(~ungTuner[layer], Rect(352, py, 200, 24))
         .font_(Font("Menlo", 11));
     ~ungTunerPop[layer] = popMenu;
@@ -382,10 +337,9 @@
 
     ~ungRefreshPresets.(layer);
 
-    // ВАЖНО: чистим реестр ТОЛЬКО если это всё ещё текущее окно слоя.
-    // Иначе отложенный onClose старого окна (при close->reopen) затирает
-    // слоты, зарегистрированные уже НОВЫМ окном, и ~setParam перестаёт
-    // двигать слайдеры (загрузка пресета меняет звук, но не UI).
+    // clear the registry ONLY if this is still the layer's current window —
+    // otherwise the deferred onClose of the OLD window (close->reopen) would
+    // wipe slots registered by the NEW window
     win.onClose_({
         if(~ungTuner[layer] === win) {
             ~ungTuner[layer]        = nil;
@@ -396,20 +350,13 @@
             ~ungTunerName[layer]    = nil;
         };
     });
-    // ПОКАЗ ОКНА — ОДНО отложенное событие, не цикл.
-    // ПРИЧИНА (проверено в реальном IDE): тяжёлое окно тюнера Qt раскладывает не
-    // мгновенно; `win.front` сразу после сборки попадает ДО раскладки и не
-    // показывает окно (окно создано, но не видно). РОВНО поэтому срабатывала
-    // твоя РУЧНАЯ ~ungTuner[\layer].bounds_(...).front — отдельное ПОЗДНЕЕ
-    // событие, между которым цикл событий Qt доработал раскладку. Плотный
-    // retry-цикл наоборот ВРЕДЕН: front; wait на AppClock не отдаёт время Qt,
-    // раскладка не завершается, ни один front не показывает окно.
-    // Поэтому: один .defer с задержкой (Qt успевает разложить) → один
-    // bounds_+front по глобальному слоту — точная копия рабочей ручной команды.
+    // show as ONE deferred event: Qt lays the heavy window out asynchronously,
+    // an immediate .front lands before layout and the window stays invisible;
+    // a retry loop on AppClock starves Qt and never shows it either
     { ~ungTuner[layer].bounds_(winRect).front }.defer(0.3);
 };
 
-// открыть окно отстройки слоя (с defer на AppClock для GUI)
+// open the layer tuner window (deferred to AppClock)
 ~openTuner = { |layer|
     layer = layer.asSymbol;
     if(~ungSpecOf.(layer).isNil) {
@@ -419,7 +366,7 @@
     };
 };
 
-// закрыть все окна отстройки (вызывается из ~appCleanup)
+// close all tuner windows (called from ~appCleanup)
 ~ungCloseTuners = {
     ~ungTuner.values.do { |win| if(win.notNil) { { win.close }.defer } };
 };

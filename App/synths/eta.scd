@@ -1,29 +1,21 @@
-// =====================================================================
-// App/synths/eta.scd
-// UNGRUND · звуковой класс 7/8 — `eta` (composed silence)
-//
-// СТАТУС: РЕАЛЬНЫЙ (по определению пустой).  // TODO: iterate this layer
-//   Премиса §C.7: НЕТ UGen'ов. eta — это запланированная тишина как
-//   событие с явной длительностью. Реализация живёт в планировщике
-//   (4_sequencer.scd): он продвигает часы на dur, НЕ порождая голосов,
-//   и гасит другие слои на это время.
-//
-//   Здесь определён тихий Ndef-плейсхолдер (стерео-молчание) — чтобы
-//   глоб папки и микшер обрабатывали все 8 классов единообразно. Звука
-//   он не производит намеренно: тишина — это регистр (Аксиома V).
-// =====================================================================
+// App/synths/eta.scd — UNGRUND class 7/8 `eta` (composed silence).
+// REAL (empty by definition).  // TODO: iterate this layer
+// Premise §C.7: NO UGens — planned silence as an event with a duration;
+// the implementation lives in the scheduler (4_sequencer.scd). The silent
+// Ndef placeholder below only keeps the folder glob and the mixer handling
+// all 8 classes uniformly (silence is a register, Axiom V).
 
 
 // ===== CONFIG — edit here ============================================
 (
 ~cfg_eta = (
-    // eta не имеет тембральных параметров — только длительность,
-    // которой управляет планировщик (см. 4_sequencer.scd: timeline).
+    // eta has no timbral parameters — only a duration, owned by the
+    // scheduler (4_sequencer.scd: timeline)
     note: "silence is a register"
 );
 
 
-// ===== LOGIC — synthesis (намеренно тишина) ==========================
+// ===== LOGIC — synthesis (intentionally silent) ======================
 Ndef(\eta, { Silent.ar(2) });
 Ndef(\eta).fadeTime = 0.5;
 )

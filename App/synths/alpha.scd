@@ -1,41 +1,19 @@
-// =====================================================================
-// App/synths/alpha.scd
-// UNGRUND · звуковой класс 1/8 — `alpha` (sustained sine / Grund)
-//
-// СТАТУС: РЕАЛЬНЫЙ СЛОЙ (портирован из Tests/test_monade.scd).
-//   Физическая модель «связка из 10 пружин в масле», адаптированная из
-//   GUI-теста в Ndef-слой. Тоны заданы в MIDI-нотах (.midicps внутри).
-//   Согласованная связка по умолчанию (композитор, 2026-05-22).
-//
-// ОТСТРОЙКА В APP (вместо отдельного теста — см. 0_lib.scd):
-//   ~openTuner.(\alpha)         — окно слайдеров по живому Ndef;
-//   ~rndFreq.(\alpha)           — рандом 10 тонов (группа \freq);
-//   ~rndParams.(\alpha)         — рандом параметров тембра (группа \tone);
-//   ~savePreset.(\alpha,"имя")  — сохранить пресет в App/presets/alpha/;
-//   ~loadPreset.(\alpha,"имя")  — загрузить пресет обратно.
-//
-// СПЕЦИФИКАЦИЯ ~spec_alpha — единый источник правды: из неё строятся
-//   слайдеры, рандомайзеры и пресеты. Расширить управление = добавить
-//   строку в ~spec_alpha.params И соответствующий аргумент в Ndef.
-//
-// ИНТЕРФЕЙС Ndef(\alpha):
-//   — пишет стерео в свой выход (его читает 2_mixer.scd через Ndef-роутинг);
-//   — посыл в эффекты выполняет МИКШЕР (через .send), а не сам слой.
-//   — управляемые параметры (\set / LFO / MIDI / tuner): см. CONFIG ниже.
-//
-// Итерировать этот слой = править ~spec_alpha и тело Ndef(\alpha).
-// =====================================================================
+// App/synths/alpha.scd — UNGRUND class 1/8 `alpha` (sustained sine / Grund).
+// REAL LAYER: physical model "bundle of 10 springs in oil" (ported from
+// Tests/test_monade.scd). Tones in MIDI notes (.midicps inside).
+// Tuning via 0_lib.scd: ~openTuner/~rndFreq/~rndParams/~save~loadPreset.
+// ~spec_alpha is the single source of truth (sliders/randomizers/presets);
+// layer contract: docs/layer_contract.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// Спецификация параметров. group \freq — тоны (рандом «частоты»);
-// group \tone — тембр/среда (рандом «параметры»). spec задаёт диапазон,
-// варп и ДЕФОЛТ (он же значение, применяемое при загрузке слоя).
+// group \freq — tones; group \tone — timbre/medium. spec gives range,
+// warp and DEFAULT (applied at layer load).
 ~spec_alpha = (
     name: \alpha,
     params: [
-        // --- группа \freq: 10 тонов пружин (MIDI-ноты, дробные = микротон) ---
+        // --- group \freq: 10 spring tones (MIDI notes, fractional = microtonal) ---
         ( key: \n1,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 29.91) ),
         ( key: \n2,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 43.87) ),
         ( key: \n3,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 54.2)  ),
@@ -47,8 +25,7 @@
         ( key: \n9,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 58.14) ),
         ( key: \n10, group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 16.69) ),
 
-        // --- группа \tone: тембр и среда ---
-        // базовые (как раньше)
+        // --- group \tone: timbre and medium ---
         ( key: \amp,       group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.30)  ),
         ( key: \density,   group: \tone, unit: " /s", spec: ControlSpec(0.2, 150,  \exp, 0, 8.65)  ),
         ( key: \contact,   group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.464) ),
@@ -56,17 +33,16 @@
         ( key: \disperse,  group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.605) ),
         ( key: \oil,       group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.725) ),
         ( key: \muffle,    group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.204) ),
-        // новые — вынесены из «магических чисел» DSP (architecture §A)
-        ( key: \bright,    group: \tone, unit: " Hz", spec: ControlSpec(1500, 6000, \exp, 0, 2800) ),  // HPF сухого контакта
-        ( key: \metalAmt,  group: \tone,             spec: ControlSpec(0.0, 0.8,  \lin, 0, 0.22)  ),  // уровень метал-звона контакта
-        ( key: \metalRing, group: \tone, unit: " s",  spec: ControlSpec(0.02, 0.3, \exp, 0, 0.12)  ),  // длительность мод (дерево↔металл)
-        ( key: \metalWeight,group: \tone,            spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.35)  ),  // вес: короткий низкий толчок удара
-        ( key: \bodyLevel, group: \tone,             spec: ControlSpec(0.0, 0.3,  \lin, 0, 0.12)  ),  // тональное тело связки (основной тон)
-        ( key: \drive,     group: \tone,             spec: ControlSpec(0.5, 4.0,  \exp, 0, 1.2)   ),  // пред-усиление tanh
-        ( key: \sprGain,   group: \tone,             spec: ControlSpec(1.0, 7.0,  \lin, 0, 4.6)   ),  // усиление суммы пружин (тон)
-        ( key: \swayRate,  group: \tone, unit: " Hz", spec: ControlSpec(0.02, 0.5, \exp, 0, 0.1)   ),  // частота «вдоха/выдоха»
-        ( key: \cutTop,    group: \tone, unit: " Hz", spec: ControlSpec(2000, 8000, \exp, 0, 5400) ),  // верх среза LPF
-        ( key: \cutOil,    group: \tone, unit: " Hz", spec: ControlSpec(0, 5000,   \lin, 0, 3800)  )   // глубина затемнения oil
+        ( key: \bright,    group: \tone, unit: " Hz", spec: ControlSpec(1500, 6000, \exp, 0, 2800) ),  // dry-contact HPF
+        ( key: \metalAmt,  group: \tone,             spec: ControlSpec(0.0, 0.8,  \lin, 0, 0.22)  ),  // contact metal-ring level
+        ( key: \metalRing, group: \tone, unit: " s",  spec: ControlSpec(0.02, 0.3, \exp, 0, 0.12)  ),  // mode ring time (wood<->metal)
+        ( key: \metalWeight,group: \tone,            spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.35)  ),  // short low impact thump
+        ( key: \bodyLevel, group: \tone,             spec: ControlSpec(0.0, 0.3,  \lin, 0, 0.12)  ),  // tonal bundle body
+        ( key: \drive,     group: \tone,             spec: ControlSpec(0.5, 4.0,  \exp, 0, 1.2)   ),  // tanh pre-gain
+        ( key: \sprGain,   group: \tone,             spec: ControlSpec(1.0, 7.0,  \lin, 0, 4.6)   ),  // spring-sum gain
+        ( key: \swayRate,  group: \tone, unit: " Hz", spec: ControlSpec(0.02, 0.5, \exp, 0, 0.1)   ),  // breathing rate
+        ( key: \cutTop,    group: \tone, unit: " Hz", spec: ControlSpec(2000, 8000, \exp, 0, 5400) ),  // LPF top
+        ( key: \cutOil,    group: \tone, unit: " Hz", spec: ControlSpec(0, 5000,   \lin, 0, 3800)  )   // oil darkening depth
     ]
 );
 
@@ -95,29 +71,28 @@ Ndef(\alpha, { |amp = 0.30, density = 8.65, contact = 0.464,
     dens     = (density.lag(0.2) * sway).clip(0.05, 400);
     contacts = Dust2.ar(dens);
 
-    // сухой контакт — ЯРКИЙ: низкая обертоновая составляющая убрана
+    // dry contact — bright, no low overtone content
     ticks = Decay2.ar(contacts.abs, 0.0004, 0.006 + (oilL * 0.02));
     ticks = ticks * ((BrownNoise.ar * 0.7) + 0.5);
     ticks = HPF.ar(ticks, bright.lag(0.2).clip(500, 10000));
-    // metal — звон СОПРИКОСНОВЕНИЯ пружин: яркий неангармоничный модальный звон
-    // с ВЫСОКИМ спектральным центром (= «металл», не «дерево»). Высокие моды —
-    // громче и звенят дольше (блеск/шиммер). Низ — только короткий толчок
-    // (вес удара, metalWeight), без звенящей деревянной ноты.
+    // metal — spring-contact ring: inharmonic modal bank with a HIGH spectral
+    // centre; high modes louder and longer (shimmer), lows only a short
+    // weight thump (metalWeight), no ringing wooden note
     mRing  = metalRing.lag(0.2).clip(0.01, 0.4);
     mDet   = LFNoise0.kr([7, 9, 11, 13, 6, 8, 10, 12, 5]).range(0.985, 1.015);
     mFreqs = [413, 661, 977, 1490, 2137, 3001, 4313, 5897, 7639] * mDet;
     mRings = mRing * [0.8, 0.9, 1.0, 1.0, 0.95, 0.88, 0.78, 0.66, 0.55];
     mAmps  = [0.4, 0.55, 0.7, 0.9, 1.0, 0.92, 0.78, 0.62, 0.46];
     mThump = Ringz.ar(contacts, 132 * LFNoise0.kr(4).range(0.98, 1.02), 0.035)
-                * metalWeight.lag(0.2) * 0.7;               // короткий вес, не «дерево»
+                * metalWeight.lag(0.2) * 0.7;
     metal  = (Mix(Ringz.ar(contacts, mFreqs, mRings) * mAmps) + mThump)
                 * 0.45 * metalAmt.lag(0.2);
-    ticks = ((ticks * 0.7) + metal) * contact.lag(0.2);     // dry чуть тише — ведёт металл
+    ticks = ((ticks * 0.7) + metal) * contact.lag(0.2);
 
-    // тело — непрерывный низкий шум: масса связки в движении
+    // body — continuous low noise: the bundle's mass in motion
     body = BrownNoise.ar(bodyLevel.lag(0.2)) * LFNoise2.kr(0.35).range(0.3, 1.0);
 
-    // --- связка из 10 пружин: каждая на своём тоне (нота -> Гц) ---
+    // bundle of 10 springs, each on its own tone (note -> Hz)
     notes = [n1, n2, n3, n4, n5, n6, n7, n8, n9, n10];
     springs = Array.fill(nSprings, { |i|
         var sf, sd, collGain, ringGain, voice;
@@ -142,12 +117,12 @@ Ndef(\alpha, { |amp = 0.30, density = 8.65, contact = 0.464,
         voice * ringGain
     });
     bundle = Mix(springs) * (1 / nSprings) * sprGain.lag(0.2);
-    bundle = bundle + (ticks * 0.9);   // контакт тише — сидит под гармоникой
+    bundle = bundle + (ticks * 0.9);
 
     cutBase = (cutTop.lag(0.3) - (oilL * cutOil.lag(0.3))).clip(300, 9000);
     bundle  = LPF.ar(bundle, cutBase);
     bundle  = (bundle * drive.lag(0.2)).tanh;
-    bundle  = LeakDC.ar(bundle);             // §DSP: после нелинейности
+    bundle  = LeakDC.ar(bundle);             // §DSP: after the nonlinearity
 
     sigL = LPF.ar(bundle, (cutBase * (1 - (muffL * 0.82))).clip(180, 9000));
     sigL = DelayC.ar(sigL, 0.05, muffL * 0.02);
@@ -160,9 +135,8 @@ Ndef(\alpha, { |amp = 0.30, density = 8.65, contact = 0.464,
     [sigL, sigR]
 });
 
-// ----- регистрация спецификации + применение дефолтов ---------------
-// (самодостаточно: не зависит от 0_lib для применения; lib нужен лишь
-//  для интерактивных рандома/пресетов/GUI после полной загрузки App.)
+// register spec + apply defaults (self-sufficient: 0_lib only needed for
+// interactive random/presets/GUI after the full App load)
 ~ungSpecs = ~ungSpecs ? ();
 ~ungVals  = ~ungVals  ? ();
 ~ungSpecs[\alpha] = ~spec_alpha;
