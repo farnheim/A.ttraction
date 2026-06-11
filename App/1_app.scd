@@ -55,6 +55,7 @@
 
 // --- master cleanup (идемпотентно) ----------------------------------
 ~appCleanup = { |verbose = true|
+    if(~mixRecOn == true) { s.stopRecording; ~mixRecOn = false };   // рекордер микшера
     if(~ungCloseTuners.notNil) { ~ungCloseTuners.value };   // окна отстройки
     if(~vizClose.notNil)       { ~vizClose.value };         // окно визуализации
     if(~mixerWin.notNil)       { { ~mixerWin.close }.defer; ~mixerWin = nil };

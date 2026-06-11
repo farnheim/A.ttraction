@@ -23,6 +23,10 @@
 //   на каждый слой + мастер. GUI синхронизируется с ~mixSet через
 //   ~mixerGuiSync (живая правка из MIDI/solo подтягивает фейдеры).
 //
+// РЕКОРДЕР: кнопка ● rec в строке мастера (и ~mixRecToggle без GUI) пишет
+//   стерео-сумму мастера С ЭФФЕКТАМИ (шина 0 после default-группы) в
+//   recordings/ungrund_<штамп>.wav — формат в ~cfg_recorder.
+//
 // Зависимости: синт-слои (Ndef(\alpha) ...), эффекты (6_effects.scd),
 //   шины ~busDry / ~busFxSend / ~busFxReturn (создаёт 1_app.scd),
 //   ~activeLayers (1_app.scd). Итерировать сведение = править таблицу levels.
@@ -52,6 +56,9 @@
 
 // уровни по умолчанию для слоя, которого нет в таблице (новый synths/*.scd)
 ~mixerDefaultLevel = ( vol: 0.7, send: 0.0 );
+
+// рекордер мастер-суммы: формат файла и папка (от корня проекта)
+~cfg_recorder = ( header: "wav", sample: "int24", dir: "recordings" );
 
 
 // ===== LOGIC — routers + master + GUI ================================
@@ -172,6 +179,40 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     if(~mixSoloCur == layer) { ~mixUnsolo.value } { ~mixSolo.(layer) };
 };
 
+// --- рекордер: стерео-сумма мастера С ЭФФЕКТАМИ -> recordings/ -------
+// Пишется аппаратная шина 0: узел записи (Recorder) встаёт в ХВОСТ корневой
+// группы, т.е. ПОСЛЕ default-группы с Ndef(\master) — в файл попадает ровно
+// то, что слышно (dry + fx-return, LeakDC, Limiter, master amp).
+// ~mixRecToggle.value — старт/стоп и без GUI; кнопка ● rec зовёт его же.
+~mixRecOn   = ~mixRecOn ? false;   // флаг переживает перезагрузку файла
+~mixRecPath = ~mixRecPath;         // путь текущей/последней записи
+
+~mixRecToggle = {
+    if(~mixRecOn) {
+        s.stopRecording;
+        ~mixRecOn = false;
+        ("MIXER rec — запись остановлена: " ++ ~mixRecPath).postln;
+    } {
+        var dir = ~appDir.dirname +/+ ~cfg_recorder.dir;
+        if(File.exists(dir).not) { File.mkdir(dir) };
+        ~mixRecPath = dir +/+
+            ("ungrund_" ++ Date.localtime.stamp ++ "." ++ ~cfg_recorder.header);
+        s.recHeaderFormat = ~cfg_recorder.header;
+        s.recSampleFormat = ~cfg_recorder.sample;
+        s.record(~mixRecPath, bus: 0, numChannels: 2);
+        ~mixRecOn = true;
+        ("MIXER rec — пишу мастер-сумму: " ++ ~mixRecPath).postln;
+    };
+    ~mixerRecSync.value;
+};
+
+// обновить визуал кнопки записи по ~mixRecOn (no-op без окна)
+~mixerRecSync = {
+    { if(~mixerRecBtn.notNil) {
+        ~mixerRecBtn.value_(if(~mixRecOn) { 1 } { 0 });
+    } }.defer;
+};
+
 
 // ===== GUI — окно микшера ============================================
 // реестры виджетов (идемпотентно при перезагрузке файла)
@@ -187,7 +228,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
 };
 
 ~ungBuildMixer = {
-    var layers, rowH, y0, w, h, by, mkRow, masterEz;
+    var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
     var win;   // захват в локаль: closures (onClose/кнопки) не зависят от слота
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
@@ -204,6 +245,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
     ~mixerGuiSync = nil;
     ~mixerEz      = ();
     ~mixerSoloBtn = ();
+    ~mixerRecBtn  = nil;
 
     win = Window(
         "UNGRUND · mixer — живое сведение слоёв (App)",
@@ -279,6 +321,18 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
         .states_([["all / unsolo", Color.gray(0.95), Color.gray(0.28)]])
         .font_(Font("Menlo", 11, true))
         .action_({ ~mixUnsolo.value });
+
+    // запись мастер-суммы (с эффектами) — состояние живёт в ~mixRecOn,
+    // поэтому кнопка корректна и после close/reopen окна во время записи
+    recBtn = Button(~mixerWin, Rect(512, by, 110, 24))
+        .states_([
+            ["● rec",  Color.gray(0.9), Color.gray(0.26)],
+            ["■ REC",  Color.white,     Color(0.62, 0.14, 0.14)]
+        ])
+        .font_(Font("Menlo", 11, true))
+        .action_({ ~mixRecToggle.value });
+    recBtn.value_(if(~mixRecOn) { 1 } { 0 });
+    ~mixerRecBtn = recBtn;
     Button(~mixerWin, Rect(694, by, 100, 24))
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
@@ -306,6 +360,7 @@ Ndef(\master).play(out: 0, numChannels: 2);          // в аппаратный 
             ~mixerGuiSync = nil;
             ~mixerEz      = ();
             ~mixerSoloBtn = ();
+            ~mixerRecBtn  = nil;
             ~mixerWin     = nil;
         };
     });
