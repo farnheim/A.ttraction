@@ -197,6 +197,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerSoloBtn = ();    // layer -> Button (solo)
 ~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
 
+// structure-grid panel slots (0_grid.scd may be absent — panel is nil-safe)
+~mixerGridTxt    = nil;   // TextView (поле)
+~mixerGridStatus = nil;   // StaticText (число Ф / размер поля / отказ)
+~mixerGridEz     = nil;   // EZSlider (сложность)
+~gridComplexity  = ~gridComplexity ? 0.5;   // survives reopen / missing 0_grid
+
 // update all solo-button visuals from ~mixSoloCur
 ~mixerRefreshSolo = {
     { ~mixerSoloBtn.keysValuesDo { |layer, btn|
@@ -206,21 +212,34 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
 ~ungBuildMixer = {
     var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
+    var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
     var win;   // local capture: closures must not depend on the global slot
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
     by = y0 + (layers.size * rowH) + 14;
-    w  = 954; h = by + 40 + 40;
+    // окно выше суммы рядов слоёв: справа стоит поле структурной сетки, ему
+    // нужна высота (поле до 64 строк — TextView доскроллит остаток)
+    // gw под 64 колонки канона: Menlo 11 ≈ 6.63 px/символ -> 424 px + рамка
+    // TextView + вертикальный скроллбар. QTextView не умеет отключать перенос,
+    // и на узком поле Qt переносит хвост строки — псевдографика рассыпается
+    gx = 954; gw = 480;
+    w  = gx + gw + 16;
+    h  = (by + 40 + 40).max(620);
+    gh = h - y0 - 100;
+    hasGrid = ~gridGenerate.notNil;
 
     // close previous window best-effort (reference may be a destroyed Qt
     // object; .close without try would abort the rebuild — same as tuner)
     if(~mixerWin.notNil) { try { ~mixerWin.close } };
     // reset all slots so nothing touches old widgets during the rebuild gap
-    ~mixerWin     = nil;
-    ~mixerGuiSync = nil;
-    ~mixerEz      = ();
-    ~mixerSoloBtn = ();
-    ~mixerRecBtn  = nil;
+    ~mixerWin        = nil;
+    ~mixerGuiSync    = nil;
+    ~mixerEz         = ();
+    ~mixerSoloBtn    = ();
+    ~mixerRecBtn     = nil;
+    ~mixerGridTxt    = nil;
+    ~mixerGridStatus = nil;
+    ~mixerGridEz     = nil;
 
     win = Window(
         "UNGRUND · mixer — живое сведение слоёв (App)",
@@ -319,6 +338,58 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .font_(Font("Menlo", 11))
         .action_({ win.close });
 
+    // --- структурная сетка (панель справа) ---
+    // панель nil-безопасна: без App/0_grid.scd кнопка выключена — тем же
+    // приёмом, что hasSpec у кнопки tuner
+    StaticText(~mixerWin, Rect(gx, 50, gw, 16))
+        .string_("структурная сетка — Ф/связи (канон structure-grid)")
+        .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
+
+    gridTv = TextView(~mixerWin, Rect(gx, y0, gw, gh))
+        .font_(Font("Menlo", 11))
+        .editable_(false)
+        .background_(Color.gray(0.08))
+        .stringColor_(Color.gray(0.88));
+    ~mixerGridTxt = gridTv;
+
+    gridEz = EZSlider(~mixerWin, Rect(gx, h - 96, gw, 24), "сложность",
+        ControlSpec(0, 1, \lin, 0, ~gridComplexity ? 0.5),
+        // слайдер только пишет ~gridComplexity: перерисовывать поле на каждый
+        // пиксель движения незачем, структуру строит кнопка
+        { |ez| ~gridComplexity = ez.value }, ~gridComplexity ? 0.5);
+    gridEz.round_(0.01);
+    ~mixerGridEz = gridEz;
+
+    gridStatus = StaticText(~mixerWin, Rect(gx, h - 36, gw, 20))
+        .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
+    ~mixerGridStatus = gridStatus;
+
+    gridBtn = Button(~mixerWin, Rect(gx, h - 66, 150, 24))
+        .states_([["сгенерировать", Color.white, Color(0.18, 0.34, 0.44)]])
+        .font_(Font("Menlo", 11, true))
+        .action_({
+            var g = ~gridGenerate.(~gridComplexity ? 0.5);
+            if(g.isNil) {
+                gridStatus.string_(
+                    "отказ: не разложилось за " ++ ~cfg_grid.graphTries ++ " графов"
+                );
+            } {
+                gridTv.string_(g[\text]);
+                gridStatus.string_(
+                    "Ф: " ++ g[\nodes] ++ " · поле: " ++ g[\cols] ++ "×" ++ g[\rows]
+                );
+            };
+        });
+
+    if(hasGrid) {
+        gridStatus.string_("сложность -> кнопка; поле выделяется и копируется");
+    } {
+        gridBtn.states_([["сетка —", Color.gray(0.4), Color.gray(0.18)]])
+            .enabled_(false);
+        gridEz.enabled_(false);
+        gridStatus.string_("модуль сетки не загружен (App/0_grid.scd)");
+    };
+
     // GUI sync hook <- ~mixSet/~masterSet
     ~mixerGuiSync = { |layer, which, v|
         {
@@ -337,11 +408,14 @@ Ndef(\master).play(out: 0, numChannels: 2);
     // would wipe slots registered by the NEW one (same trap as the tuner)
     win.onClose_({
         if(~mixerWin.isNil or: { ~mixerWin === win }) {
-            ~mixerGuiSync = nil;
-            ~mixerEz      = ();
-            ~mixerSoloBtn = ();
-            ~mixerRecBtn  = nil;
-            ~mixerWin     = nil;
+            ~mixerGuiSync    = nil;
+            ~mixerEz         = ();
+            ~mixerSoloBtn    = ();
+            ~mixerRecBtn     = nil;
+            ~mixerGridTxt    = nil;
+            ~mixerGridStatus = nil;
+            ~mixerGridEz     = nil;
+            ~mixerWin        = nil;
         };
     });
     win.front;

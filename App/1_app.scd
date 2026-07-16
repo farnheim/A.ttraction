@@ -54,6 +54,9 @@ s.waitForBoot({
 
     // 0a. tuning infrastructure first: synths/*.scd register specs in ~ungSpecs
     (~appDir +/+ "0_lib.scd").load;
+    // structure-grid generator: pure logic, no server; the mixer window (step 4)
+    // reads ~gridGenerate, so it must exist before the mixer is loaded
+    (~appDir +/+ "0_grid.scd").load;
 
     // 0b. clean start
     ~appCleanup.value(false);
