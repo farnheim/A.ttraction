@@ -9,7 +9,7 @@
 ~cfg_effects = (
     // --- tape reverb (§K.1) ---
     rev_wet:      0.85,    // return level
-    rev_decay:    3.0,     // CombC decay, s (2–4)
+    rev_decay:    0.95,    // CombC decay, s (§K.1 amended 2026-07-16: 0.9–4)
     rev_rolloff:  3500,    // tail LPF (tape rolloff), Hz
 
     // --- ping-pong delay (§K.2) ---
@@ -23,7 +23,7 @@
 
 // ===== LOGIC — effect proxies ========================================
 // --- K.1  tape reverb -------------------------------------------------
-Ndef(\tape_reverb, { |wet = 0.85, decay = 3.0, rolloff = 3500|
+Ndef(\tape_reverb, { |wet = 0.85, decay = 0.95, rolloff = 3500|
     var sig, ratesL, ratesR, diffL, diffR, combL, combR, roll;
     sig    = InFeedback.ar(~busFxSend.index, 2);
     sig    = DelayC.ar(sig, 0.05, 0.012);
@@ -33,8 +33,11 @@ Ndef(\tape_reverb, { |wet = 0.85, decay = 3.0, rolloff = 3500|
     diffR  = sig[1];
     ratesL.do { |r| diffL = AllpassC.ar(diffL, 0.08, LFNoise2.kr(r).range(0.010, 0.070), 1.2) };
     ratesR.do { |r| diffR = AllpassC.ar(diffR, 0.08, LFNoise2.kr(r).range(0.010, 0.070), 1.2) };
-    combL  = CombC.ar(diffL, 0.5, 0.087 + LFNoise2.kr(0.21).range(-0.002, 0.002), decay.clip(0.5, 6));
-    combR  = CombC.ar(diffR, 0.5, 0.113 + LFNoise2.kr(0.17).range(-0.002, 0.002), decay.clip(0.5, 6));
+    // §K.1 decay range 0.9–4 s (floor extended from 2 s, 2026-07-16: the
+    // send is the system's ONLY mechanism for space — no class may bake a
+    // tail in — so any tail a piece needs must be reachable here)
+    combL  = CombC.ar(diffL, 0.5, 0.087 + LFNoise2.kr(0.21).range(-0.002, 0.002), decay.clip(0.9, 4.0));
+    combR  = CombC.ar(diffR, 0.5, 0.113 + LFNoise2.kr(0.17).range(-0.002, 0.002), decay.clip(0.9, 4.0));
     roll   = (rolloff.lag(0.3) + LFNoise2.kr(0.09).range(-300, 300)).clip(500, 12000);
     sig    = LPF.ar([combL, combR], roll);
     sig    = LeakDC.ar(sig);

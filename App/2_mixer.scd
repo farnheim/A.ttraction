@@ -16,9 +16,9 @@
         //            vol    send
         alpha:   ( vol: 0.85, send: 0.55 ),
         beta:    ( vol: 0.00, send: 0.00 ),          // stub — off
-        gamma:   ( vol: 0.00, send: 0.00 ),          // stub — off
+        gamma:   ( vol: 0.80, send: 0.35 ),          // §K.1 flockung; the send is the drips' ONLY space
         delta:   ( vol: 0.80, send: 0.45 ),
-        epsilon: ( vol: 0.00, send: 0.00 ),          // stub — off
+        epsilon: ( vol: 0.75, send: 0.15 ),          // §K.1: self-diffuse — low send
         zeta:    ( vol: 0.75, send: 0.15 ),
         eta:     ( vol: 0.00, send: 0.00 ),          // silence — no level
         theta:   ( vol: 0.00, send: 0.00 )           // stub — off
