@@ -1,32 +1,34 @@
-// App/2_mixer.scd — UNGRUND · MIXER: per-layer vol/send routing, fx-send
-// aggregator, master (LeakDC + Limiter), solo, recorder, mixer window.
+// App/2_mixer.scd — UNGRUND · MIXER: per-layer vol + two fx sends (reverb
+// §K.1 / delay §K.2), one aggregator per send bus, master (LeakDC +
+// Limiter), solo, recorder, mixer window.
 // Routes only layers listed in ~activeLayers (set by 1_app.scd).
 // Signal flow: docs/architecture/app/README.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// Level table, key = layer name. vol = level into master, send = fx send
-// (§K.1/K.2 recommended levels as a start). Entries for unloaded layers
-// are simply ignored.
+// Level table, key = layer name. vol = level into master; sendRev = tape
+// reverb send (§K.1 table), sendDly = ping-pong delay send (§K.2 table).
+// The two sends are independent by canon — see the aggregators below.
+// Entries for unloaded layers are simply ignored.
 ~cfg_mixer = (
     master:  0.9,
 
     levels: (
-        //            vol    send
-        alpha:   ( vol: 0.85, send: 0.55 ),
-        beta:    ( vol: 0.00, send: 0.00 ),          // stub — off
-        gamma:   ( vol: 0.80, send: 0.35 ),          // §K.1 flockung; the send is the drips' ONLY space
-        delta:   ( vol: 0.80, send: 0.45 ),
-        epsilon: ( vol: 0.75, send: 0.15 ),          // §K.1: self-diffuse — low send
-        zeta:    ( vol: 0.75, send: 0.15 ),
-        eta:     ( vol: 0.00, send: 0.00 ),          // silence — no level
-        theta:   ( vol: 0.00, send: 0.00 )           // stub — off
+        //            vol    sendRev (§K.1)  sendDly (§K.2)
+        alpha:   ( vol: 0.85, sendRev: 0.55, sendDly: 0.20 ),
+        beta:    ( vol: 0.00, sendRev: 0.00, sendDly: 0.00 ),   // stub — off
+        gamma:   ( vol: 0.80, sendRev: 0.35, sendDly: 0.20 ),   // §K.1 flockung; the send is the drips' ONLY space
+        delta:   ( vol: 0.80, sendRev: 0.45, sendDly: 0.00 ),   // §K.2: binde is not in the delay table
+        epsilon: ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.1: self-diffuse — low send; §K.2: no delay
+        zeta:    ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.2: kratzer is not in the delay table
+        eta:     ( vol: 0.00, sendRev: 0.00, sendDly: 0.00 ),   // silence — no level
+        theta:   ( vol: 0.00, sendRev: 0.00, sendDly: 0.00 )    // stub — off
     )
 );
 
 // fallback levels for a layer missing from the table (new synths/*.scd)
-~mixerDefaultLevel = ( vol: 0.7, send: 0.0 );
+~mixerDefaultLevel = ( vol: 0.7, sendRev: 0.0, sendDly: 0.0 );
 
 // master-sum recorder: file format and dir (relative to project root)
 ~cfg_recorder = ( header: "wav", sample: "int24", dir: "recordings" );
@@ -56,21 +58,36 @@
     Ndef(routerKey).play(out: ~busDry.index, numChannels: 2);
 };
 
-// send aggregator: sum of all layers × send -> ~busFxSend.
-// Sole writer of the send bus; ReplaceOut => no accumulation across blocks.
-Ndef(\fxsend, {
-    var sends = ~mixerLayers.collect { |layer|
+// send aggregators: ONE PER EFFECT BUS, so the §K.1 and §K.2 send tables stay
+// independent — a layer may go to the reverb and NOT to the delay, which a
+// single shared send bus cannot express (both effects would read one sum).
+// Each aggregator is the SOLE writer of its bus; ReplaceOut => no
+// accumulation across blocks.
+// both aggregators expose the SAME param names (send_<layer>) — the Ndef they
+// live on is what distinguishes the §K.1 send from the §K.2 send
+~mixerSendMix = {
+    Mix(~mixerLayers.collect { |layer|
         var amt = NamedControl.kr(("send_" ++ layer).asSymbol, 0);
         Ndef(layer.asSymbol).ar(2) * amt.lag(0.1);
-    };
-    ReplaceOut.ar(~busFxSend.index, Mix(sends));
-});
-~mixerLayers.do { |layer|
-    Ndef(\fxsend).set(("send_" ++ layer).asSymbol, ~cfg_mixer.levels[layer].send);
+    })
 };
-Ndef(\fxsend).fadeTime = 1;
-// NO .play: the proxy body already writes via ReplaceOut; a monitor would
-// add a SECOND writer mixing the empty proxy bus on top of ReplaceOut
+
+Ndef(\fxsendRev, { ReplaceOut.ar(~busFxSendRev.index, ~mixerSendMix.value) });
+Ndef(\fxsendDly, { ReplaceOut.ar(~busFxSendDly.index, ~mixerSendMix.value) });
+
+// which -> aggregator Ndef key (~mixSet/~mixSolo/~mixUnsolo lookup)
+~mixerSendAgg = ( sendRev: \fxsendRev, sendDly: \fxsendDly );
+
+~mixerSendAgg.keysValuesDo { |which, aggKey|
+    ~mixerLayers.do { |layer|
+        Ndef(aggKey).set(
+            ("send_" ++ layer).asSymbol, ~cfg_mixer.levels[layer][which]
+        );
+    };
+    Ndef(aggKey).fadeTime = 1;
+    // NO .play: the proxy body already writes via ReplaceOut; a monitor would
+    // add a SECOND writer mixing the empty proxy bus on top of ReplaceOut
+};
 
 // master: (dry + fx return), LeakDC, Limiter
 Ndef(\master, { |amp = 0.9|
@@ -93,11 +110,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerGuiSync = ~mixerGuiSync;
 
 // live setters for editing / MIDI / sequencer:
-// ~mixSet.(\alpha, \vol, 0.5) / ~mixSet.(\theta, \send, 0.8) / ~masterSet.(v)
+// ~mixSet.(\alpha, \vol, 0.5) / ~mixSet.(\alpha, \sendRev, 0.8)
+// / ~mixSet.(\alpha, \sendDly, 0.2) / ~masterSet.(v)
 ~mixSet = { |layer, which = \vol, value|
+    var agg = ~mixerSendAgg[which];
     if(~cfg_mixer.levels[layer].isNil) { ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy };
-    if(which == \send) {
-        Ndef(\fxsend).set(("send_" ++ layer).asSymbol, value);
+    if(agg.notNil) {
+        Ndef(agg).set(("send_" ++ layer).asSymbol, value);
     } {
         Ndef(("mix_" ++ layer).asSymbol).set(\vol, value);
     };
@@ -116,7 +135,9 @@ Ndef(\master).play(out: 0, numChannels: 2);
         var on = (l == layer);
         var lv = ~cfg_mixer.levels[l];
         Ndef(("mix_" ++ l).asSymbol).set(\vol, on.if({ lv.vol }, 0));
-        Ndef(\fxsend).set(("send_" ++ l).asSymbol, on.if({ lv.send }, 0));
+        ~mixerSendAgg.keysValuesDo { |which, agg|
+            Ndef(agg).set(("send_" ++ l).asSymbol, on.if({ lv[which] }, 0));
+        };
     };
     ~mixSoloCur = layer;
     if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
@@ -125,7 +146,9 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerLayers.do { |l|
         var lv = ~cfg_mixer.levels[l];
         Ndef(("mix_" ++ l).asSymbol).set(\vol, lv.vol);
-        Ndef(\fxsend).set(("send_" ++ l).asSymbol, lv.send);
+        ~mixerSendAgg.keysValuesDo { |which, agg|
+            Ndef(agg).set(("send_" ++ l).asSymbol, lv[which]);
+        };
     };
     ~mixSoloCur = nil;
     if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
@@ -170,7 +193,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
 // ===== GUI — mixer window ============================================
 // widget registries (idempotent on file reload)
-~mixerEz      = ();    // layer -> ( \vol: EZSlider, \send: EZSlider ); \master -> EZSlider
+~mixerEz      = ();    // layer -> ( \vol:, \sendRev:, \sendDly: EZSlider ); \master -> EZSlider
 ~mixerSoloBtn = ();    // layer -> Button (solo)
 ~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
 
@@ -187,7 +210,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
     by = y0 + (layers.size * rowH) + 14;
-    w  = 812; h = by + 40 + 40;
+    w  = 954; h = by + 40 + 40;
 
     // close previous window best-effort (reference may be a destroyed Qt
     // object; .close without try would abort the rebuild — same as tuner)
@@ -206,12 +229,14 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerWin = win;
 
     StaticText(~mixerWin, Rect(18, 10, w - 36, 22))
-        .string_("сведение слоёв — vol в мастер · send в эффекты · solo · tuner (живой Ndef)")
+        .string_("сведение слоёв — vol в мастер · rev/dly посылы в эффекты · solo · tuner (живой Ndef)")
         .stringColor_(Color.gray(0.92)).font_(Font("Menlo", 13, true));
 
-    StaticText(~mixerWin, Rect(112, 50, 250, 16)).string_("vol -> master")
+    StaticText(~mixerWin, Rect(112, 50, 210, 16)).string_("vol -> master")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
-    StaticText(~mixerWin, Rect(372, 50, 250, 16)).string_("send -> fx")
+    StaticText(~mixerWin, Rect(332, 50, 210, 16)).string_("rev -> tape reverb (§K.1)")
+        .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
+    StaticText(~mixerWin, Rect(552, 50, 210, 16)).string_("dly -> ping-pong (§K.2)")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
 
     // one row per layer
@@ -219,23 +244,28 @@ Ndef(\master).play(out: 0, numChannels: 2);
         var y = y0 + (i * rowH);
         var lv = ~cfg_mixer.levels[layer] ? ~mixerDefaultLevel;
         var hasSpec = ~ungSpecOf.notNil and: { ~ungSpecOf.(layer).notNil };
-        var ezV, ezS, soloBtn, tunBtn;
+        var ezV, ezR, ezD, soloBtn, tunBtn;
 
         StaticText(~mixerWin, Rect(16, y, 92, 24))
             .string_(layer.asString)
             .stringColor_(Color.gray(0.9)).font_(Font("Menlo", 12, true));
 
-        ezV = EZSlider(~mixerWin, Rect(112, y, 250, 24), "vol",
+        ezV = EZSlider(~mixerWin, Rect(112, y, 210, 24), "vol",
             ControlSpec(0, 1, \lin, 0, lv.vol),
             { |ez| ~mixSet.(layer, \vol, ez.value) }, lv.vol);
         ezV.round_(0.001);
 
-        ezS = EZSlider(~mixerWin, Rect(372, y, 250, 24), "send",
-            ControlSpec(0, 1, \lin, 0, lv.send),
-            { |ez| ~mixSet.(layer, \send, ez.value) }, lv.send);
-        ezS.round_(0.001);
+        ezR = EZSlider(~mixerWin, Rect(332, y, 210, 24), "rev",
+            ControlSpec(0, 1, \lin, 0, lv.sendRev),
+            { |ez| ~mixSet.(layer, \sendRev, ez.value) }, lv.sendRev);
+        ezR.round_(0.001);
 
-        soloBtn = Button(~mixerWin, Rect(632, y, 56, 24))
+        ezD = EZSlider(~mixerWin, Rect(552, y, 210, 24), "dly",
+            ControlSpec(0, 1, \lin, 0, lv.sendDly),
+            { |ez| ~mixSet.(layer, \sendDly, ez.value) }, lv.sendDly);
+        ezD.round_(0.001);
+
+        soloBtn = Button(~mixerWin, Rect(772, y, 56, 24))
             .states_([
                 ["solo", Color.gray(0.9),  Color.gray(0.26)],
                 ["SOLO", Color.white,      Color(0.55, 0.42, 0.16)]
@@ -244,7 +274,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
             .action_({ ~mixSoloToggle.(layer) });
         soloBtn.value_(if(~mixSoloCur == layer) { 1 } { 0 });
 
-        tunBtn = Button(~mixerWin, Rect(694, y, 100, 24))
+        tunBtn = Button(~mixerWin, Rect(836, y, 100, 24))
             .states_([["tuner", Color.white, Color(0.18, 0.34, 0.44)]])
             .font_(Font("Menlo", 11, true))
             .action_({ ~openTuner.(layer) });
@@ -254,7 +284,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
                 .enabled_(false);
         };
 
-        ~mixerEz[layer]      = ( vol: ezV, send: ezS );
+        ~mixerEz[layer]      = ( vol: ezV, sendRev: ezR, sendDly: ezD );
         ~mixerSoloBtn[layer] = soloBtn;
     };
     layers.do { |layer, i| mkRow.(layer, i) };
@@ -262,20 +292,20 @@ Ndef(\master).play(out: 0, numChannels: 2);
     // --- master row + buttons ---
     StaticText(~mixerWin, Rect(16, by, 92, 24))
         .string_("master").stringColor_(Color.white).font_(Font("Menlo", 12, true));
-    masterEz = EZSlider(~mixerWin, Rect(112, by, 250, 24), "amp",
+    masterEz = EZSlider(~mixerWin, Rect(112, by, 210, 24), "amp",
         ControlSpec(0, 1, \lin, 0, ~cfg_mixer.master),
         { |ez| ~masterSet.(ez.value) }, ~cfg_mixer.master);
     masterEz.round_(0.001);
     ~mixerEz[\master] = masterEz;
 
-    Button(~mixerWin, Rect(372, by, 130, 24))
+    Button(~mixerWin, Rect(332, by, 130, 24))
         .states_([["all / unsolo", Color.gray(0.95), Color.gray(0.28)]])
         .font_(Font("Menlo", 11, true))
         .action_({ ~mixUnsolo.value });
 
     // record button state lives in ~mixRecOn, so it stays correct after
     // close/reopen while recording
-    recBtn = Button(~mixerWin, Rect(512, by, 110, 24))
+    recBtn = Button(~mixerWin, Rect(472, by, 110, 24))
         .states_([
             ["● rec",  Color.gray(0.9), Color.gray(0.26)],
             ["■ REC",  Color.white,     Color(0.62, 0.14, 0.14)]
@@ -284,7 +314,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .action_({ ~mixRecToggle.value });
     recBtn.value_(if(~mixRecOn) { 1 } { 0 });
     ~mixerRecBtn = recBtn;
-    Button(~mixerWin, Rect(694, by, 100, 24))
+    Button(~mixerWin, Rect(836, by, 100, 24))
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
         .action_({ win.close });

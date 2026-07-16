@@ -1,6 +1,7 @@
 // App/6_effects.scd — UNGRUND · EFFECTS (§K reference_v2): \tape_reverb
-// (§K.1) and \ping_delay (§K.2) read ~busFxSend in parallel and write
-// their returns to ~busFxReturn (read by the master in 2_mixer.scd).
+// (§K.1) reads ~busFxSendRev, \ping_delay (§K.2) reads ~busFxSendDly —
+// separate buses, so the §K.1/§K.2 send tables stay independent. Both
+// write their returns to ~busFxReturn (read by the master in 2_mixer.scd).
 // Buses are created by 1_app.scd.
 
 
@@ -25,7 +26,7 @@
 // --- K.1  tape reverb -------------------------------------------------
 Ndef(\tape_reverb, { |wet = 0.85, decay = 0.95, rolloff = 3500|
     var sig, ratesL, ratesR, diffL, diffR, combL, combR, roll;
-    sig    = InFeedback.ar(~busFxSend.index, 2);
+    sig    = InFeedback.ar(~busFxSendRev.index, 2);
     sig    = DelayC.ar(sig, 0.05, 0.012);
     ratesL = [0.17, 0.24, 0.19, 0.31];
     ratesR = [0.21, 0.16, 0.28, 0.23];
@@ -47,7 +48,7 @@ Ndef(\tape_reverb, { |wet = 0.85, decay = 0.95, rolloff = 3500|
 // --- K.2  ping-pong delay ---------------------------------------------
 Ndef(\ping_delay, { |wet = 0.5, timeL = 0.37, timeR = 0.53, fb = 0.55, lpf = 1800|
     var in, dL, dR, sig;
-    in = InFeedback.ar(~busFxSend.index, 2);
+    in = InFeedback.ar(~busFxSendDly.index, 2);
     in = Mix(in) * 0.5;                              // mono into the ping-pong
     dL = LocalIn.ar(2);
     // L gets input + decayed right tail; R gets the left tail
