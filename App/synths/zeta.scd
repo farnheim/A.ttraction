@@ -3,7 +3,7 @@
 // continuous coloured bed (hump ~1.2 kHz, hard ceiling ~7 kHz, slow wow
 // drift) + impulsive crackle (dense frying ticks, rare pops with a low
 // resonant "thock" body). High crest factor; keep reverb send LOW.
-// Tuning via 0_lib.scd; full reference: docs/zeta_texture_reference.md.
+// Tuning via 0_lib.scd; full reference: docs/features/zeta/texture-reference.md.
 
 
 // ===== CONFIG — edit here ============================================

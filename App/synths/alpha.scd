@@ -3,7 +3,7 @@
 // Tests/test_monade.scd). Tones in MIDI notes (.midicps inside).
 // Tuning via 0_lib.scd: ~openTuner/~rndFreq/~rndParams/~save~loadPreset.
 // ~spec_alpha is the single source of truth (sliders/randomizers/presets);
-// layer contract: docs/layer_contract.md.
+// layer contract: docs/architecture/app/layer-contract.md.
 
 
 // ===== CONFIG — edit here ============================================

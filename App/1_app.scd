@@ -1,7 +1,7 @@
 // App/1_app.scd — UNGRUND · APP: single entry point (boot, buses, module
 // loading by ~cfg_app flags, auto-presets, master cleanup ~appCleanup).
 // Run the whole block; stop with Cmd-., full reset: ~appCleanup.value(true).
-// Load order, signal flow, conventions: docs/architecture.md.
+// Load order, signal flow, conventions: docs/architecture/app/README.md.
 
 
 // ===== CONFIG — edit here ============================================

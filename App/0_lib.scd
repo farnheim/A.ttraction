@@ -2,7 +2,7 @@
 // Spec registry ~ungSpecs, live values ~ungVals, ~setParam, randomizers,
 // presets (save/load/list), per-layer tuner GUI (~openTuner).
 // Each synths/<layer>.scd registers its spec here; load this file FIRST.
-// Spec format and details: docs/architecture.md.
+// Spec format and details: docs/architecture/app/README.md.
 
 (
 // ----- registries (idempotent: reloading does not reset) -------------

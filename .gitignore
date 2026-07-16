@@ -1,5 +1,8 @@
-# Ignore everything except App/ and docs/
+# Allowlist: track only App/ and README.md (plus this file)
 /*
 !/.gitignore
 !/App/
-!/docs/
+!/README.md
+
+# Junk
+.DS_Store

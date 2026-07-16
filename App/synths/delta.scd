@@ -1,9 +1,9 @@
 // App/synths/delta.scd — UNGRUND class 4/8 `delta` (formant-cluster wind /
-// metal plates). REAL LAYER (rewritten from stub per docs/task.md,
+// metal plates). REAL LAYER (rewritten from stub per docs/features/delta/dsp-spec.md,
 // 2026-06-10). Premise §C.4 `binde`, EXTENDED: 5 wind streams, each
 // exciting a metal plate (Ringz bank) plus a 3-formant vowel BPF bank;
 // tones from the 3-limit 94 Hz lattice. §C.4 bans kept: no central-pitch
-// glide, band-identity modulation ≤ 0.25 Hz (supersede flag in docs/task.md).
+// glide, band-identity modulation ≤ 0.25 Hz (supersede flag in docs/features/delta/dsp-spec.md).
 // Tuning via 0_lib.scd; ~spec_delta is the single source of truth.
 
 

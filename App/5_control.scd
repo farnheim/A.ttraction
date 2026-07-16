@@ -1,7 +1,7 @@
 // App/5_control.scd — UNGRUND · CONTROL: MIDI CC -> target mapping table
 // plus one generic MIDIdef(\ung_cc) (fixed key: re-running replaces, never
 // stacks). Adding a controller = adding a line to ~cfg_ctrl.map.
-// Load after mixer/lfo (docs/architecture.md).
+// Load after mixer/lfo (docs/architecture/app/README.md).
 
 
 // ===== CONFIG — edit here ============================================

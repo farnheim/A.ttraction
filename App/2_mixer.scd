@@ -1,7 +1,7 @@
 // App/2_mixer.scd — UNGRUND · MIXER: per-layer vol/send routing, fx-send
 // aggregator, master (LeakDC + Limiter), solo, recorder, mixer window.
 // Routes only layers listed in ~activeLayers (set by 1_app.scd).
-// Signal flow: docs/architecture.md.
+// Signal flow: docs/architecture/app/README.md.
 
 
 // ===== CONFIG — edit here ============================================

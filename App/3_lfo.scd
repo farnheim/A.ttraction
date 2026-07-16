@@ -1,7 +1,7 @@
 // App/3_lfo.scd — UNGRUND · LFO: central registry of all parameter
 // automation. One kr-Ndef per line in ~cfg_lfo.lines, routed via
 // Ndef(target).map(param, ...). Adding automation = adding a line.
-// Load after mixer, before sequencer (docs/architecture.md).
+// Load after mixer, before sequencer (docs/architecture/app/README.md).
 
 
 // ===== CONFIG — edit here ============================================
