@@ -24,6 +24,14 @@
 // ===== LOGIC — boot, load, wire, start ===============================
 ~appDir = thisProcess.nowExecutingPath.dirname;
 
+// scsynth's default of 64 interconnect buffers is not enough for the largest
+// layer graph: theta's 8-voice aggregate needs ~130–256 (measured — it fails
+// to load at 128 with "exceeded number of interconnect buffers", and the
+// server then reports "SynthDef not found" while the app otherwise starts
+// normally, i.e. the layer goes SILENT rather than erroring visibly).
+// Costs ~131 KB. Takes effect at BOOT only — reboot the server after changing.
+s.options.numWireBufs = 512;
+
 // master cleanup (idempotent)
 ~appCleanup = { |verbose = true|
     if(~mixRecOn == true) { s.stopRecording; ~mixRecOn = false };
