@@ -12,16 +12,15 @@
     // gone (layers muted), set (optional [\layer, \param, value] triples).
     // Layers not mentioned keep their previous state.
     timeline: [
-        ( t: 0,   active: [\alpha],                 gone: [\beta, \gamma, \delta, \epsilon, \zeta, \theta],
+        ( t: 0,   active: [\alpha],                 gone: [\delta, \epsilon, \zeta, \theta],
           set: [[\alpha, \amp, 0.22]] ),
         ( t: 4,   active: [\theta],                 gone: [] ),
-        ( t: 20,  active: [\beta],                   gone: [] ),
         ( t: 36,  active: [\delta],                  gone: [],
           set: [[\delta, \freq, 188]] ),
         ( t: 52,  active: [\epsilon],               gone: [\delta] ),
-        ( t: 68,  active: [],                         gone: [\epsilon, \beta, \theta] ),
-        ( t: 72,  active: [\eta],                 gone: [\alpha] ),
-        ( t: 80,  active: [],                         gone: [\eta], finish: true )
+        ( t: 68,  active: [],                         gone: [\epsilon, \theta] ),
+        ( t: 72,  active: [],                         gone: [\alpha] ),
+        ( t: 80,  active: [],                         gone: [], finish: true )
     ]
 );
 

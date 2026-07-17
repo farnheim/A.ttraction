@@ -1,6 +1,6 @@
 // App/2_mixer.scd — UNGRUND · MIXER: per-layer vol + two fx sends (reverb
 // §K.1 / delay §K.2), one aggregator per send bus, master (LeakDC +
-// Limiter), solo, recorder, mixer window.
+// Limiter), solo, mute, recorder, mixer window.
 // Routes only layers listed in ~activeLayers (set by 1_app.scd).
 // Signal flow: docs/architecture/app/README.md.
 
@@ -17,13 +17,10 @@
     levels: (
         //            vol    sendRev (§K.1)  sendDly (§K.2)
         alpha:   ( vol: 0.85, sendRev: 0.55, sendDly: 0.20 ),
-        beta:    ( vol: 0.00, sendRev: 0.00, sendDly: 0.00 ),   // stub — off
-        gamma:   ( vol: 0.80, sendRev: 0.35, sendDly: 0.20 ),   // §K.1 flockung; the send is the drips' ONLY space
         delta:   ( vol: 0.80, sendRev: 0.45, sendDly: 0.00 ),   // §K.2: binde is not in the delay table
         epsilon: ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.1: self-diffuse — low send; §K.2: no delay
         zeta:    ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.2: kratzer is not in the delay table
-        eta:     ( vol: 0.00, sendRev: 0.00, sendDly: 0.00 ),   // silence — no level
-        theta:   ( vol: 0.80, sendRev: 0.18, sendDly: 0.00 )    // §K.1 schotter; §K.2 zero is a FORBIDDEN move, not a preference: the delay's 0.37/0.53 s taps put phantom events off the grid
+        theta:   ( vol: 0.80, sendRev: 0.16, sendDly: 0.00 )    // §K.1 splitter; §K.2 zero is a FORBIDDEN move, not a preference: a feedback echo replenishes at constant density exactly what the class's law is exhausting
     )
 );
 
@@ -35,7 +32,7 @@
 
 
 // ===== LOGIC — routers + master + GUI ================================
-~mixerLayers = ~activeLayers ? [\alpha, \beta, \gamma, \delta, \epsilon, \zeta, \eta, \theta];
+~mixerLayers = ~activeLayers ? [\alpha, \delta, \epsilon, \zeta, \theta];
 
 // ensure a level entry for every active layer
 ~mixerLayers.do { |layer|
@@ -115,12 +112,16 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixSet = { |layer, which = \vol, value|
     var agg = ~mixerSendAgg[which];
     if(~cfg_mixer.levels[layer].isNil) { ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy };
-    if(agg.notNil) {
-        Ndef(agg).set(("send_" ++ layer).asSymbol, value);
-    } {
-        Ndef(("mix_" ++ layer).asSymbol).set(\vol, value);
-    };
     ~cfg_mixer.levels[layer][which] = value;
+    // a muted / solo-hidden layer keeps its zero at the router; only its stored
+    // level moves, so unmuting restores the value the slider now shows
+    if(~mixLayerAudible.(layer)) {
+        if(agg.notNil) {
+            Ndef(agg).set(("send_" ++ layer).asSymbol, value);
+        } {
+            Ndef(("mix_" ++ layer).asSymbol).set(\vol, value);
+        };
+    };
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(layer, which, value) };
 };
 ~masterSet = { |value|
@@ -128,35 +129,49 @@ Ndef(\master).play(out: 0, numChannels: 2);
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(\master, \amp, value) };
 };
 
-// solo / unsolo: levels are read from ~cfg_mixer (never overwritten with
-// zeros), so unsolo restores the original mix
-~mixSolo = { |layer|
+// mute + solo compose through ONE apply function: a layer is audible unless it
+// is muted, or a solo is active and it is not the soloed one. Levels are read
+// from ~cfg_mixer (never overwritten with zeros), so clearing mute/solo
+// restores the original mix. ~mixMuted survives a mixer-file reload, and
+// ~mixApplyLevels is re-run at load (below) so the rebuilt routers honour it.
+~mixMuted = ~mixMuted ? ();   // layer -> true when muted; survives reopen/reload
+~mixLayerAudible = { |layer|
+    (~mixMuted[layer] != true) and: { ~mixSoloCur.isNil or: { ~mixSoloCur == layer } }
+};
+~mixApplyLevels = {
     ~mixerLayers.do { |l|
-        var on = (l == layer);
+        var on = ~mixLayerAudible.(l);
         var lv = ~cfg_mixer.levels[l];
         Ndef(("mix_" ++ l).asSymbol).set(\vol, on.if({ lv.vol }, 0));
         ~mixerSendAgg.keysValuesDo { |which, agg|
             Ndef(agg).set(("send_" ++ l).asSymbol, on.if({ lv[which] }, 0));
         };
     };
-    ~mixSoloCur = layer;
+};
+
+~mixSolo = { |layer|
+    ~mixSoloCur = layer; ~mixApplyLevels.value;
     if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
 };
 ~mixUnsolo = {
-    ~mixerLayers.do { |l|
-        var lv = ~cfg_mixer.levels[l];
-        Ndef(("mix_" ++ l).asSymbol).set(\vol, lv.vol);
-        ~mixerSendAgg.keysValuesDo { |which, agg|
-            Ndef(agg).set(("send_" ++ l).asSymbol, lv[which]);
-        };
-    };
-    ~mixSoloCur = nil;
+    ~mixSoloCur = nil; ~mixApplyLevels.value;
     if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
 };
 // pressing solo on the same layer again removes solo
 ~mixSoloToggle = { |layer|
     if(~mixSoloCur == layer) { ~mixUnsolo.value } { ~mixSolo.(layer) };
 };
+
+// mute is per-layer and independent — many layers may be muted at once, and a
+// mute stands whether or not a solo is active
+~mixMuteToggle = { |layer|
+    ~mixMuted[layer] = (~mixMuted[layer] != true);
+    ~mixApplyLevels.value;
+    if(~mixerRefreshMute.notNil) { ~mixerRefreshMute.value };
+};
+
+// restore persisted mute/solo onto the freshly (re)built routers/aggregators
+~mixApplyLevels.value;
 
 // recorder: records hardware bus 0 — the Recorder node sits at the TAIL of
 // the root group, i.e. AFTER Ndef(\master), so the file gets exactly what
@@ -195,6 +210,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 // widget registries (idempotent on file reload)
 ~mixerEz      = ();    // layer -> ( \vol:, \sendRev:, \sendDly: EZSlider ); \master -> EZSlider
 ~mixerSoloBtn = ();    // layer -> Button (solo)
+~mixerMuteBtn = ();    // layer -> Button (mute)
 ~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
 
 // structure-grid panel slots (0_grid.scd may be absent — panel is nil-safe)
@@ -210,6 +226,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
     } }.defer;
 };
 
+// update all mute-button visuals from ~mixMuted
+~mixerRefreshMute = {
+    { ~mixerMuteBtn.keysValuesDo { |layer, btn|
+        if(btn.notNil) { btn.value_(if(~mixMuted[layer.asSymbol] == true) { 1 } { 0 }) };
+    } }.defer;
+};
+
 ~ungBuildMixer = {
     var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
     var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
@@ -222,7 +245,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     // gw под 64 колонки канона: Menlo 11 ≈ 6.63 px/символ -> 424 px + рамка
     // TextView + вертикальный скроллбар. QTextView не умеет отключать перенос,
     // и на узком поле Qt переносит хвост строки — псевдографика рассыпается
-    gx = 954; gw = 480;
+    gx = 1002; gw = 480;
     w  = gx + gw + 16;
     h  = (by + 40 + 40).max(620);
     gh = h - y0 - 100;
@@ -236,6 +259,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerGuiSync    = nil;
     ~mixerEz         = ();
     ~mixerSoloBtn    = ();
+    ~mixerMuteBtn    = ();
     ~mixerRecBtn     = nil;
     ~mixerGridTxt    = nil;
     ~mixerGridStatus = nil;
@@ -248,7 +272,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerWin = win;
 
     StaticText(~mixerWin, Rect(18, 10, w - 36, 22))
-        .string_("сведение слоёв — vol в мастер · rev/dly посылы в эффекты · solo · tuner (живой Ndef)")
+        .string_("сведение слоёв — vol в мастер · rev/dly посылы в эффекты · mute/solo · tuner (живой Ndef)")
         .stringColor_(Color.gray(0.92)).font_(Font("Menlo", 13, true));
 
     StaticText(~mixerWin, Rect(112, 50, 210, 16)).string_("vol -> master")
@@ -263,7 +287,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         var y = y0 + (i * rowH);
         var lv = ~cfg_mixer.levels[layer] ? ~mixerDefaultLevel;
         var hasSpec = ~ungSpecOf.notNil and: { ~ungSpecOf.(layer).notNil };
-        var ezV, ezR, ezD, soloBtn, tunBtn;
+        var ezV, ezR, ezD, muteBtn, soloBtn, tunBtn;
 
         StaticText(~mixerWin, Rect(16, y, 92, 24))
             .string_(layer.asString)
@@ -284,7 +308,16 @@ Ndef(\master).play(out: 0, numChannels: 2);
             { |ez| ~mixSet.(layer, \sendDly, ez.value) }, lv.sendDly);
         ezD.round_(0.001);
 
-        soloBtn = Button(~mixerWin, Rect(772, y, 56, 24))
+        muteBtn = Button(~mixerWin, Rect(772, y, 52, 24))
+            .states_([
+                ["mute", Color.gray(0.9),  Color.gray(0.26)],
+                ["MUTE", Color.white,      Color(0.5, 0.12, 0.12)]
+            ])
+            .font_(Font("Menlo", 11, true))
+            .action_({ ~mixMuteToggle.(layer) });
+        muteBtn.value_(if(~mixMuted[layer] == true) { 1 } { 0 });
+
+        soloBtn = Button(~mixerWin, Rect(828, y, 52, 24))
             .states_([
                 ["solo", Color.gray(0.9),  Color.gray(0.26)],
                 ["SOLO", Color.white,      Color(0.55, 0.42, 0.16)]
@@ -293,7 +326,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
             .action_({ ~mixSoloToggle.(layer) });
         soloBtn.value_(if(~mixSoloCur == layer) { 1 } { 0 });
 
-        tunBtn = Button(~mixerWin, Rect(836, y, 100, 24))
+        tunBtn = Button(~mixerWin, Rect(884, y, 100, 24))
             .states_([["tuner", Color.white, Color(0.18, 0.34, 0.44)]])
             .font_(Font("Menlo", 11, true))
             .action_({ ~openTuner.(layer) });
@@ -305,6 +338,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
         ~mixerEz[layer]      = ( vol: ezV, sendRev: ezR, sendDly: ezD );
         ~mixerSoloBtn[layer] = soloBtn;
+        ~mixerMuteBtn[layer] = muteBtn;
     };
     layers.do { |layer, i| mkRow.(layer, i) };
 
@@ -333,7 +367,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .action_({ ~mixRecToggle.value });
     recBtn.value_(if(~mixRecOn) { 1 } { 0 });
     ~mixerRecBtn = recBtn;
-    Button(~mixerWin, Rect(836, by, 100, 24))
+    Button(~mixerWin, Rect(884, by, 100, 24))
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
         .action_({ win.close });
@@ -411,6 +445,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
             ~mixerGuiSync    = nil;
             ~mixerEz         = ();
             ~mixerSoloBtn    = ();
+            ~mixerMuteBtn    = ();
             ~mixerRecBtn     = nil;
             ~mixerGridTxt    = nil;
             ~mixerGridStatus = nil;
