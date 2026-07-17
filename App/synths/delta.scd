@@ -16,38 +16,38 @@
     name: \delta,
     params: [
         // --- group \freq: 5 voice fundamentals (MIDI notes) ---
-        ( key: \f1, group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 48.71) ),  // 141 Hz
-        ( key: \f2, group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 53.71) ),  // 188 Hz
-        ( key: \f3, group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 60.72) ),  // 282 Hz
-        ( key: \f4, group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 65.71) ),  // 376 Hz
-        ( key: \f5, group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 72.72) ),  // 564 Hz
+        ( key: \f1, label: "нота 1", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 48.71) ),  // 141 Hz
+        ( key: \f2, label: "нота 2", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 53.71) ),  // 188 Hz
+        ( key: \f3, label: "нота 3", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 60.72) ),  // 282 Hz
+        ( key: \f4, label: "нота 4", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 65.71) ),  // 376 Hz
+        ( key: \f5, label: "нота 5", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 72.72) ),  // 564 Hz
 
         // --- group \tone: wind ---
-        ( key: \amp,        group: \tone,              spec: ControlSpec(0.0, 0.5, \lin, 0, 0.18)  ),  // layer level (§K.4)
-        ( key: \windForce,  group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.6)   ),  // stream force
-        ( key: \turbulence, group: \tone,              spec: ControlSpec(0.0, 0.9, \lin, 0, 0.45)  ),  // gust depth
-        ( key: \gustRate,   group: \tone, unit: " Hz",  spec: ControlSpec(0.02, 0.25, \exp, 0, 0.08) ),  // gust rate (§C.4 ≤0.25)
-        ( key: \flutter,    group: \tone,              spec: ControlSpec(0.0, 0.3, \lin, 0, 0.12)  ),  // fast small air flutter
-        ( key: \edge,       group: \tone,              spec: ControlSpec(0.0, 0.6, \lin, 0, 0.18)  ),  // edge whistle
-        ( key: \edgeRatio,  group: \tone,              spec: ControlSpec(3.0, 12.0, \exp, 0, 7.0)  ),  // whistle = fund × edgeRatio
+        ( key: \amp, label: "громкость",        group: \tone,              spec: ControlSpec(0.0, 0.5, \lin, 0, 0.18)  ),  // layer level (§K.4)
+        ( key: \windForce, label: "сила ветра",  group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.6)   ),  // stream force
+        ( key: \turbulence, label: "турбулентн.", group: \tone,              spec: ControlSpec(0.0, 0.9, \lin, 0, 0.45)  ),  // gust depth
+        ( key: \gustRate, label: "част. порывов",   group: \tone, unit: " Hz",  spec: ControlSpec(0.02, 0.25, \exp, 0, 0.08) ),  // gust rate (§C.4 ≤0.25)
+        ( key: \flutter, label: "дрожание",    group: \tone,              spec: ControlSpec(0.0, 0.3, \lin, 0, 0.12)  ),  // fast small air flutter
+        ( key: \edge, label: "свист кромки",       group: \tone,              spec: ControlSpec(0.0, 0.6, \lin, 0, 0.18)  ),  // edge whistle
+        ( key: \edgeRatio, label: "отнош. свиста",  group: \tone,              spec: ControlSpec(3.0, 12.0, \exp, 0, 7.0)  ),  // whistle = fund × edgeRatio
 
         // --- group \tone: metal plates ---
-        ( key: \metal,      group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.55)  ),  // plate resonance vs raw wind
-        ( key: \plateQ,     group: \tone,              spec: ControlSpec(0.05, 3.0, \exp, 0, 0.9)  ),  // plate ring time
-        ( key: \plateBright,group: \tone,              spec: ControlSpec(0.3, 2.0, \lin, 0, 1.0)   ),  // excitation brightness
-        ( key: \plateSpread,group: \tone,              spec: ControlSpec(0.0, 0.05, \lin, 0, 0.015)),  // ring detune across voices
+        ( key: \metal, label: "металл/ветер",      group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.55)  ),  // plate resonance vs raw wind
+        ( key: \plateQ, label: "звон пластины",     group: \tone,              spec: ControlSpec(0.05, 3.0, \exp, 0, 0.9)  ),  // plate ring time
+        ( key: \plateBright, label: "ярк. пластины",group: \tone,              spec: ControlSpec(0.3, 2.0, \lin, 0, 1.0)   ),  // excitation brightness
+        ( key: \plateSpread, label: "расстройка",group: \tone,              spec: ControlSpec(0.0, 0.05, \lin, 0, 0.015)),  // ring detune across voices
 
         // --- group \tone: formant "human" filter ---
-        ( key: \vowelMix,   group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7)   ),  // vowel prominence (§C.4)
-        ( key: \vowelSel,   group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.5)   ),  // vowel-set shift (a-e-i-o-u)
-        ( key: \formRq,     group: \tone,              spec: ControlSpec(0.03, 0.3, \exp, 0, 0.09)  ),  // formant width
-        ( key: \formScale,  group: \tone,              spec: ControlSpec(0.6, 1.6, \lin, 0, 1.0)   ),  // formant pitch vs fundamental
-        ( key: \beatRate,   group: \tone, unit: " Hz",  spec: ControlSpec(0.05, 0.25, \exp, 0, 0.15) ),  // §C.4 formant beating (≤0.25 Hz)
+        ( key: \vowelMix, label: "гласная",   group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7)   ),  // vowel prominence (§C.4)
+        ( key: \vowelSel, label: "выбор гласной",   group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.5)   ),  // vowel-set shift (a-e-i-o-u)
+        ( key: \formRq, label: "ширина форм.",     group: \tone,              spec: ControlSpec(0.03, 0.3, \exp, 0, 0.09)  ),  // formant width
+        ( key: \formScale, label: "высота форм.",  group: \tone,              spec: ControlSpec(0.6, 1.6, \lin, 0, 1.0)   ),  // formant pitch vs fundamental
+        ( key: \beatRate, label: "биения",   group: \tone, unit: " Hz",  spec: ControlSpec(0.05, 0.25, \exp, 0, 0.15) ),  // §C.4 formant beating (≤0.25 Hz)
 
         // --- group \tone: levels and space ---
-        ( key: \voiceLevel, group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7)   ),  // voice-sum level (pre master amp)
-        ( key: \panWidth,   group: \tone,              spec: ControlSpec(0.0, 0.3, \lin, 0, 0.22)  ),  // §F: pan ≤ ±0.3
-        ( key: \panRate,    group: \tone, unit: " Hz",  spec: ControlSpec(0.01, 0.5, \exp, 0, 0.06) )   // §F: slow pan drift
+        ( key: \voiceLevel, label: "уровень голосов", group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7)   ),  // voice-sum level (pre master amp)
+        ( key: \panWidth, label: "ширина пан.",   group: \tone,              spec: ControlSpec(0.0, 0.3, \lin, 0, 0.22)  ),  // §F: pan ≤ ±0.3
+        ( key: \panRate, label: "част. пан.",    group: \tone, unit: " Hz",  spec: ControlSpec(0.01, 0.5, \exp, 0, 0.06) )   // §F: slow pan drift
     ]
 );
 

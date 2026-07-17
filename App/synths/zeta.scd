@@ -15,34 +15,34 @@
     name: \zeta,
     params: [
         // --- group \freq ---
-        ( key: \bedHpf,      group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(80,    600,   \exp, 0, 270)    ),  // bed low edge
-        ( key: \bedLpf,      group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(3000,  12000, \exp, 0, 11000)  ),  // bed ceiling (tape hiss)
-        ( key: \bedHumpFreq, group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(600,   2500,  \exp, 0, 1200)   ),  // energy centroid ~1.2k
-        ( key: \subFreq,     group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(40,    200,   \exp, 0, 120)    ),  // sub-rumble ceiling
-        ( key: \fineHpf,     group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(1500,  8000,  \exp, 0, 2000)   ),  // fine-crackle HF tilt
-        ( key: \popHpf,      group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(500,   6000,  \exp, 0, 1500)   ),  // pop HF tilt
-        ( key: \bodyFreq,    group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(80,    600,   \exp, 0, 180)    ),  // pop "thock" body freq
+        ( key: \bedHpf, label: "низ подложки",      group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(80,    600,   \exp, 0, 270)    ),  // bed low edge
+        ( key: \bedLpf, label: "потолок подложки",      group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(3000,  12000, \exp, 0, 11000)  ),  // bed ceiling (tape hiss)
+        ( key: \bedHumpFreq, label: "центр горба", group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(600,   2500,  \exp, 0, 1200)   ),  // energy centroid ~1.2k
+        ( key: \subFreq, label: "потолок суба",     group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(40,    200,   \exp, 0, 120)    ),  // sub-rumble ceiling
+        ( key: \fineHpf, label: "наклон тиков",     group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(1500,  8000,  \exp, 0, 2000)   ),  // fine-crackle HF tilt
+        ( key: \popHpf, label: "наклон щелчков",      group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(500,   6000,  \exp, 0, 1500)   ),  // pop HF tilt
+        ( key: \bodyFreq, label: "частота тела",    group: \freq, unit: " Hz", disp: \hz, spec: ControlSpec(80,    600,   \exp, 0, 180)    ),  // pop "thock" body freq
 
         // --- group \tone ---
-        ( key: \amp,          group: \tone,             spec: ControlSpec(0.0,    0.5,   \lin, 0, 0.32)   ),  // layer master level
-        ( key: \bedAmp,       group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.6)    ),  // bed level
-        ( key: \bedHumpRq,    group: \tone,             spec: ControlSpec(0.2,    1.5,   \lin, 0, 0.6)    ),  // hump width (rq)
-        ( key: \bedHumpAmt,   group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.55)   ),  // hump prominence
-        ( key: \bedDriftRate, group: \tone, unit: " Hz", spec: ControlSpec(0.02,   2.0,   \exp, 0, 0.1)    ),  // wow drift rate
-        ( key: \bedDriftDepth,group: \tone,             spec: ControlSpec(0.0,    0.8,   \lin, 0, 0.25)   ),  // drift depth
-        ( key: \subAmt,       group: \tone,             spec: ControlSpec(0.0,    0.3,   \lin, 0, 0.0)    ),  // sub-rumble level
-        ( key: \fineRate,     group: \tone, unit: " /s", spec: ControlSpec(5,      120,   \exp, 0, 45)     ),  // fine-crackle density
-        ( key: \fineDecay,    group: \tone, unit: " s",  spec: ControlSpec(0.0003, 0.005, \exp, 0, 0.0015) ),  // tick decay
-        ( key: \fineAmpMin,   group: \tone,             spec: ControlSpec(0.005,  0.3,   \exp, 0, 0.04)   ),  // tick exp-dist low edge
-        ( key: \fineAmt,      group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.48)   ),  // fine-crackle level
-        ( key: \popRate,      group: \tone, unit: " /s", spec: ControlSpec(0.2,    8.0,   \exp, 0, 2.4)    ),  // pop density
-        ( key: \popDecay,     group: \tone, unit: " s",  spec: ControlSpec(0.002,  0.03,  \exp, 0, 0.006)  ),  // pop decay
-        ( key: \popAmpMin,    group: \tone,             spec: ControlSpec(0.01,   0.5,   \exp, 0, 0.14)   ),  // pop exp-dist low edge
-        ( key: \popAmt,       group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.85)   ),  // pop level
-        ( key: \bodyAmt,      group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.4)    ),  // "thock" prominence
-        ( key: \bodyRing,     group: \tone, unit: " s",  spec: ControlSpec(0.005,  0.12,  \exp, 0, 0.04)   ),  // body ring time
-        ( key: \panWidth,     group: \tone,             spec: ControlSpec(0.0,    0.4,   \lin, 0, 0.3)    ),  // §F: pan ≤ ±0.4
-        ( key: \panRate,      group: \tone, unit: " Hz", spec: ControlSpec(0.02,   2.0,   \exp, 0, 0.15)   )   // §F: slow pan
+        ( key: \amp, label: "громкость",          group: \tone,             spec: ControlSpec(0.0,    0.5,   \lin, 0, 0.32)   ),  // layer master level
+        ( key: \bedAmp, label: "уровень подложки",       group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.6)    ),  // bed level
+        ( key: \bedHumpRq, label: "ширина горба",    group: \tone,             spec: ControlSpec(0.2,    1.5,   \lin, 0, 0.6)    ),  // hump width (rq)
+        ( key: \bedHumpAmt, label: "выраж. горба",   group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.55)   ),  // hump prominence
+        ( key: \bedDriftRate, label: "част. wow", group: \tone, unit: " Hz", spec: ControlSpec(0.02,   2.0,   \exp, 0, 0.1)    ),  // wow drift rate
+        ( key: \bedDriftDepth, label: "глуб. wow",group: \tone,             spec: ControlSpec(0.0,    0.8,   \lin, 0, 0.25)   ),  // drift depth
+        ( key: \subAmt, label: "суб-гул",       group: \tone,             spec: ControlSpec(0.0,    0.3,   \lin, 0, 0.0)    ),  // sub-rumble level
+        ( key: \fineRate, label: "плотн. тиков",     group: \tone, unit: " /s", spec: ControlSpec(5,      120,   \exp, 0, 45)     ),  // fine-crackle density
+        ( key: \fineDecay, label: "затух. тика",    group: \tone, unit: " s",  spec: ControlSpec(0.0003, 0.005, \exp, 0, 0.0015) ),  // tick decay
+        ( key: \fineAmpMin, label: "ниж. край тиков",   group: \tone,             spec: ControlSpec(0.005,  0.3,   \exp, 0, 0.04)   ),  // tick exp-dist low edge
+        ( key: \fineAmt, label: "уровень тиков",      group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.48)   ),  // fine-crackle level
+        ( key: \popRate, label: "плотн. щелчков",      group: \tone, unit: " /s", spec: ControlSpec(0.2,    8.0,   \exp, 0, 2.4)    ),  // pop density
+        ( key: \popDecay, label: "затух. щелчка",     group: \tone, unit: " s",  spec: ControlSpec(0.002,  0.03,  \exp, 0, 0.006)  ),  // pop decay
+        ( key: \popAmpMin, label: "ниж. край щелчков",    group: \tone,             spec: ControlSpec(0.01,   0.5,   \exp, 0, 0.14)   ),  // pop exp-dist low edge
+        ( key: \popAmt, label: "уровень щелчков",       group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.85)   ),  // pop level
+        ( key: \bodyAmt, label: "тело",      group: \tone,             spec: ControlSpec(0.0,    1.0,   \lin, 0, 0.4)    ),  // "thock" prominence
+        ( key: \bodyRing, label: "звон тела",     group: \tone, unit: " s",  spec: ControlSpec(0.005,  0.12,  \exp, 0, 0.04)   ),  // body ring time
+        ( key: \panWidth, label: "ширина пан.",     group: \tone,             spec: ControlSpec(0.0,    0.4,   \lin, 0, 0.3)    ),  // §F: pan ≤ ±0.4
+        ( key: \panRate, label: "част. пан.",      group: \tone, unit: " Hz", spec: ControlSpec(0.02,   2.0,   \exp, 0, 0.15)   )   // §F: slow pan
     ]
 );
 

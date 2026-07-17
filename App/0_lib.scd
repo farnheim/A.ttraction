@@ -254,7 +254,7 @@
         var v0, lbl, mapped, ez;
         v0     = (~ungVals[layer] !? { ~ungVals[layer][p.key] }) ? p.spec.default;
         mapped = ~isMapped.(layer, p.key);
-        lbl    = p.key.asString ++ (p[\unit] ? "");
+        lbl    = (p[\label] ? p.key.asString) ++ (p[\unit] ? "");
         if(mapped) { lbl = lbl ++ " ⟳LFO" };
         ez = EZSlider(~ungTuner[layer], Rect(x, y, sw, 24), lbl, p.spec, { |e|
             ~setParam.(layer, p.key, e.value);

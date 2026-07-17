@@ -20,35 +20,35 @@
     name: \epsilon,
     params: [
         // --- group \freq: streak endpoints + held modes (MIDI notes, 47–1504 Hz) ---
-        ( key: \freqLo,   group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 30.28) ),  // 47 Hz ÷2
-        ( key: \freqHi,   group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 49.30) ),  // 141 Hz ×3/2
-        ( key: \m1,       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 30.28) ),  // 47 Hz ÷2
-        ( key: \m2,       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 37.30) ),  // 70.5 Hz ×3/4
-        ( key: \m3,       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 49.30) ),  // 141 Hz ×3/2
-        ( key: \m4,       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 54.28) ),  // 188 Hz ×2
-        ( key: \flowCeil, group: \freq, unit: " Hz", disp: \hz,  spec: ControlSpec(1200, 5000, \exp, 0, 2500)   ),  // amendment (e): 1.2–5 kHz
+        ( key: \freqLo, label: "низ дрейфа",   group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 30.28) ),  // 47 Hz ÷2
+        ( key: \freqHi, label: "верх дрейфа",   group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 49.30) ),  // 141 Hz ×3/2
+        ( key: \m1, label: "мода 1",       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 30.28) ),  // 47 Hz ÷2
+        ( key: \m2, label: "мода 2",       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 37.30) ),  // 70.5 Hz ×3/4
+        ( key: \m3, label: "мода 3",       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 49.30) ),  // 141 Hz ×3/2
+        ( key: \m4, label: "мода 4",       group: \freq, disp: \note,             spec: ControlSpec(30.28, 90.28, \lin, 0, 54.28) ),  // 188 Hz ×2
+        ( key: \flowCeil, label: "потолок потока", group: \freq, unit: " Hz", disp: \hz,  spec: ControlSpec(1200, 5000, \exp, 0, 2500)   ),  // amendment (e): 1.2–5 kHz
 
         // --- group \tone: mode field (the principal stratum) ---
-        ( key: \mLevel,      group: \tone,              spec: ControlSpec(0.0,  0.5,  \lin, 0, 0.35) ),  // up to +6 dB over the flow (inverted)
-        ( key: \mWidth,      group: \tone,              spec: ControlSpec(0.02, 0.3,  \exp, 0, 0.06) ),  // mode rq — drives the flatness metric
-        ( key: \mBreath,     group: \tone, unit: " Hz", spec: ControlSpec(0.02, 0.1,  \exp, 0, 0.04) ),  // per-mode breathing base rate
+        ( key: \mLevel, label: "уровень мод",      group: \tone,              spec: ControlSpec(0.0,  0.5,  \lin, 0, 0.35) ),  // up to +6 dB over the flow (inverted)
+        ( key: \mWidth, label: "ширина мод",      group: \tone,              spec: ControlSpec(0.02, 0.3,  \exp, 0, 0.06) ),  // mode rq — drives the flatness metric
+        ( key: \mBreath, label: "дыхание мод",     group: \tone, unit: " Hz", spec: ControlSpec(0.02, 0.1,  \exp, 0, 0.04) ),  // per-mode breathing base rate
 
         // --- group \tone: flow (excitation, subordinate) ---
-        ( key: \flowLevel,   group: \tone,              spec: ControlSpec(0.0,  0.5,  \lin, 0, 0.15) ),  // the modes' medium
-        ( key: \diffDepth,   group: \tone,              spec: ControlSpec(0.0,  1.0,  \lin, 0, 0.6)  ),  // AllpassC delay-mod depth
+        ( key: \flowLevel, label: "уровень потока",   group: \tone,              spec: ControlSpec(0.0,  0.5,  \lin, 0, 0.15) ),  // the modes' medium
+        ( key: \diffDepth, label: "диффузия",   group: \tone,              spec: ControlSpec(0.0,  1.0,  \lin, 0, 0.6)  ),  // AllpassC delay-mod depth
 
         // --- group \tone: streak (the §C.5 motion identity) ---
-        ( key: \streakLevel, group: \tone,              spec: ControlSpec(0.0,  0.5,  \lin, 0, 0.20) ),  // audible, not dominant
-        ( key: \streakWidth, group: \tone,              spec: ControlSpec(0.1,  1.5,  \exp, 0, 0.45) ),  // band formant rq (softness)
-        ( key: \driftPeriod, group: \tone, unit: " s",  spec: ControlSpec(20,   240,  \exp, 0, 180)  ),  // §C.5 two-LFN law period T
+        ( key: \streakLevel, label: "уровень полосы", group: \tone,              spec: ControlSpec(0.0,  0.5,  \lin, 0, 0.20) ),  // audible, not dominant
+        ( key: \streakWidth, label: "ширина полосы", group: \tone,              spec: ControlSpec(0.1,  1.5,  \exp, 0, 0.45) ),  // band formant rq (softness)
+        ( key: \driftPeriod, label: "период дрейфа", group: \tone, unit: " s",  spec: ControlSpec(20,   240,  \exp, 0, 180)  ),  // §C.5 two-LFN law period T
 
         // --- group \tone: surface + space ---
-        ( key: \surfDepth,   group: \tone, unit: " dB", spec: ControlSpec(0.0,  6.0,  \lin, 0, 3.0)  ),  // a cave's air is not still
-        ( key: \surfRate,    group: \tone, unit: " Hz", spec: ControlSpec(0.05, 0.3,  \exp, 0, 0.09) ),  // aperiodic by UGen choice
-        ( key: \decorrWidth, group: \tone,              spec: ControlSpec(0.0,  0.3,  \lin, 0, 0.2)  ),  // L/R decorrelation, centre fixed
+        ( key: \surfDepth, label: "глуб. поверхн.",   group: \tone, unit: " dB", spec: ControlSpec(0.0,  6.0,  \lin, 0, 3.0)  ),  // a cave's air is not still
+        ( key: \surfRate, label: "част. поверхн.",    group: \tone, unit: " Hz", spec: ControlSpec(0.05, 0.3,  \exp, 0, 0.09) ),  // aperiodic by UGen choice
+        ( key: \decorrWidth, label: "декорреляция", group: \tone,              spec: ControlSpec(0.0,  0.3,  \lin, 0, 0.2)  ),  // L/R decorrelation, centre fixed
 
         // --- group \tone: master ---
-        ( key: \amp,         group: \tone,              spec: ControlSpec(0.0,  0.3,  \lin, 0, 0.14) )   // §K.4 schliere level
+        ( key: \amp, label: "громкость",         group: \tone,              spec: ControlSpec(0.0,  0.3,  \lin, 0, 0.14) )   // §K.4 schliere level
     ]
 );
 

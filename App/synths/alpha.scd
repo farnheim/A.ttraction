@@ -14,35 +14,35 @@
     name: \alpha,
     params: [
         // --- group \freq: 10 spring tones (MIDI notes, fractional = microtonal) ---
-        ( key: \n1,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 29.91) ),
-        ( key: \n2,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 43.87) ),
-        ( key: \n3,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 54.2)  ),
-        ( key: \n4,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 18.97) ),
-        ( key: \n5,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 27.2)  ),
-        ( key: \n6,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 26.68) ),
-        ( key: \n7,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 80.12) ),
-        ( key: \n8,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 87.0)  ),
-        ( key: \n9,  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 58.14) ),
-        ( key: \n10, group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 16.69) ),
+        ( key: \n1, label: "нота 1",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 29.91) ),
+        ( key: \n2, label: "нота 2",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 43.87) ),
+        ( key: \n3, label: "нота 3",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 54.2)  ),
+        ( key: \n4, label: "нота 4",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 18.97) ),
+        ( key: \n5, label: "нота 5",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 27.2)  ),
+        ( key: \n6, label: "нота 6",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 26.68) ),
+        ( key: \n7, label: "нота 7",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 80.12) ),
+        ( key: \n8, label: "нота 8",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 87.0)  ),
+        ( key: \n9, label: "нота 9",  group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 58.14) ),
+        ( key: \n10, label: "нота 10", group: \freq, disp: \note, spec: ControlSpec(12, 96, \lin, 0, 16.69) ),
 
         // --- group \tone: timbre and medium ---
-        ( key: \amp,       group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.30)  ),
-        ( key: \density,   group: \tone, unit: " /s", spec: ControlSpec(0.2, 150,  \exp, 0, 8.65)  ),
-        ( key: \contact,   group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.464) ),
-        ( key: \decay,     group: \tone, unit: " s",  spec: ControlSpec(0.2, 8.0,  \exp, 0, 3.74)  ),
-        ( key: \disperse,  group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.605) ),
-        ( key: \oil,       group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.725) ),
-        ( key: \muffle,    group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.204) ),
-        ( key: \bright,    group: \tone, unit: " Hz", spec: ControlSpec(1500, 6000, \exp, 0, 2800) ),  // dry-contact HPF
-        ( key: \metalAmt,  group: \tone,             spec: ControlSpec(0.0, 0.8,  \lin, 0, 0.22)  ),  // contact metal-ring level
-        ( key: \metalRing, group: \tone, unit: " s",  spec: ControlSpec(0.02, 0.3, \exp, 0, 0.12)  ),  // mode ring time (wood<->metal)
-        ( key: \metalWeight,group: \tone,            spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.35)  ),  // short low impact thump
-        ( key: \bodyLevel, group: \tone,             spec: ControlSpec(0.0, 0.3,  \lin, 0, 0.12)  ),  // tonal bundle body
-        ( key: \drive,     group: \tone,             spec: ControlSpec(0.5, 4.0,  \exp, 0, 1.2)   ),  // tanh pre-gain
-        ( key: \sprGain,   group: \tone,             spec: ControlSpec(1.0, 7.0,  \lin, 0, 4.6)   ),  // spring-sum gain
-        ( key: \swayRate,  group: \tone, unit: " Hz", spec: ControlSpec(0.02, 0.5, \exp, 0, 0.1)   ),  // breathing rate
-        ( key: \cutTop,    group: \tone, unit: " Hz", spec: ControlSpec(2000, 8000, \exp, 0, 5400) ),  // LPF top
-        ( key: \cutOil,    group: \tone, unit: " Hz", spec: ControlSpec(0, 5000,   \lin, 0, 3800)  )   // oil darkening depth
+        ( key: \amp, label: "громкость",       group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.30)  ),
+        ( key: \density, label: "плотность",   group: \tone, unit: " /s", spec: ControlSpec(0.2, 150,  \exp, 0, 8.65)  ),
+        ( key: \contact, label: "контакт",   group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.464) ),
+        ( key: \decay, label: "затухание",     group: \tone, unit: " s",  spec: ControlSpec(0.2, 8.0,  \exp, 0, 3.74)  ),
+        ( key: \disperse, label: "рассеяние",  group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.605) ),
+        ( key: \oil, label: "масло",       group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.725) ),
+        ( key: \muffle, label: "приглушение",    group: \tone,             spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.204) ),
+        ( key: \bright, label: "яркость",    group: \tone, unit: " Hz", spec: ControlSpec(1500, 6000, \exp, 0, 2800) ),  // dry-contact HPF
+        ( key: \metalAmt, label: "металл",  group: \tone,             spec: ControlSpec(0.0, 0.8,  \lin, 0, 0.22)  ),  // contact metal-ring level
+        ( key: \metalRing, label: "звон металла", group: \tone, unit: " s",  spec: ControlSpec(0.02, 0.3, \exp, 0, 0.12)  ),  // mode ring time (wood<->metal)
+        ( key: \metalWeight, label: "вес удара",group: \tone,            spec: ControlSpec(0.0, 1.0,  \lin, 0, 0.35)  ),  // short low impact thump
+        ( key: \bodyLevel, label: "тело", group: \tone,             spec: ControlSpec(0.0, 0.3,  \lin, 0, 0.12)  ),  // tonal bundle body
+        ( key: \drive, label: "преусиление",     group: \tone,             spec: ControlSpec(0.5, 4.0,  \exp, 0, 1.2)   ),  // tanh pre-gain
+        ( key: \sprGain, label: "усил. пружин",   group: \tone,             spec: ControlSpec(1.0, 7.0,  \lin, 0, 4.6)   ),  // spring-sum gain
+        ( key: \swayRate, label: "дыхание",  group: \tone, unit: " Hz", spec: ControlSpec(0.02, 0.5, \exp, 0, 0.1)   ),  // breathing rate
+        ( key: \cutTop, label: "верх. срез",    group: \tone, unit: " Hz", spec: ControlSpec(2000, 8000, \exp, 0, 5400) ),  // LPF top
+        ( key: \cutOil, label: "глуб. масла",    group: \tone, unit: " Hz", spec: ControlSpec(0, 5000,   \lin, 0, 3800)  )   // oil darkening depth
     ]
 );
 

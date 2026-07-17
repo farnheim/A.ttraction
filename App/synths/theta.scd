@@ -43,22 +43,22 @@
         // no `disp`: an octave index is not a frequency. `step: 1` is correct
         // for the tuner's slider, but the graph is what enforces the lattice —
         // ControlSpec:map ignores `step`, see the round in LOGIC.
-        ( key: \fragOct,    group: \freq,             spec: ControlSpec(-1, 0, \lin, 1, 0)          ),
+        ( key: \fragOct, label: "октава мод",    group: \freq,             spec: ControlSpec(-1, 0, \lin, 1, 0)          ),
 
         // --- group \tone: the arrival law (NEVER lagged — they latch at the
         // population boundary, where Dgeom/Ddup re-poll their kr inputs) ---
-        ( key: \ioi0,       group: \tone, unit: " s", spec: ControlSpec(0.012, 0.120, \exp, 0, 0.018) ),  // head IOI; \exp — a time constant over 10:1
-        ( key: \decel,      group: \tone,             spec: ControlSpec(1.05, 1.40, \lin, 0, 1.22)  ),  // decel <= 1 is unreachable by construction
-        ( key: \ioiMax,     group: \tone, unit: " s", spec: ControlSpec(0.4, 1.5, \lin, 0, 0.60)    ),  // exhaustion floor -> kMax
-        ( key: \popScale,   group: \tone,             spec: ControlSpec(0.5, 2.0, \lin, 0, 1.0)     ),  // scales wheel 6
-        ( key: \gapScale,   group: \tone,             spec: ControlSpec(0.3, 3.0, \lin, 0, 1.0)     ),  // scales wheel 7
+        ( key: \ioi0, label: "IOI головы",       group: \tone, unit: " s", spec: ControlSpec(0.012, 0.120, \exp, 0, 0.018) ),  // head IOI; \exp — a time constant over 10:1
+        ( key: \decel, label: "замедление",      group: \tone,             spec: ControlSpec(1.05, 1.40, \lin, 0, 1.22)  ),  // decel <= 1 is unreachable by construction
+        ( key: \ioiMax, label: "потолок истощ.",     group: \tone, unit: " s", spec: ControlSpec(0.4, 1.5, \lin, 0, 0.60)    ),  // exhaustion floor -> kMax
+        ( key: \popScale, label: "разм. популяции",   group: \tone,             spec: ControlSpec(0.5, 2.0, \lin, 0, 1.0)     ),  // scales wheel 6
+        ( key: \gapScale, label: "пауза",   group: \tone,             spec: ControlSpec(0.3, 3.0, \lin, 0, 1.0)     ),  // scales wheel 7
 
         // --- group \tone: the contact + level ---
-        ( key: \edgeWidth,  group: \tone,             spec: ControlSpec(0.2, 1.0, \lin, 0, 0.7)     ),  // scales wheel 2's rq; narrow = clean ping, wide = grain survives
-        ( key: \edgeAmp,    group: \tone,             spec: ControlSpec(0.0, 1.0, \lin, 0, 0.45)    ),  // kante level vs the mode sum; 0.0 = a bell (a control, not a defect)
-        ( key: \decayScale, group: \tone,             spec: ControlSpec(0.3, 1.0, \lin, 0, 1.0)     ),  // can only SHORTEN the size law
-        ( key: \spread,     group: \tone,             spec: ControlSpec(0.0, 1.0, \lin, 0, 0.8)     ),  // scales wheel 4; never moves one position
-        ( key: \amp,        group: \tone,             spec: ControlSpec(0.0, 0.30, \lin, 0, 0.09)   )   // §K.4; §F band −24…−10 dBFS peak
+        ( key: \edgeWidth, label: "ширина контакта",  group: \tone,             spec: ControlSpec(0.2, 1.0, \lin, 0, 0.7)     ),  // scales wheel 2's rq; narrow = clean ping, wide = grain survives
+        ( key: \edgeAmp, label: "уровень контакта",    group: \tone,             spec: ControlSpec(0.0, 1.0, \lin, 0, 0.45)    ),  // kante level vs the mode sum; 0.0 = a bell (a control, not a defect)
+        ( key: \decayScale, label: "масшт. затух.", group: \tone,             spec: ControlSpec(0.3, 1.0, \lin, 0, 1.0)     ),  // can only SHORTEN the size law
+        ( key: \spread, label: "разброс пан.",     group: \tone,             spec: ControlSpec(0.0, 1.0, \lin, 0, 0.8)     ),  // scales wheel 4; never moves one position
+        ( key: \amp, label: "громкость",        group: \tone,             spec: ControlSpec(0.0, 0.30, \lin, 0, 0.09)   )   // §K.4; §F band −24…−10 dBFS peak
     ]
 );
 
