@@ -23,7 +23,7 @@
         epsilon: ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.1: self-diffuse — low send; §K.2: no delay
         zeta:    ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.2: kratzer is not in the delay table
         eta:     ( vol: 0.00, sendRev: 0.00, sendDly: 0.00 ),   // silence — no level
-        theta:   ( vol: 0.00, sendRev: 0.00, sendDly: 0.00 )    // stub — off
+        theta:   ( vol: 0.80, sendRev: 0.18, sendDly: 0.00 )    // §K.1 schotter; §K.2 zero is a FORBIDDEN move, not a preference: the delay's 0.37/0.53 s taps put phantom events off the grid
     )
 );
 
