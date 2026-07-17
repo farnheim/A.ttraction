@@ -42,9 +42,10 @@
         ~seqClock.stop;
         ~seqClock = nil;
     };
-    if(~busDry.notNil)      { ~busDry.free;      ~busDry = nil };
-    if(~busFxSend.notNil)   { ~busFxSend.free;   ~busFxSend = nil };
-    if(~busFxReturn.notNil) { ~busFxReturn.free; ~busFxReturn = nil };
+    if(~busDry.notNil)        { ~busDry.free;        ~busDry = nil };
+    if(~busFxSendRev.notNil)  { ~busFxSendRev.free;  ~busFxSendRev = nil };
+    if(~busFxSendDly.notNil)  { ~busFxSendDly.free;  ~busFxSendDly = nil };
+    if(~busFxReturn.notNil)   { ~busFxReturn.free;   ~busFxReturn = nil };
     s.freeAll;
     if(verbose) { "UNGRUND app — очистка выполнена.".postln };
 };
@@ -53,14 +54,21 @@ s.waitForBoot({
 
     // 0a. tuning infrastructure first: synths/*.scd register specs in ~ungSpecs
     (~appDir +/+ "0_lib.scd").load;
+    // structure-grid generator: pure logic, no server; the mixer window (step 4)
+    // reads ~gridGenerate, so it must exist before the mixer is loaded
+    (~appDir +/+ "0_grid.scd").load;
 
     // 0b. clean start
     ~appCleanup.value(false);
 
     // 1. buses
-    ~busDry      = Bus.audio(s, 2);   // dry layer sum -> master
-    ~busFxSend   = Bus.audio(s, 2);   // layer sends -> effects (§K)
-    ~busFxReturn = Bus.audio(s, 2);   // effect returns -> master (§K)
+    ~busDry       = Bus.audio(s, 2);   // dry layer sum -> master
+    // two send buses, NOT one: §K.1 and §K.2 prescribe independent per-class
+    // send tables (delta/epsilon/zeta: reverb yes, delay 0.0) — a shared bus
+    // cannot express that, since both effects would read the same sum
+    ~busFxSendRev = Bus.audio(s, 2);   // layer sends -> \tape_reverb (§K.1)
+    ~busFxSendDly = Bus.audio(s, 2);   // layer sends -> \ping_delay  (§K.2)
+    ~busFxReturn  = Bus.audio(s, 2);   // effect returns -> master (§K)
     s.sync;
 
     // 2. synth layers (optional filter via ~cfg_app.layers)
@@ -107,7 +115,7 @@ s.waitForBoot({
         };
     };
 
-    // 3. effects (read ~busFxSend, write ~busFxReturn)
+    // 3. effects (read ~busFxSendRev/~busFxSendDly, write ~busFxReturn)
     if(~cfg_app.enableEffects) {
         (~appDir +/+ "6_effects.scd").load;
         s.sync;

@@ -8,8 +8,8 @@
 (
 // Each line: ( target: \layer, param: \name, shape: \sine|\tri|\noise|\noise0,
 //              rate: Hz, min: lo, max: hi )
-// target may also be the mixer: \mix_<layer> param \vol, or the send
-// aggregator \fxsend param \send_<layer> (see 2_mixer.scd).
+// target may also be the mixer: \mix_<layer> param \vol, or a send
+// aggregator \fxsendRev / \fxsendDly param \send_<layer> (see 2_mixer.scd).
 ~cfg_lfo = (
     lines: [
         // alpha: very slow volume breathing (§C.1)
@@ -25,7 +25,7 @@
         ( target: \theta,   param: \lfnRate, shape: \tri,   rate: 0.02, min: 0.08, max: 0.16 ),
 
         // mixer: slow breathing of theta's reverb send
-        ( target: \fxsend, param: \send_theta, shape: \sine, rate: 0.025, min: 0.45, max: 0.70 )
+        ( target: \fxsendRev, param: \send_theta, shape: \sine, rate: 0.025, min: 0.45, max: 0.70 )
     ]
 );
 

@@ -6,7 +6,7 @@
 
 // ===== CONFIG — edit here ============================================
 (
-// Each line: ( cc: N, type: \layer|\mixVol|\mixSend|\lfoRate|\master,
+// Each line: ( cc: N, type: \layer|\mixVol|\mixSendRev|\mixSendDly|\lfoRate|\master,
 //              target: \layer (or lfo index for \lfoRate),
 //              param: \name (only for type \layer), min: lo, max: hi )
 ~cfg_ctrl = (
@@ -15,7 +15,7 @@
         ( cc: 1,  type: \mixVol,  target: \alpha,            min: 0.0,  max: 1.0 ),
         ( cc: 7,  type: \master,                              min: 0.0,  max: 1.0 ),
         ( cc: 21, type: \layer,   target: \delta, param: \freq, min: 100, max: 2000 ),
-        ( cc: 22, type: \mixSend, target: \theta,            min: 0.0,  max: 1.0 ),
+        ( cc: 22, type: \mixSendRev, target: \theta,          min: 0.0,  max: 1.0 ),
         ( cc: 23, type: \layer,   target: \epsilon, param: \freqHi, min: 300, max: 2000 ),
         ( cc: 24, type: \lfoRate, target: 0,                  min: 0.005, max: 0.2 )
     ]
@@ -38,11 +38,12 @@ MIDIdef.cc(\ung_cc, { |val, num, chan|
     if(line.notNil and: { ~cfg_ctrl.channel.isNil or: { chan == ~cfg_ctrl.channel } }) {
         var v = ~ctrlScale.(val, line.min, line.max);
         switch(line.type,
-            \mixVol,  { ~mixSet.(line.target, \vol, v) },
-            \mixSend, { ~mixSet.(line.target, \send, v) },
-            \master,  { ~masterSet.(v) },
-            \layer,   { Ndef(line.target.asSymbol).set(line.param, v) },
-            \lfoRate, {
+            \mixVol,     { ~mixSet.(line.target, \vol, v) },
+            \mixSendRev, { ~mixSet.(line.target, \sendRev, v) },
+            \mixSendDly, { ~mixSet.(line.target, \sendDly, v) },
+            \master,     { ~masterSet.(v) },
+            \layer,      { Ndef(line.target.asSymbol).set(line.param, v) },
+            \lfoRate,    {
                 // ~lfoKeys exists only if 3_lfo is loaded — ignore silently
                 if(~lfoKeys.notNil) {
                     var lfoKey = ~lfoKeys.detect { |k|
