@@ -75,8 +75,8 @@ s.waitForBoot({
     // two send buses, NOT one: §K.1 and §K.2 prescribe independent per-class
     // send tables (delta/epsilon/zeta: reverb yes, delay 0.0) — a shared bus
     // cannot express that, since both effects would read the same sum
-    ~busFxSendRev = Bus.audio(s, 2);   // layer sends -> \tape_reverb (§K.1)
-    ~busFxSendDly = Bus.audio(s, 2);   // layer sends -> \ping_delay  (§K.2)
+    ~busFxSendRev = Bus.audio(s, 2);   // layer sends -> \space_echo_rev (§K.1)
+    ~busFxSendDly = Bus.audio(s, 2);   // layer sends -> \space_echo_dly (§K.2)
     ~busFxReturn  = Bus.audio(s, 2);   // effect returns -> master (§K)
     s.sync;
 

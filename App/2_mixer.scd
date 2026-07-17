@@ -1,14 +1,15 @@
-// App/2_mixer.scd — UNGRUND · MIXER: per-layer vol + two fx sends (reverb
-// §K.1 / delay §K.2), one aggregator per send bus, master (LeakDC +
-// Limiter), solo, mute, recorder, mixer window.
+// App/2_mixer.scd — UNGRUND · MIXER: per-layer vol + two fx sends (Space Echo
+// reverb-forward §K.1 / Space Echo multi-tap echo §K.2), one aggregator per
+// send bus, master (LeakDC + Limiter), solo, mute, recorder, mixer window.
 // Routes only layers listed in ~activeLayers (set by 1_app.scd).
 // Signal flow: docs/architecture/app/README.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// Level table, key = layer name. vol = level into master; sendRev = tape
-// reverb send (§K.1 table), sendDly = ping-pong delay send (§K.2 table).
+// Level table, key = layer name. vol = level into master; sendRev = Space Echo
+// reverb-forward send (§K.1 table), sendDly = Space Echo multi-tap echo send
+// (§K.2 table).
 // The two sends are independent by canon — see the aggregators below.
 // Entries for unloaded layers are simply ignored.
 ~cfg_mixer = (
@@ -209,6 +210,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 // ===== GUI — mixer window ============================================
 // widget registries (idempotent on file reload)
 ~mixerEz      = ();    // layer -> ( \vol:, \sendRev:, \sendDly: EZSlider ); \master -> EZSlider
+~mixerFx      = ();    // space-echo strip: ( dlyMode:, revMode: PopUpMenu; bass:, treble: EZSlider )
 ~mixerSoloBtn = ();    // layer -> Button (solo)
 ~mixerMuteBtn = ();    // layer -> Button (mute)
 ~mixerModEz   = ();    // modmatrix line index -> depth EZSlider (nil-safe; 8_modmatrix.scd)
@@ -238,10 +240,17 @@ Ndef(\master).play(out: 0, numChannels: 2);
     var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
     var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
     var hasMod;
+    var fxY, hasFx, fxModeItems;
     var win;   // local capture: closures must not depend on the global slot
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
     by = y0 + (layers.size * rowH) + 14;
+    // space-echo control strip sits where the master row was; master + all
+    // panels below shift down by one row. Present only if effects are loaded
+    // (~cfg_effects created by 6_effects.scd; nil when enableEffects=false)
+    hasFx = ~cfg_effects.notNil;
+    fxY   = by;
+    if(hasFx) { by = by + 34 };
     // окно выше суммы рядов слоёв: справа стоит поле структурной сетки, ему
     // нужна высота (поле до 64 строк — TextView доскроллит остаток)
     // gw под 64 колонки канона: Menlo 11 ≈ 6.63 px/символ -> 424 px + рамка
@@ -264,6 +273,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerSoloBtn    = ();
     ~mixerMuteBtn    = ();
     ~mixerModEz      = ();
+    ~mixerFx         = ();
     ~modmatrixGuiSync = nil;
     ~mixerRecBtn     = nil;
     ~mixerGridTxt    = nil;
@@ -282,9 +292,9 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
     StaticText(~mixerWin, Rect(112, 50, 210, 16)).string_("vol -> master")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
-    StaticText(~mixerWin, Rect(332, 50, 210, 16)).string_("rev -> tape reverb (§K.1)")
+    StaticText(~mixerWin, Rect(332, 50, 210, 16)).string_("rev -> space echo · reverb (§K.1)")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
-    StaticText(~mixerWin, Rect(552, 50, 210, 16)).string_("dly -> ping-pong (§K.2)")
+    StaticText(~mixerWin, Rect(552, 50, 210, 16)).string_("dly -> space echo · echo (§K.2)")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
 
     // one row per layer
@@ -376,6 +386,58 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .states_([["закрыть", Color.gray(0.9), Color(0.4, 0.18, 0.18)]])
         .font_(Font("Menlo", 11))
         .action_({ win.close });
+
+    // --- space echo control strip (mode selectors + tone) ---
+    // mode = head-mask × reverb table (12 positions). Rows 1–4 = ECHO/delay
+    // modes (reverb OFF); 5–12 include the spring reverb. Both instances get a
+    // selector so the delay modes are reachable, per the §K.2 unit. Tone (bass +
+    // treble) is a global fx tone wired to both instances' RE-201 shelves.
+    // All six params live in ~cfg_effects (rev_/dly_mode, rev_/dly_bass,
+    // rev_/dly_treble) and drive the Ndefs at load — the GUI rides on top.
+    if(hasFx) {
+        var dlyPop, revPop, bassEz, trebEz;
+        fxModeItems = [
+            "1 ·1 tap", "2 ·2 tap", "3 ·1+2 tap", "4 ·1+2+3 echo",
+            "5 ·1 +rev", "6 ·2 +rev", "7 ·3 +rev", "8 ·1+2 +rev",
+            "9 ·2+3 +rev", "10 ·1+3 +rev", "11 all +rev", "12 rev only"
+        ];
+        StaticText(~mixerWin, Rect(16, fxY, 92, 24))
+            .string_("space echo").stringColor_(Color(0.55, 0.7, 0.85))
+            .font_(Font("Menlo", 12, true));
+
+        StaticText(~mixerWin, Rect(112, fxY, 40, 24)).string_("echo")
+            .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
+        dlyPop = PopUpMenu(~mixerWin, Rect(154, fxY, 168, 24))
+            .items_(fxModeItems).font_(Font("Menlo", 11))
+            .value_((~cfg_effects.dly_mode - 1).clip(0, 11))
+            .action_({ |m| Ndef(\space_echo_dly).set(\mode, m.value + 1) });
+
+        StaticText(~mixerWin, Rect(332, fxY, 34, 24)).string_("rev")
+            .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
+        revPop = PopUpMenu(~mixerWin, Rect(368, fxY, 174, 24))
+            .items_(fxModeItems).font_(Font("Menlo", 11))
+            .value_((~cfg_effects.rev_mode - 1).clip(0, 11))
+            .action_({ |m| Ndef(\space_echo_rev).set(\mode, m.value + 1) });
+
+        // tone knobs set BOTH instances (global fx tone); init from rev values
+        bassEz = EZSlider(~mixerWin, Rect(552, fxY, 210, 24), "bass",
+            ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_bass),
+            { |ez|
+                Ndef(\space_echo_rev).set(\bass, ez.value);
+                Ndef(\space_echo_dly).set(\bass, ez.value);
+            }, ~cfg_effects.rev_bass);
+        bassEz.round_(0.01);
+
+        trebEz = EZSlider(~mixerWin, Rect(772, fxY, 210, 24), "treble",
+            ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_treble),
+            { |ez|
+                Ndef(\space_echo_rev).set(\treble, ez.value);
+                Ndef(\space_echo_dly).set(\treble, ez.value);
+            }, ~cfg_effects.rev_treble);
+        trebEz.round_(0.01);
+
+        ~mixerFx = ( dlyMode: dlyPop, revMode: revPop, bass: bassEz, treble: trebEz );
+    };
 
     // --- модуляционная матрица (панель слева, под master) ---
     // nil-безопасна: без App/8_modmatrix.scd (enableModMatrix=false) панель
