@@ -13,6 +13,7 @@
     enableMixer:     true,    // 2_mixer.scd
     enableMixerGui:  true,    // open mixer window after load
     enableLfo:       false,   // 3_lfo.scd
+    enableModMatrix: true,    // 8_modmatrix.scd (cross-layer coupling; loads before mixer)
     enableControl:   false,   // 5_control.scd (MIDI)
     enableSequencer: false,   // 4_sequencer.scd
     enableVizGui:    false,    // 7_viz.scd (only useful with enableLfo/Sequencer)
@@ -129,6 +130,21 @@ s.waitForBoot({
         s.sync;
     } {
         "UNGRUND app — эффекты ВЫКЛ (enableEffects=false).".postln;
+    };
+
+    // 3b. modulation matrix (BEFORE the mixer: the mixer window builds the
+    // 16 depth faders and must see ~modKeys — same "loads before mixer"
+    // constraint as 0_grid). Maps onto layer params (loaded at step 2).
+    if(~cfg_app.enableModMatrix) {
+        (~appDir +/+ "8_modmatrix.scd").load;
+        s.sync;
+    } {
+        // disabled: drop any registry lingering from a prior enabled run so the
+        // mixer shows the placeholder, not stale/dead faders (~modActive holds
+        // the maps to release; ? [] covers "never loaded")
+        (~modActive ? []).do { |e| Ndef(e[\target]).unmap(e[\param]) };
+        ~modKeys = nil; ~modActive = nil;
+        "UNGRUND app — модуляционная матрица ВЫКЛ (enableModMatrix=false).".postln;
     };
 
     // 4. mixer (routes layers + master)

@@ -211,6 +211,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerEz      = ();    // layer -> ( \vol:, \sendRev:, \sendDly: EZSlider ); \master -> EZSlider
 ~mixerSoloBtn = ();    // layer -> Button (solo)
 ~mixerMuteBtn = ();    // layer -> Button (mute)
+~mixerModEz   = ();    // modmatrix line index -> depth EZSlider (nil-safe; 8_modmatrix.scd)
 ~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
 
 // structure-grid panel slots (0_grid.scd may be absent — panel is nil-safe)
@@ -236,6 +237,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~ungBuildMixer = {
     var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
     var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
+    var hasMod;
     var win;   // local capture: closures must not depend on the global slot
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
@@ -250,6 +252,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     h  = (by + 40 + 40).max(620);
     gh = h - y0 - 100;
     hasGrid = ~gridGenerate.notNil;
+    hasMod  = ~modKeys.notNil and: { ~modKeys.size > 0 };
 
     // close previous window best-effort (reference may be a destroyed Qt
     // object; .close without try would abort the rebuild — same as tuner)
@@ -260,6 +263,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerEz         = ();
     ~mixerSoloBtn    = ();
     ~mixerMuteBtn    = ();
+    ~mixerModEz      = ();
+    ~modmatrixGuiSync = nil;
     ~mixerRecBtn     = nil;
     ~mixerGridTxt    = nil;
     ~mixerGridStatus = nil;
@@ -372,6 +377,40 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .font_(Font("Menlo", 11))
         .action_({ win.close });
 
+    // --- модуляционная матрица (панель слева, под master) ---
+    // nil-безопасна: без App/8_modmatrix.scd (enableModMatrix=false) панель
+    // выключена — тем же приёмом, что hasGrid у сетки. Индекс i строки == индекс
+    // в ~cfg_modmtx.lines, так что ~modDepthSet.(i, ...) адресует ту же связь.
+    // Заголовок ВНУТРИ ветки: безусловный заголовок над заглушкой читается как
+    // «пустое место» и путает (отсюда баг-репорт 2026-07-17).
+    if(hasMod) {
+        StaticText(~mixerWin, Rect(16, by + 40, 660, 16))
+            .string_("модуляционная матрица — 16 уровней влияния (частота одной связи ведёт другую)")
+            .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
+        Button(~mixerWin, Rect(684, by + 37, 140, 20))
+            .states_([["рандом связей", Color.white, Color(0.28, 0.2, 0.44)]])
+            .font_(Font("Menlo", 10, true))
+            .action_({ if(~modRandomize.notNil) { ~modRandomize.value } });
+        ~modKeys.do { |e, i|
+            var col = i div: 8;
+            var row = i mod: 8;
+            var mx  = 16 + (col * 492);
+            var my  = by + 60 + (row * 24);
+            var ez;
+            ez = EZSlider(~mixerWin, Rect(mx, my, 470, 22), e[\label],
+                ControlSpec(0, 1, \lin, 0, e[\depth]),
+                { |sl| ~modDepthSet.(i, sl.value) }, e[\depth]);
+            ez.round_(0.001);
+            // связь на незагруженном слое (subset ~cfg_app.layers) — слайдер виден, но мёртв
+            if(e[\enabled].not) { ez.enabled_(false) };
+            ~mixerModEz[i] = ez;
+        };
+    } {
+        StaticText(~mixerWin, Rect(16, by + 40, 900, 18))
+            .string_("модуляционная матрица ВЫКЛ — включи ~cfg_app.enableModMatrix = true и перезапусти весь блок 1_app.scd")
+            .stringColor_(Color(0.85, 0.55, 0.2)).font_(Font("Menlo", 11, true));
+    };
+
     // --- структурная сетка (панель справа) ---
     // панель nil-безопасна: без App/0_grid.scd кнопка выключена — тем же
     // приёмом, что hasSpec у кнопки tuner
@@ -436,6 +475,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
         }.defer;
     };
 
+    // modmatrix depth sync <- ~modDepthSet (value_ never fires the action, so
+    // no fader<->setter feedback loop — same reason as ~mixerGuiSync)
+    ~modmatrixGuiSync = { |i, v|
+        { if(~mixerModEz[i].notNil) { ~mixerModEz[i].value_(v) } }.defer;
+    };
+
     // clear registries only if this is still the CURRENT window (or it was
     // already taken down by ~appCleanup, which nils ~mixerWin before the
     // deferred close) — otherwise the deferred onClose of an OLD window
@@ -446,6 +491,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
             ~mixerEz         = ();
             ~mixerSoloBtn    = ();
             ~mixerMuteBtn    = ();
+            ~mixerModEz      = ();
+            ~modmatrixGuiSync = nil;
             ~mixerRecBtn     = nil;
             ~mixerGridTxt    = nil;
             ~mixerGridStatus = nil;
