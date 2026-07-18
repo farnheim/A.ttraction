@@ -44,10 +44,28 @@
 };
 ~seqMute = { |layer| ~seqSetVol.(layer, 0) };
 
+// runtime timeline slot (Konstruktion): the Tdef plays ~seqTimeline when set,
+// the CONFIG demo otherwise — same runtime-vs-CONFIG принцип, that ~seqSetVol
+// против ~mixSet; ~seqTimeline = nil возвращает демо
+~seqTimeline = ~seqTimeline;
+
+// runtime-слот (user override 2026-07-18): false = секвенсор НЕ дирижирует
+// громкостями (vols/active/gone и глушение в start/stop пропускаются, set:
+// остаётся) — громкости у исполнителя; Konstruktion ставит false, демо — true
+~seqDriveVols = ~seqDriveVols ? true;
+
 // apply one timeline block
 ~seqApplyBlock = { |block|
-    (block.active   ? []).do { |l| ~seqRaise.(l) };
-    (block.gone     ? []).do { |l| ~seqMute.(l) };
+    if(~seqDriveVols == true) {
+        // block[\vols]: [[\layer, rel]] — уровень блока ОТНОСИТЕЛЬНО живого
+        // сведения (rel × ~cfg_mixer.levels), сведение нулями не перетирается
+        (block[\vols]   ? []).do { |pair|
+            var lv = ~cfg_mixer.levels[pair[0]];
+            if(lv.notNil) { ~seqSetVol.(pair[0], pair[1] * lv.vol) };
+        };
+        (block.active   ? []).do { |l| ~seqRaise.(l) };
+        (block.gone     ? []).do { |l| ~seqMute.(l) };
+    };
     // block[\set] (NOT block.set): .set is an Event method shadowing the key
     (block[\set]    ? []).do { |triple|
         Ndef(triple[0].asSymbol).set(triple[1], triple[2]);
@@ -59,7 +77,7 @@
 ~seqStartTime    = ~seqStartTime    ? nil;
 
 Tdef(\ung_sequencer, {
-    var line = ~cfg_seq.timeline;
+    var line = ~seqTimeline ? ~cfg_seq.timeline;
     var prevT = 0;
     line.do { |block, i|
         var wait = (block.t - prevT).max(0);
@@ -78,7 +96,8 @@ Tdef(\ung_sequencer, {
 // --- start / stop -----------------------------------------------------
 ~seqStart = {
     // initial state: mute all layers, block t=0 raises the needed ones
-    ~mixerLayers.do { |l| ~seqMute.(l) };
+    // (only while the sequencer drives volumes — see ~seqDriveVols)
+    if(~seqDriveVols == true) { ~mixerLayers.do { |l| ~seqMute.(l) } };
     ~seqCurrentBlock = nil;
     ~seqStartTime    = Main.elapsedTime;     // wall-clock mark for viz playhead
     Tdef(\ung_sequencer).stop;
@@ -88,10 +107,14 @@ Tdef(\ung_sequencer, {
 
 ~seqStop = {
     Tdef(\ung_sequencer).stop;
-    ~mixerLayers.do { |l| ~seqMute.(l) };
+    if(~seqDriveVols == true) {
+        ~mixerLayers.do { |l| ~seqMute.(l) };
+        "seq — стоп, слои погашены.".postln;
+    } {
+        "seq — стоп (громкости у исполнителя, слои не тронуты).".postln;
+    };
     ~seqStartTime    = nil;
     ~seqCurrentBlock = nil;
-    "seq — стоп, слои погашены.".postln;
 };
 
 "4_sequencer — готов (~seqStart / ~seqStop).".postln;

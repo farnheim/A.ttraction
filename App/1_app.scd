@@ -15,7 +15,8 @@
     enableLfo:       false,   // 3_lfo.scd
     enableModMatrix: true,    // 8_modmatrix.scd (cross-layer coupling; loads before mixer)
     enableControl:   false,   // 5_control.scd (MIDI)
-    enableSequencer: false,   // 4_sequencer.scd
+    enableSequencer: true,    // 4_sequencer.scd
+    enableKonstruktion: true, // 9_konstruktion.scd (форма §E.6; ТРЕБУЕТ enableSequencer + enableModMatrix)
     enableVizGui:    false,    // 7_viz.scd (only useful with enableLfo/Sequencer)
     autostart:       false,    // start timeline automatically
     sortSynths:      true      // load synths/*.scd alphabetically
@@ -51,6 +52,13 @@ s.options.numWireBufs = 512;
         ~seqClock.stop;
         ~seqClock = nil;
     };
+    // Konstruktion (9_konstruktion.scd): runtime-таймлайн и состояние акта;
+    // Tdef/Ndef/клок уже очищены строками выше; nil у ~seqDriveVols вернёт
+    // дефолт true при следующей загрузке секвенсора
+    ~seqTimeline  = nil;
+    ~seqDriveVols = nil;
+    ~konActive    = false;
+    ~konCurrent   = nil;
     if(~busDry.notNil)        { ~busDry.free;        ~busDry = nil };
     if(~busFxSendRev.notNil)  { ~busFxSendRev.free;  ~busFxSendRev = nil };
     if(~busFxSendDly.notNil)  { ~busFxSendDly.free;  ~busFxSendDly = nil };
@@ -174,12 +182,27 @@ s.waitForBoot({
         "UNGRUND app — MIDI ВЫКЛ (enableControl=false).".postln;
     };
 
-    // 7. sequencer (last)
+    // 7. sequencer (last of the sound modules)
     if(~cfg_app.enableSequencer) {
         (~appDir +/+ "4_sequencer.scd").load;
         s.sync;
     } {
         "UNGRUND app — секвенсор ВЫКЛ (enableSequencer=false).".postln;
+    };
+
+    // 7b. konstruktion (после секвенсора, до viz): форма §E.6 — акт генерации
+    // сетки = макроформа + топология модуляции; требует оба модуля-исполнителя
+    if(~cfg_app.enableKonstruktion) {
+        if(~cfg_app.enableSequencer and: { ~cfg_app.enableModMatrix }) {
+            (~appDir +/+ "9_konstruktion.scd").load;
+            s.sync;
+        } {
+            ("UNGRUND app — Konstruktion пропущен: нужны "
+                ++ if(~cfg_app.enableSequencer, "", "enableSequencer ")
+                ++ if(~cfg_app.enableModMatrix, "", "enableModMatrix")).warn;
+        };
+    } {
+        "UNGRUND app — Konstruktion ВЫКЛ (enableKonstruktion=false).".postln;
     };
 
     // 8. visualization (optional, very last)

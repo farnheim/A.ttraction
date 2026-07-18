@@ -58,18 +58,21 @@
             .string_("секвенсор не загружен (enableSequencer=false)")
             .stringColor_(Color(0.6, 0.4, 0.4)).font_(Font("Menlo", 11));
     } {
-        var tl    = ~cfg_seq.timeline;
-        var tMax  = (tl.collect { |b| b.t }.maxItem ? 1).max(1);
         var x0    = 18, vw = w - 36, vy = 60, vh = seqH;
         seqView = UserView(~vizWin, Rect(x0, vy, vw, vh));
         seqView.background_(Color.gray(0.06));
         seqView.drawFunc_({ |uv|
             var bw = uv.bounds.width, bh = uv.bounds.height;
+            // runtime-слот Konstruktion читается В drawFunc (view анимирован):
+            // акт после открытия окна сразу виден, nil возвращает демо CONFIG
+            var tl    = ~seqTimeline ? ~cfg_seq.timeline;
+            var tMax  = (tl.collect { |b| b.t }.maxItem ? 1).max(1);
             tl.do { |b, i|
                 var bx     = (b.t / tMax) * bw;
                 var nextT  = (i < (tl.size - 1)).if({ tl[i + 1].t }, { tMax });
                 var segW   = ((nextT - b.t) / tMax * bw).max(2);
-                var active = b.active ? [];
+                var active = (b.active ? []).collect(_.asString)
+                    ++ (b[\vols] ? []).collect { |p| p[0].asString ++ "×" ++ p[1] };
                 var gone   = b.gone ? [];
                 var cur    = (~seqCurrentBlock == i);
                 Pen.fillColor = cur.if(
@@ -78,7 +81,7 @@
                 Pen.fillRect(Rect(bx, 14, segW - 2, bh - 28));
                 Pen.stringAtPoint(b.t.asString ++ "s",
                     (bx + 4) @ 2, Font("Menlo", 9), Color.gray(0.7));
-                Pen.stringAtPoint(active.collect(_.asString).join(" "),
+                Pen.stringAtPoint(active.join(" "),
                     (bx + 4) @ 18, Font("Menlo", 9), Color(0.7, 0.85, 0.6));
                 if(gone.notEmpty) {
                     Pen.stringAtPoint("-" ++ gone.collect(_.asString).join(" "),

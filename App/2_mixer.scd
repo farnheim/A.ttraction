@@ -43,7 +43,9 @@
 };
 
 // per-layer router: dry only -> ~busDry (fx sends are collected by the
-// single aggregator below so the send bus has exactly ONE writer)
+// single aggregator below so the send bus has exactly ONE writer).
+// Konstruktion (user override 2026-07-18) volumes are the performer's — the
+// act touches neither \vol nor any fade here, so the plain 0.1 lag stands
 ~mixerLayers.do { |layer|
     var routerKey = ("mix_" ++ layer).asSymbol;
     var lv = ~cfg_mixer.levels[layer];
@@ -222,6 +224,23 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerGridEz     = nil;   // EZSlider (сложность)
 ~gridComplexity  = ~gridComplexity ? 0.5;   // survives reopen / missing 0_grid
 
+// Konstruktion slots (9_konstruktion.scd may be absent — nil-safe like 0_grid)
+~mixerKonTtier   = nil;   // NumberBox (T_tier, партитурный — читается только актом)
+~mixerKonBtns    = ();    // \start / \stop / \score Buttons
+~gridLastText    = ~gridLastText;   // поле — партитура: переживает переоткрытие окна
+
+// enable-состояние кнопок пьесы от ~konActive (зовут постройка окна и акт).
+// Гейтится только старт/стоп: «партитура» всегда активна и сама отчитывается
+// статусом «нет акта» — молчащая выключенная кнопка читалась как поломка
+~mixerKonSync = {
+    {
+        var on = (~konActive == true);
+        [\start, \stop].do { |k|
+            if(~mixerKonBtns[k].notNil) { ~mixerKonBtns[k].enabled_(on) };
+        };
+    }.defer;
+};
+
 // update all solo-button visuals from ~mixSoloCur
 ~mixerRefreshSolo = {
     { ~mixerSoloBtn.keysValuesDo { |layer, btn|
@@ -239,6 +258,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~ungBuildMixer = {
     var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
     var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
+    var konRange, konTtierBox, konStartBtn, konStopBtn, konScoreBtn;
     var hasMod;
     var fxY, hasFx, fxModeItems;
     var win;   // local capture: closures must not depend on the global slot
@@ -251,15 +271,14 @@ Ndef(\master).play(out: 0, numChannels: 2);
     hasFx = ~cfg_effects.notNil;
     fxY   = by;
     if(hasFx) { by = by + 34 };
-    // окно выше суммы рядов слоёв: справа стоит поле структурной сетки, ему
-    // нужна высота (поле до 64 строк — TextView доскроллит остаток)
-    // gw под 64 колонки канона: Menlo 11 ≈ 6.63 px/символ -> 424 px + рамка
-    // TextView + вертикальный скроллбар. QTextView не умеет отключать перенос,
-    // и на узком поле Qt переносит хвост строки — псевдографика рассыпается
-    gx = 1002; gw = 480;
+    // поле фиксировано 16×16 (user override 2026-07-18): TextView подогнан
+    // ровно под 16 строк Menlo 17 (~10.3 px/символ, ~20 px/строка) + рамка.
+    // QTextView не умеет отключать перенос — ширина ОБЯЗАНА вмещать 16
+    // символов + скроллбар, иначе Qt переносит хвост и псевдографика рассыпается
+    gx = 1002; gw = 210;
     w  = gx + gw + 16;
     h  = (by + 40 + 40).max(620);
-    gh = h - y0 - 100;
+    gh = 332;
     hasGrid = ~gridGenerate.notNil;
     hasMod  = ~modKeys.notNil and: { ~modKeys.size > 0 };
 
@@ -275,10 +294,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerModEz      = ();
     ~mixerFx         = ();
     ~modmatrixGuiSync = nil;
+    ~modmatrixGuiRelabel = nil;
     ~mixerRecBtn     = nil;
     ~mixerGridTxt    = nil;
     ~mixerGridStatus = nil;
     ~mixerGridEz     = nil;
+    ~mixerKonTtier   = nil;
+    ~mixerKonBtns    = ();
 
     win = Window(
         "UNGRUND · mixer — живое сведение слоёв (App)",
@@ -463,6 +485,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
                 ControlSpec(0, 1, \lin, 0, e[\depth]),
                 { |sl| ~modDepthSet.(i, sl.value) }, e[\depth]);
             ez.round_(0.001);
+            ez.labelView.stringColor_(Color.white);
             // связь на незагруженном слое (subset ~cfg_app.layers) — слайдер виден, но мёртв
             if(e[\enabled].not) { ez.enabled_(false) };
             ~mixerModEz[i] = ez;
@@ -477,17 +500,25 @@ Ndef(\master).play(out: 0, numChannels: 2);
     // панель nil-безопасна: без App/0_grid.scd кнопка выключена — тем же
     // приёмом, что hasSpec у кнопки tuner
     StaticText(~mixerWin, Rect(gx, 50, gw, 16))
-        .string_("структурная сетка — Ф/связи (канон structure-grid)")
+        .string_("структурная сетка 16×16 (канон)")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
 
     gridTv = TextView(~mixerWin, Rect(gx, y0, gw, gh))
-        .font_(Font("Menlo", 11))
+        .font_(Font("Menlo", 17))
         .editable_(false)
         .background_(Color.gray(0.08))
-        .stringColor_(Color.gray(0.88));
+        .stringColor_(Color.white);
+    // Qt: плоский текст красится палитрой (baseText), stringColor_ его не берёт —
+    // см. note в TextView.schelp; после каждого string_ цвет добивается по диапазону
+    gridTv.palette_(gridTv.palette.baseText_(Color.white));
+    // поле — партитура текущего акта: обязано пережить переоткрытие окна
+    if(~gridLastText.notNil) {
+        gridTv.string_(~gridLastText);
+        gridTv.setStringColor(Color.white, 0, ~gridLastText.size);
+    };
     ~mixerGridTxt = gridTv;
 
-    gridEz = EZSlider(~mixerWin, Rect(gx, h - 96, gw, 24), "сложность",
+    gridEz = EZSlider(~mixerWin, Rect(gx, y0 + gh + 8, gw, 24), "сложность",
         ControlSpec(0, 1, \lin, 0, ~gridComplexity ? 0.5),
         // слайдер только пишет ~gridComplexity: перерисовывать поле на каждый
         // пиксель движения незачем, структуру строит кнопка
@@ -495,26 +526,68 @@ Ndef(\master).play(out: 0, numChannels: 2);
     gridEz.round_(0.01);
     ~mixerGridEz = gridEz;
 
-    gridStatus = StaticText(~mixerWin, Rect(gx, h - 36, gw, 20))
-        .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
+    // до 5 строк статуса Menlo 9: сюда пишутся и длинный статус акта,
+    // и путь записанной партитуры — StaticText переносит сам
+    gridStatus = StaticText(~mixerWin, Rect(gx, y0 + gh + 98, gw, 56))
+        .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
     ~mixerGridStatus = gridStatus;
 
-    gridBtn = Button(~mixerWin, Rect(gx, h - 66, 150, 24))
+    gridBtn = Button(~mixerWin, Rect(gx, y0 + gh + 38, 118, 24))
         .states_([["сгенерировать", Color.white, Color(0.18, 0.34, 0.44)]])
         .font_(Font("Menlo", 11, true))
         .action_({
-            var g = ~gridGenerate.(~gridComplexity ? 0.5);
-            if(g.isNil) {
-                gridStatus.string_(
-                    "отказ: не разложилось за " ++ ~cfg_grid.graphTries ++ " графов"
-                );
+            // с модулем Konstruktion кнопка = АКТ (поле + таймлайн + 16 линий,
+            // GUI обновляет сам акт); без него — прежний чистый рисунок
+            if(~konGenerate.notNil) {
+                ~konGenerate.(~gridComplexity ? 0.5, nil, ~konTtier);
             } {
-                gridTv.string_(g[\text]);
-                gridStatus.string_(
-                    "Ф: " ++ g[\nodes] ++ " · поле: " ++ g[\cols] ++ "×" ++ g[\rows]
-                );
+                var g = ~gridGenerate.(~gridComplexity ? 0.5);
+                if(g.isNil) {
+                    gridStatus.string_(
+                        "отказ: не разложилось за " ++ ~cfg_grid.graphTries ++ " графов"
+                    );
+                } {
+                    ~gridLastText = g[\text];
+                    gridTv.string_(g[\text]);
+                    gridTv.setStringColor(Color.white, 0, g[\text].size);
+                    gridStatus.string_(
+                        "Ф: " ++ g[\nodes] ++ " · поле: " ++ g[\cols] ++ "×" ++ g[\rows]
+                    );
+                };
             };
         });
+
+    // Konstruktion: T_tier — параметр партитуры (читается только актом),
+    // старт/стоп пьесы и партитура; всё nil-safe без 9_konstruktion.scd
+    konRange = (~cfg_kon !? { ~cfg_kon[\tTierRange] }) ? [15, 60];
+    StaticText(~mixerWin, Rect(gx + 122, y0 + gh + 38, 12, 24)).string_("T")
+        .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
+    konTtierBox = NumberBox(~mixerWin, Rect(gx + 136, y0 + gh + 38, 44, 24))
+        .clipLo_(konRange[0]).clipHi_(konRange[1])
+        .step_(1).scroll_step_(1)
+        .font_(Font("Menlo", 11))
+        .value_(~konTtier ? ((~cfg_kon !? { ~cfg_kon[\tTier] }) ? 30))
+        .action_({ |nb| ~konTtier = nb.value });
+    ~mixerKonTtier = konTtierBox;
+
+    konStartBtn = Button(~mixerWin, Rect(gx, y0 + gh + 68, 64, 24))
+        .states_([["старт", Color.white, Color(0.2, 0.4, 0.24)]])
+        .font_(Font("Menlo", 11, true))
+        .action_({ if((~konActive == true) and: { ~seqStart.notNil }) { ~seqStart.value } });
+    konStopBtn = Button(~mixerWin, Rect(gx + 68, y0 + gh + 68, 64, 24))
+        .states_([["стоп", Color.white, Color(0.42, 0.2, 0.2)]])
+        .font_(Font("Menlo", 11, true))
+        .action_({ if((~konActive == true) and: { ~seqStop.notNil }) { ~seqStop.value } });
+    konScoreBtn = Button(~mixerWin, Rect(gx + 136, y0 + gh + 68, 74, 24))
+        .states_([["партитура", Color.white, Color(0.3, 0.3, 0.42)]])
+        .font_(Font("Menlo", 11, true))
+        .action_({
+            if(~konSaveScore.notNil) { ~konSaveScore.value } {
+                gridStatus.string_("модуль Konstruktion не загружен (enableKonstruktion)");
+            };
+        });
+    ~mixerKonBtns = ( start: konStartBtn, stop: konStopBtn, score: konScoreBtn );
+    ~mixerKonSync.value;
 
     if(hasGrid) {
         gridStatus.string_("сложность -> кнопка; поле выделяется и копируется");
@@ -543,6 +616,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
         { if(~mixerModEz[i].notNil) { ~mixerModEz[i].value_(v) } }.defer;
     };
 
+    // relabel hook <- ~konGenerate: после ~modBuild подписи src→dst меняются
+    // на месте, без пересборки окна
+    ~modmatrixGuiRelabel = { |i, label|
+        { if(~mixerModEz[i].notNil) { ~mixerModEz[i].labelView.string_(label) } }.defer;
+    };
+
     // clear registries only if this is still the CURRENT window (or it was
     // already taken down by ~appCleanup, which nils ~mixerWin before the
     // deferred close) — otherwise the deferred onClose of an OLD window
@@ -555,10 +634,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
             ~mixerMuteBtn    = ();
             ~mixerModEz      = ();
             ~modmatrixGuiSync = nil;
+            ~modmatrixGuiRelabel = nil;
             ~mixerRecBtn     = nil;
             ~mixerGridTxt    = nil;
             ~mixerGridStatus = nil;
             ~mixerGridEz     = nil;
+            ~mixerKonTtier   = nil;
+            ~mixerKonBtns    = ();
             ~mixerWin        = nil;
         };
     });

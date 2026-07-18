@@ -2,25 +2,30 @@
 // docs/architecture/structure-grid/README.md (правила 1–6).
 // Чистая логика, сервер не нужен. Грузится шагом 0a в 1_app.scd, сразу за
 // 0_lib.scd — окно микшера (шаг 4) читает ~gridGenerate.
-// API: ~gridGenerate.(complexity) -> ( text:, field:, nodes:, rows:, cols: )
+// API: ~gridGenerate.(complexity, seed) ->
+//      ( text:, field:, nodes:, rows:, cols:, seed:, complexity:, graph: )
 //      или nil при отказе; ~gridRender.(grid) -> строка поля.
+//      nodes ОСТАЁТСЯ числом (его читает статус микшера); список узлов и рёбер
+//      (индексами) — только внутри graph: для деривации 9_konstruktion.scd.
 // Алфавит символов: docs/architecture/structure-grid/char.md.
 
 (
 // ===== CONFIG — edit here ============================================
 // Между парой [a, b] интерполирует слайдер сложности 0..1.
+// Поле фиксировано 16×16 (user override 2026-07-18): компактные, плотные,
+// ветвисто-сходящиеся графы — mergeProb поднят ради замыканий (циклов census).
 ~cfg_grid = (
-    nodes:      [5, 24],        // число Ф при сложности 0 -> 1
-    branchProb: [0.15, 0.60],   // вероятность ветвления Ф (правило 4)
-    mergeProb:  [0.10, 0.50],   // вероятность схождения двух ветвей в один Ф
+    nodes:      [7, 20],        // число Ф при сложности 0 -> 1
+    branchProb: [0.35, 0.90],   // вероятность ветвления Ф (правило 4)
+    mergeProb:  [0.45, 0.95],   // вероятность схождения двух ветвей в один Ф
     maxOut:     3,              // максимум исходящих связей из узла
     // Потолок ширины фронта. Растеризатор разводит связи только сегментами и
     // углами (тройники/кресты канон резервирует), и фронт шире 5 на плоскости
     // без пересечений почти не разводится. Без потолка такие графы всё равно
     // отбраковывались бы — но молча, смещая выборку в сторону узких.
     maxFront:   [3, 5],         // ширина фронта при сложности 0 -> 1
-    cols:       [16, 64],       // ширина поля  (канон: 16 … 64)
-    rows:       [16, 64],       // высота поля  (канон: 16 … 64)
+    cols:       [16, 16],       // ширина поля  (канонный минимум, фикс.)
+    rows:       [16, 16],       // высота поля  (канонный минимум, фикс.)
     // Шаг рангов по строкам НЕ фиксирован: он выводится из числа рангов графа
     // так, чтобы граф занял поле по высоте (rowGap = (rows-2) div (tiers-1),
     // зажат в [rowGapMin, rowGapMax]). Фиксированный шаг молча отбраковывал по
@@ -29,10 +34,12 @@
     // поэтому широкий низкий граф получает много полос и разводится.
     rowGapMin:  2,              // правило 3: между рангами хотя бы одна связь
     rowGapMax:  8,              // потолок шага (длиннее связи не растягиваем)
-    colGap:     4,              // шаг узлов по колонкам   (>= 3: боковые выходы)
+    colGap:     3,              // шаг узлов по колонкам   (>= 3: боковые выходы)
     relax:      4,              // сглаживающих проходов раскладки (короче связи)
-    rasterTries: 8,             // попыток развести ОДИН граф (перебор полос)
-    graphTries: 40              // попыток вырастить новый граф до отказа
+    // 16×16 разводится тяжело (полос мало): 20-Ф графы при c=1 проходят 100%
+    // замера только с таким запасом ретраев; 22 Ф давали 70% — потолок поля
+    rasterTries: 24,            // попыток развести ОДИН граф (перебор полос)
+    graphTries: 120             // попыток вырастить новый граф до отказа
 );
 
 
@@ -337,12 +344,22 @@
     pass = {
         var fine = true;
         field = Array.fill(rows, { Array.fill(cols, " ") });
+        // routeLen валиден только из УСПЕШНОГО прохода: каждый pass сбрасывает
+        // поле, и без сброса неудачный проход оставил бы длину чужой полосы
+        graph[\edges].do { |e| e[\routeLen] = nil };
         graph[\nodes].do { |n| if(place.([[rowOf.(n), n.col, n.ch]]).not) { fine = false } };
         edgesByReach.do { |e|
             if(fine) {
                 var lanes = ~gridSpan.(rowOf.(e.src) + 1, rowOf.(e.dst) - 1).scramble;
                 var done = false;
-                lanes.do { |j| if(done.not) { done = place.(cells.(e, j)) } };
+                lanes.do { |j|
+                    var list;
+                    if(done.not) {
+                        list = cells.(e, j);
+                        done = place.(list);
+                        if(done) { e[\routeLen] = list.size };
+                    };
+                };
                 if(done.not) { fine = false };
             };
         };
@@ -359,10 +376,33 @@
         ok = routed;
     };
 
-    if(ok) { ( field: field, nodes: graph[\nodes].size, rows: rows, cols: cols ) };
+    if(ok) {
+        var idx = IdentityDictionary[];
+        graph[\nodes].do { |n, i| idx[n] = i };
+        (
+            field: field, nodes: graph[\nodes].size, rows: rows, cols: cols,
+            graph: (
+                tiers: graph[\tiers], rowGap: rowGap,
+                nodes: graph[\nodes].collect { |n, i|
+                    (
+                        i: i, tier: n.tier, ch: n.ch,
+                        indeg: n.ins.size, outdeg: n.outs.size,
+                        // сила входа (правило 6): корень и точки схождения сильны
+                        strongIn: (n.ins.size == 0)
+                            or: { n.ins.size >= 2 }
+                            or: { n.ins[0].strong }
+                    )
+                },
+                edges: graph[\edges].collect { |e|
+                    ( src: idx[e.src], dst: idx[e.dst],
+                      strong: e.strong, routeLen: e[\routeLen] )
+                }
+            )
+        )
+    };
 };
 
-~gridGenerate = { |complexity = 0.5|
+~gridGenerate = { |complexity = 0.5, seed|
     var t = complexity.clip(0, 1);
     var target = ~gridLerp.(~cfg_grid[\nodes], t).round.asInteger.max(2);
     var bp   = ~gridLerp.(~cfg_grid[\branchProb], t);
@@ -371,11 +411,16 @@
     var rows = ~gridLerp.(~cfg_grid[\rows], t).round.asInteger;
     var mf = ~gridLerp.(~cfg_grid[\maxFront], t).round.asInteger.max(1);
     var got = nil, n = 0;
+    // seed ставится ДО цикла ретраев: ретраи графов и перебор полос потребляют
+    // один детерминированный поток -> (seed, complexity) воспроизводит рисунок
+    // побитово; seed внутри цикла зациклил бы каждый graphTry на одном графе
+    seed = seed ?? { Date.seed };
+    thisThread.randSeed = seed;
     while { got.isNil and: { n < ~cfg_grid.graphTries } } {
         n = n + 1;
         got = ~gridAttempt.(~gridGrow.(target, bp, mp, mf), cols, rows);
     };
-    got !? { got[\text] = ~gridRender.(got); got };
+    got !? { got[\text] = ~gridRender.(got); got[\seed] = seed; got[\complexity] = t; got };
 };
 
 "0_grid — генератор структурных сеток (~gridGenerate / ~gridRender).".postln;
