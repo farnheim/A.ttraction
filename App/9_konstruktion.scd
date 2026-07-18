@@ -2,7 +2,7 @@
 // генерации сетки (0_grid) читается дважды: как макроформа (таймлайн для
 // 4_sequencer) и как топология модуляции (16 линий для 8_modmatrix).
 // Законы вывода: docs/features/grid-modulation/reference.md; спека:
-// plans/active/grid-konstruktion-spec.md. Грузится шагом 7b в 1_app.scd
+// docs/features/grid-modulation/dsp-spec.md. Грузится шагом 7b в 1_app.scd
 // (требует enableSequencer + enableModMatrix). Чистый sclang: не бутит
 // сервер, не пишет в шины, аудио-графов не создаёт; cleanup — в ~appCleanup.
 // API: ~konGenerate.(complexity, seed, tTier) — акт (три артефакта разом);
@@ -41,7 +41,8 @@
 );
 
 // чистая функция графа: только опубликованные признаки экспорта 0_grid
-// (символ, ранг, степени, strongIn, strong, routeLen) — третьего прочтения нет
+// (символ, ранг, степени остов/полный, strongIn, strong, routeLen, род ребра
+// ret и выводимый из него признак петли — поправка II) — третьего прочтения нет
 ~konDerive = { |grid, tTier|
     var g = grid[\graph];
     var nodes = g[\nodes], edges = g[\edges];
@@ -189,6 +190,7 @@
       census: census, loops: loopPair,
       edgeTab: edges.collect { |e|
           ( src: layerOfNode.(nodes[e[\src]]), dst: layerOfNode.(nodes[e[\dst]]),
+            srcI: e[\src], dstI: e[\dst],
             ret: e[\ret] == true, strong: e[\strong] == true,
             routeLen: e[\routeLen] )
       },
@@ -324,12 +326,15 @@
             };
         };
         sb.add("");
-        sb.add("## Рёбра графа (род: прямое/возврат — правило 7)");
+        sb.add("## Рёбра графа (род: прямое/возврат — правило 7; узлы индексами:"
+            ++ " закон предка поверяем по самой таблице)");
         sb.add("");
         sb.add("| # | src | dst | род | сила | routeLen |");
         sb.add("|" ++ "---|".dup(6).join);
         (kon[\edgeTab] ? []).do { |e, k|
-            sb.add("| " ++ k ++ " | " ++ e[\src] ++ " | " ++ e[\dst]
+            sb.add("| " ++ k
+                ++ " | " ++ e[\src] ++ "(" ++ (e[\srcI] ? "—") ++ ")"
+                ++ " | " ++ e[\dst] ++ "(" ++ (e[\dstI] ? "—") ++ ")"
                 ++ " | " ++ if(e[\ret]) { "возврат" } { "прямое" }
                 ++ " | " ++ if(e[\strong]) { "сильное" } { "слабое" }
                 ++ " | " ++ e[\routeLen] ++ " |");

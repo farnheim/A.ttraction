@@ -51,7 +51,9 @@
 
 // runtime-слот (user override 2026-07-18): false = секвенсор НЕ дирижирует
 // громкостями (vols/active/gone и глушение в start/stop пропускаются, set:
-// остаётся) — громкости у исполнителя; Konstruktion ставит false, демо — true
+// остаётся) — громкости у исполнителя. Акт Konstruktion ставит false ВМЕСТЕ
+// с ~seqTimeline; демо (~seqTimeline = nil) всегда дирижирует: ~seqStart и
+// Tdef восстанавливают true, когда таймлайна акта нет — false не защёлкивается
 ~seqDriveVols = ~seqDriveVols ? true;
 
 // apply one timeline block
@@ -77,8 +79,9 @@
 ~seqStartTime    = ~seqStartTime    ? nil;
 
 Tdef(\ung_sequencer, {
-    var line = ~seqTimeline ? ~cfg_seq.timeline;
-    var prevT = 0;
+    var line, prevT = 0;
+    if(~seqTimeline.isNil) { ~seqDriveVols = true };
+    line = ~seqTimeline ? ~cfg_seq.timeline;
     line.do { |block, i|
         var wait = (block.t - prevT).max(0);
         if(wait > 0) { wait.wait };
@@ -95,6 +98,9 @@ Tdef(\ung_sequencer, {
 
 // --- start / stop -----------------------------------------------------
 ~seqStart = {
+    // демо всегда дирижирует: false акта не переживает возврат к демо
+    // (акт выставляет false вместе с ~seqTimeline — см. слот выше)
+    if(~seqTimeline.isNil) { ~seqDriveVols = true };
     // initial state: mute all layers, block t=0 raises the needed ones
     // (only while the sequencer drives volumes — see ~seqDriveVols)
     if(~seqDriveVols == true) { ~mixerLayers.do { |l| ~seqMute.(l) } };
