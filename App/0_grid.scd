@@ -1,12 +1,14 @@
 // App/0_grid.scd — UNGRUND · GRID: генератор структурных сеток по канону
-// docs/architecture/structure-grid/README.md (правила 1–6).
+// docs/architecture/structure-grid/README.md (правила 1–9: остов 1–6,
+// возвраты 7, пересечения 8, ось сложности 9 — поправка 2026-07-18).
 // Чистая логика, сервер не нужен. Грузится шагом 0a в 1_app.scd, сразу за
 // 0_lib.scd — окно микшера (шаг 4) читает ~gridGenerate.
 // API: ~gridGenerate.(complexity, seed) ->
-//      ( text:, field:, nodes:, rows:, cols:, seed:, complexity:, graph: )
+//      ( text:, field:, nodes:, rows:, cols:, seed:, complexity:, counts:, graph: )
 //      или nil при отказе; ~gridRender.(grid) -> строка поля.
 //      nodes ОСТАЁТСЯ числом (его читает статус микшера); список узлов и рёбер
-//      (индексами) — только внутри graph: для деривации 9_konstruktion.scd.
+//      (индексами, ребро несёт род ret:) — только внутри graph: для деривации
+//      9_konstruktion.scd; counts: три счётчика поля для аудита развёрткой.
 // Алфавит символов: docs/architecture/structure-grid/char.md.
 
 (
@@ -16,14 +18,14 @@
 // ветвисто-сходящиеся графы — mergeProb поднят ради замыканий (циклов census).
 ~cfg_grid = (
     nodes:      [7, 20],        // число Ф при сложности 0 -> 1
-    branchProb: [0.35, 0.90],   // вероятность ветвления Ф (правило 4)
-    mergeProb:  [0.45, 0.95],   // вероятность схождения двух ветвей в один Ф
+    // нижние границы НУЛЕВЫЕ (правило 9): c = 0 обязан дать литерально один
+    // ствол — ни ветвлений, ни схождений, ни возвратов, ни крестов
+    branchProb: [0.00, 0.90],   // вероятность ветвления Ф (правило 4)
+    mergeProb:  [0.00, 0.95],   // вероятность схождения двух ветвей в один Ф
     maxOut:     3,              // максимум исходящих связей из узла
-    // Потолок ширины фронта. Растеризатор разводит связи только сегментами и
-    // углами (тройники/кресты канон резервирует), и фронт шире 5 на плоскости
-    // без пересечений почти не разводится. Без потолка такие графы всё равно
-    // отбраковывались бы — но молча, смещая выборку в сторону узких.
-    maxFront:   [3, 5],         // ширина фронта при сложности 0 -> 1
+    // Потолок ширины фронта: фронт шире 5 почти не разводится даже с квотой
+    // крестов. Без потолка такие графы отбраковывались бы молча, смещая выборку.
+    maxFront:   [1, 5],         // ширина фронта при сложности 0 -> 1
     cols:       [16, 16],       // ширина поля  (канонный минимум, фикс.)
     rows:       [16, 16],       // высота поля  (канонный минимум, фикс.)
     // Шаг рангов по строкам НЕ фиксирован: он выводится из числа рангов графа
@@ -261,10 +263,21 @@
 // выбор полосы под перекладину. Поэтому неудачную разводку перебираем НА ТОМ ЖЕ
 // графе (rasterTries) и только потом отдаём его назад — иначе отбраковка по
 // коллизии выбивает целые классы графов (широкие низкие) и смещает выборку.
-~gridAttempt = { |graph, cols, rows|
+// Поправка 2026-07-18: возвраты (правило 7) выбираются по закону предка после
+// назначения сторон и укладываются best-effort (квота — верхняя граница,
+// неуложившийся возврат отбрасывается, остов не отбраковывается); пересечения
+// (правило 8) разрешены вторым кругом полос в пределах квоты правила 9.
+~gridAttempt = { |graph, cols, rows, cx = 0.5|
     var field;
     var ok = true;
     var rowGap, rowOf, cells, place, edgesByReach, routed, pass;
+    var nN = graph[\nodes].size;
+    var retQuota   = (cx * nN / 4).floor.asInteger;
+    var crossQuota = (cx * nN / 3).floor.asInteger;
+    var crossCount = 0;
+    var rets, ancestorsOf, freeH, retCells, retLanes;
+    var isV = { |s| (s == "│") or: { s == "║" } };
+    var isH = { |s| (s == "─") or: { s == "═" } };
 
     // шаг рангов под конкретный граф: стволовой сжимается до rowGapMin и влезает
     // по высоте, низкий растягивается до rowGapMax и получает полосы под
@@ -300,6 +313,102 @@
 
     if(ok) { ok = ~gridSides.(graph) };
 
+    // --- возвраты (правило 7): выбор ПОСЛЕ раскладки и сторон -------------
+    // предки — упорядоченными списками, не IdentitySet: порядок итерации сета
+    // зависит от identityHash (адресов) и сломал бы побитовый детерминизм seed
+    rets = List[];
+    if(ok) {
+        graph[\nodes].do { |n|
+            n[\sidesUsed] = n.ins.collect { |e| e.entrySide }
+                ++ n.outs.collect { |e| e.exitSide };
+            n[\retNeed] = 0;
+        };
+        ancestorsOf = IdentityDictionary[];
+        graph[\nodes].do { |n|
+            var lst = List[];
+            n.ins.do { |e|
+                if(lst.detect { |a| a === e.src }.isNil) { lst.add(e.src) };
+                ancestorsOf[e.src].do { |a|
+                    if(lst.detect { |x| x === a }.isNil) { lst.add(a) };
+                };
+            };
+            ancestorsOf[n] = lst;
+        };
+        freeH = { |n|
+            ([\left, \right].reject { |s| n[\sidesUsed].includes(s) }).size;
+        };
+        if(retQuota > 0) {
+            var cands = List[];
+            graph[\nodes].do { |n|
+                ancestorsOf[n].do { |a| cands.add([n, a]) };
+            };
+            cands.asArray.scramble.do { |pair|
+                var s = pair[0], d = pair[1];
+                if((rets.size < retQuota)
+                    and: { s[\retOut] != true } and: { d[\retIn] != true }
+                    and: { freeH.(s) > s[\retNeed] } and: { freeH.(d) > d[\retNeed] }
+                ) {
+                    rets.add((
+                        src: s, dst: d,
+                        // правило 6 в распространении: возврат наследует силу
+                        // ВХОДА src — что сошлось, возвращается сильно
+                        strong: (s.ins.size >= 2)
+                            or: { s.ins.size == 0 }
+                            or: { s.ins[0].strong }
+                    ));
+                    s[\retOut] = true; d[\retIn] = true;
+                    s[\retNeed] = s[\retNeed] + 1;
+                    d[\retNeed] = d[\retNeed] + 1;
+                };
+            };
+        };
+    };
+
+    // оси возврата разносильны (канон, правило 7): сильный — ║ вертикаль,
+    // ─ горизонталь, углы ╓ ╙ ╖ ╜; слабый — │ вертикаль, ═ горизонталь,
+    // углы ╒ ╘ ╕ ╛; смешанный угол = знак смены направления чтения
+    retCells = { |e, x|
+        var src = e[\src], dst = e[\dst];
+        var r1 = rowOf.(src), c1 = src.col;
+        var r2 = rowOf.(dst), c2 = dst.col;
+        var strong = e[\strong];
+        var vert  = if(strong) { "║" } { "│" };
+        var horiz = if(strong) { "─" } { "═" };
+        var bot = if(x > c1) { if(strong) { "╜" } { "╛" } } { if(strong) { "╙" } { "╘" } };
+        var top = if(x > c2) { if(strong) { "╖" } { "╕" } } { if(strong) { "╓" } { "╒" } };
+        var out = List[];
+        ~gridSpan.(c1.min(x) + 1, c1.max(x) - 1).do { |c| out.add([r1, c, horiz]) };
+        out.add([r1, x, bot]);
+        ~gridSpan.(r2 + 1, r1 - 1).do { |r| out.add([r, x, vert]) };
+        out.add([r2, x, top]);
+        ~gridSpan.(c2.min(x) + 1, c2.max(x) - 1).do { |c| out.add([r2, c, horiz]) };
+        out;
+    };
+
+    // колонка x однозначно задаёт стороны у обоих концов (знаки x−c);
+    // x == col исключён: угол лёг бы в ячейку Ф, а возврат без колена
+    // неотличим от прямой связи (канон)
+    retLanes = { |e|
+        var src = e[\src], dst = e[\dst];
+        var out = List[];
+        (1 .. cols - 2).do { |x|
+            var sSide, dSide;
+            if((x != src.col) and: { x != dst.col }) {
+                sSide = if(x > src.col) { \right } { \left };
+                dSide = if(x > dst.col) { \right } { \left };
+                if(
+                    src[\sidesUsed].includes(sSide).not
+                    and: { src[\retSides].includes(sSide).not }
+                    and: { dst[\sidesUsed].includes(dSide).not }
+                    and: { dst[\retSides].includes(dSide).not }
+                ) {
+                    out.add(( x: x, srcSide: sSide, dstSide: dSide ));
+                };
+            };
+        };
+        out.asArray.scramble;
+    };
+
     cells = { |e, j|
         var n1 = e.src, n2 = e.dst;
         var r1 = rowOf.(n1), r2 = rowOf.(n2);
@@ -326,15 +435,40 @@
         out;
     };
 
-    // коллизия = пересечение связей, которое потребовало бы ┼/╬ — канон их не
-    // даёт, поэтому пишем только целиком свободный маршрут
-    place = { |list|
-        var free = list.every { |t|
-            (t[0] >= 0) and: { t[0] < rows } and: { t[1] >= 0 } and: { t[1] < cols }
-                and: { field[t[0]][t[1]] == " " };
+    // Правило 8: пересечение — встреча без узла, строго вертикаль сквозь
+    // горизонталь, в пределах квоты; крест по силам осей. Углы, Ф и уже
+    // поставленные кресты не пересекаются (в ячейке не более одного креста).
+    // allowCross=false — прежний плоский закон (и весь c=0).
+    place = { |list, allowCross = false|
+        var need = List[];
+        var fine = true;
+        var crossFor = { |vSym, hSym|
+            if(vSym == "║") { if(hSym == "═") { "╬" } { "╫" } }
+            { if(hSym == "═") { "╪" } { "┼" } };
         };
-        if(free) { list.do { |t| field[t[0]][t[1]] = t[2] } };
-        free;
+        list.do { |t|
+            var cur;
+            if(fine) {
+                if((t[0] < 0) or: { t[0] >= rows } or: { t[1] < 0 } or: { t[1] >= cols }) {
+                    fine = false;
+                } {
+                    cur = field[t[0]][t[1]];
+                    case
+                        { cur == " " } { }
+                        { allowCross.not } { fine = false }
+                        { isV.(t[2]) and: { isH.(cur) } } { need.add([t[0], t[1], crossFor.(t[2], cur)]) }
+                        { isH.(t[2]) and: { isV.(cur) } } { need.add([t[0], t[1], crossFor.(cur, t[2])]) }
+                        { true } { fine = false };
+                };
+            };
+        };
+        if(fine and: { (crossCount + need.size) > crossQuota }) { fine = false };
+        if(fine) {
+            list.do { |t| if(field[t[0]][t[1]] == " ") { field[t[0]][t[1]] = t[2] } };
+            need.do { |t| field[t[0]][t[1]] = t[2] };
+            crossCount = crossCount + need.size;
+        };
+        fine;
     };
 
     edgesByReach = graph[\edges].sort { |a, b|
@@ -344,23 +478,53 @@
     pass = {
         var fine = true;
         field = Array.fill(rows, { Array.fill(cols, " ") });
+        crossCount = 0;
         // routeLen валиден только из УСПЕШНОГО прохода: каждый pass сбрасывает
         // поле, и без сброса неудачный проход оставил бы длину чужой полосы
         graph[\edges].do { |e| e[\routeLen] = nil };
+        rets.do { |e| e[\routeLen] = nil; e[\placed] = false };
+        graph[\nodes].do { |n| n[\retSides] = List[] };
         graph[\nodes].do { |n| if(place.([[rowOf.(n), n.col, n.ch]]).not) { fine = false } };
         edgesByReach.do { |e|
             if(fine) {
                 var lanes = ~gridSpan.(rowOf.(e.src) + 1, rowOf.(e.dst) - 1).scramble;
                 var done = false;
-                lanes.do { |j|
-                    var list;
-                    if(done.not) {
-                        list = cells.(e, j);
-                        done = place.(list);
-                        if(done) { e[\routeLen] = list.size };
+                // укладка без пересечения предпочтительна (правило 8): второй
+                // круг по тем же полосам — только когда плоской укладки нет
+                [false, true].do { |allow|
+                    lanes.do { |j|
+                        var list;
+                        if(done.not) {
+                            list = cells.(e, j);
+                            done = place.(list, allow);
+                            if(done) { e[\routeLen] = list.size };
+                        };
                     };
                 };
                 if(done.not) { fine = false };
+            };
+        };
+        // возвраты — best-effort ПОСЛЕ всего остова: квота — верхняя граница,
+        // неуложившийся возврат отбрасывается, а не отбраковывает рисунок
+        if(fine) {
+            rets.do { |e|
+                var lanes = retLanes.(e);
+                var done = false;
+                [false, true].do { |allow|
+                    lanes.do { |lane|
+                        var list;
+                        if(done.not) {
+                            list = retCells.(e, lane[\x]);
+                            done = place.(list, allow);
+                            if(done) {
+                                e[\routeLen] = list.size;
+                                e[\placed] = true;
+                                e[\src][\retSides].add(lane[\srcSide]);
+                                e[\dst][\retSides].add(lane[\dstSide]);
+                            };
+                        };
+                    };
+                };
             };
         };
         fine;
@@ -378,16 +542,40 @@
 
     if(ok) {
         var idx = IdentityDictionary[];
+        var placedRets = rets.select { |e| e[\placed] == true };
+        var retInOf = IdentityDictionary[], retOutOf = IdentityDictionary[];
+        var transitions = 0, crosses = 0;
+        var retCorner = ["╒", "╓", "╘", "╙", "╕", "╖", "╛", "╜"];
+        var crossSyms = ["┼", "╬", "╫", "╪"];
         graph[\nodes].do { |n, i| idx[n] = i };
+        placedRets.do { |e|
+            retOutOf[e[\src]] = (retOutOf[e[\src]] ? 0) + 1;
+            retInOf[e[\dst]]  = (retInOf[e[\dst]] ? 0) + 1;
+        };
+        // счётчики — ПО ГОТОВОМУ ПОЛЮ (аудит развёрткой, правило 9);
+        // String-членство через ==, не Array:includes (identity-ловушка)
+        field.do { |row| row.do { |s|
+            if(retCorner.any { |x| x == s }) { transitions = transitions + 1 };
+            if(crossSyms.any { |x| x == s }) { crosses = crosses + 1 };
+        } };
         (
             field: field, nodes: graph[\nodes].size, rows: rows, cols: cols,
+            counts: (
+                branching: graph[\nodes].count { |n| n.outs.size >= 2 },
+                transitions: transitions,
+                crosses: crosses
+            ),
             graph: (
                 tiers: graph[\tiers], rowGap: rowGap,
                 nodes: graph[\nodes].collect { |n, i|
                     (
                         i: i, tier: n.tier, ch: n.ch,
-                        indeg: n.ins.size, outdeg: n.outs.size,
-                        // сила входа (правило 6): корень и точки схождения сильны
+                        // степени двух родов: Чтение 1 (макроформа) читает остов
+                        // (indegS/outdegS), Чтение 2 (модуляция) — полный граф
+                        indegS: n.ins.size, outdegS: n.outs.size,
+                        indeg: n.ins.size + (retInOf[n] ? 0),
+                        outdeg: n.outs.size + (retOutOf[n] ? 0),
+                        // сила входа (правило 6, ПО ОСТОВУ): корень и схождения
                         strongIn: (n.ins.size == 0)
                             or: { n.ins.size >= 2 }
                             or: { n.ins[0].strong }
@@ -395,7 +583,10 @@
                 },
                 edges: graph[\edges].collect { |e|
                     ( src: idx[e.src], dst: idx[e.dst],
-                      strong: e.strong, routeLen: e[\routeLen] )
+                      strong: e.strong, ret: false, routeLen: e[\routeLen] )
+                } ++ placedRets.collect { |e|
+                    ( src: idx[e[\src]], dst: idx[e[\dst]],
+                      strong: e[\strong], ret: true, routeLen: e[\routeLen] )
                 }
             )
         )
@@ -418,7 +609,7 @@
     thisThread.randSeed = seed;
     while { got.isNil and: { n < ~cfg_grid.graphTries } } {
         n = n + 1;
-        got = ~gridAttempt.(~gridGrow.(target, bp, mp, mf), cols, rows);
+        got = ~gridAttempt.(~gridGrow.(target, bp, mp, mf), cols, rows, t);
     };
     got !? { got[\text] = ~gridRender.(got); got[\seed] = seed; got[\complexity] = t; got };
 };

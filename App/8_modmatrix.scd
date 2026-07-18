@@ -24,8 +24,9 @@
 // driven — the "общая связь слоёв".
 // NOTE theta rows (13–15): ioi0/decel are never lagged and latch at the
 // population boundary; a slow kr drift is legitimate (the layer re-polls once
-// per population, its .clip stands) but keep their depth low — a §C.8 premise
-// concern, not a bug. See docs/features/parameters-ru.md.
+// per population, its .clip stands). The §C.8 depth ceilings are LIFTED (user
+// override + amendment II, 2026-07-18): full 0..1 faders / 0.5 randomize,
+// protection is the layer's own clips. See docs/features/parameters-ru.md.
 // rates ×12 против первой редакции (user override 2026-07-18): пульсация
 // должна быть слышна как пульсация, не как дрейф — согласовано с rateScale
 // деривации Konstruktion (~cfg_kon), чтобы вне и внутри пьесы масштаб совпадал
@@ -169,19 +170,19 @@
 // octaves, kept ≤ 1.2 so the ring stays stable) and depth (influence). All
 // three are .set-able NamedControls -> live, no proxy rebuild. src/shape (the
 // coupling topology) are left intact so the ring stays a single cycle.
-// ~modRandomize.() = all connections; ~modRandomize.(5) = one. theta rows keep
-// a lower depth ceiling (§C.8 caution, see parameters-ru.md).
+// ~modRandomize.() = all connections; ~modRandomize.(5) = one. Depth range is
+// uniform 0..0.5 for all rows (№10, amendment II: theta ceiling lifted).
 ~modRandomize = { |i|
     var doLine = { |idx|
         var line  = ~cfg_modmtx.lines[idx];
         var entry = ~modKeys[idx];
-        var depthMax, newRate, newFm, newDepth;
+        var newRate, newFm, newDepth;
         if(entry.notNil and: { entry[\enabled] }) {
-            depthMax = if(line[\target].asSymbol == \theta, 0.2, 0.5);
-            // диапазон рандома ×12 — синхронно с CONFIG-ставками (user override)
+            // диапазон рандома ×12 — синхронно с CONFIG-ставками; потолок theta
+            // 0.2 снят (решение №10 поправки II: выровнен с фейдерами/деривацией)
             newRate  = 0.12.exprand(1.44);
             newFm    = 0.3.rrand(1.2);
-            newDepth = 0.0.rrand(depthMax);
+            newDepth = 0.0.rrand(0.5);
             Ndef(~modOscKey.(idx)).set(\rate, newRate, \fm, newFm);
             Ndef(~modMapKey.(idx)).set(\depth, newDepth);
             line[\rate] = newRate; line[\fm] = newFm; line[\depth] = newDepth;

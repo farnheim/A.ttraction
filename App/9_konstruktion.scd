@@ -48,16 +48,39 @@
     var tiers = g[\tiers], rowGap = g[\rowGap];
     var tauCell = tTier / rowGap;
     var layerIdx = ();
-    var layerOfNode, census, levels, timeline, lines;
+    var layerOfNode, census, loopPair, levels, timeline, lines;
 
     ~konLayerOrder.do { |l, k| layerIdx[l] = k };
     layerOfNode = { |n| ~konLayerOf[n[\ch]] };
 
+    // census по ПОЛНОМУ графу и ПО НАПРАВЛЕНИЮ ребра (поправка II): возврат
+    // B-нижний → A-верхний даёт вклад в K[B][A] — влияние течёт по стрелке
     census = Array.fill(5, { Array.fill(5, 0) });
     edges.do { |e|
         var a = layerIdx[layerOfNode.(nodes[e[\src]])];
         var b = layerIdx[layerOfNode.(nodes[e[\dst]])];
         census[a][b] = census[a][b] + 1;
+    };
+
+    // нарисованная петля A⇄B: оба направления ненулевые И хотя бы одно
+    // ребро пары — возвратное (поправка II референции)
+    loopPair = Array.fill(5, { Array.fill(5, false) });
+    (0..4).do { |a|
+        (0..4).do { |b|
+            if((a < b)
+                and: { census[a][b] > 0 } and: { census[b][a] > 0 }
+                and: { edges.any { |e|
+                    var ea = layerIdx[layerOfNode.(nodes[e[\src]])];
+                    var eb = layerIdx[layerOfNode.(nodes[e[\dst]])];
+                    (e[\ret] == true) and: {
+                        ((ea == a) and: { eb == b }) or: { (ea == b) and: { eb == a } }
+                    };
+                } }
+            ) {
+                loopPair[a][b] = true;
+                loopPair[b][a] = true;
+            };
+        };
     };
 
     // чтение 1 — макроформа: уровень слоя на ранге = max по его узлам
@@ -91,7 +114,7 @@
         var family = ~konLineFamily[i];
         var bIdx = layerIdx[b];
         var j = 0;
-        var cands, sorted, aIdx, aLayer, src, ab, ln;
+        var cands, sorted, aIdx, aLayer, src, ab, ln, isLoop;
         var meanRoute, rate, strongShare, fm, cAB, depth, shape;
         var colSum, baseLo, baseHi;
         ~cfg_modmtx.lines.do { |lx, k|
@@ -103,7 +126,7 @@
             // шаг 7: пустой census — автономная линия (rate/src/shape из CONFIG,
             // при fm = 0 вход src не влияет)
             ( target: b, param: param, shape: cfgLine[\shape], rate: cfgLine[\rate],
-              src: cfgLine[\src], fm: 0, depth: 0,
+              src: cfgLine[\src], fm: 0, depth: 0, loopAB: 0,
               srcLayer: nil, family: family, nEdges: 0,
               meanRoute: nil, strongShare: nil, cAB: nil, derived: false )
         } {
@@ -125,14 +148,21 @@
                 .clip(~cfg_kon.rateClip[0], ~cfg_kon.rateClip[1]);
             strongShare = ab.count { |e| e[\strong] } / ab.size;
             fm = ~cfg_kon.fmBase + (~cfg_kon.fmSpan * strongShare);
+            // степени в cAB — по ПОЛНОМУ графу (indeg/outdeg экспорта включают
+            // возвраты): у листа с возвратом outdeg = 1, деление определено
             cAB = ab.collect { |e| nodes[e[\dst]][\indeg] }.mean
                 / ab.collect { |e| nodes[e[\src]][\outdeg] }.mean;
-            depth = (~cfg_kon.depthGain * cAB)
+            isLoop = loopPair[aIdx][bIdx];
+            // шаг 5б (поправка II): нарисованная петля бустит обе встречные
+            // линии пары ×1.5; клип depthMax — ПОСЛЕ буста
+            depth = (~cfg_kon.depthGain * cAB * if(isLoop) { 1.5 } { 1 })
                 .clip(~cfg_kon.depthFloor, ~cfg_kon.depthMax);
-            shape = if((ab.count { |e| nodes[e[\dst]][\indeg] >= 2 } * 2) > ab.size)
+            // шаг 6 расширен: петля периодична по построению => \sine
+            shape = if(isLoop
+                or: { (ab.count { |e| nodes[e[\dst]][\indeg] >= 2 } * 2) > ab.size })
                 { \sine } { \noise };
             ( target: b, param: param, shape: shape, rate: rate, src: src,
-              fm: fm, depth: depth,
+              fm: fm, depth: depth, loopAB: if(isLoop) { 1 } { 0 },
               srcLayer: aLayer, family: family, nEdges: ab.size,
               meanRoute: meanRoute, strongShare: strongShare, cAB: cAB,
               derived: true )
@@ -156,7 +186,13 @@
 
     ( seed: grid[\seed], complexity: grid[\complexity], tTier: tTier,
       tiers: tiers, rowGap: rowGap, tauCell: tauCell,
-      census: census, timeline: timeline.asArray, lines: lines )
+      census: census, loops: loopPair,
+      edgeTab: edges.collect { |e|
+          ( src: layerOfNode.(nodes[e[\src]]), dst: layerOfNode.(nodes[e[\dst]]),
+            ret: e[\ret] == true, strong: e[\strong] == true,
+            routeLen: e[\routeLen] )
+      },
+      timeline: timeline.asArray, lines: lines )
 };
 
 // акт генерации: один акт — одна пьеса — три артефакта разом.
@@ -175,6 +211,7 @@
     } {
         kon = ~konDerive.(grid, tTier ? ~cfg_kon.tTier);
         kon[\text] = grid[\text];
+        kon[\counts] = grid[\counts];
         // детерминизм относителен ~cfg_grid — партитура пишет снапшот CONFIG
         kon[\cfgGrid] = ~cfg_grid.copy;
         ~seqTimeline = kon[\timeline];
@@ -258,6 +295,11 @@
             ++ " · τ_cell: " ++ fmt.(kon[\tauCell], 3) ++ " с");
         sb.add("- длительность: " ++ (kon[\tiers] * kon[\tTier]) ++ " с");
         sb.add("- поле: `" ++ base ++ ".txt`");
+        kon[\counts] !? { |ct|
+            sb.add("- счётчики поля (правило 9): ветвящихся узлов " ++ ct[\branching]
+                ++ " · переходных углов " ++ ct[\transitions]
+                ++ " · крестов " ++ ct[\crosses]);
+        };
         sb.add("");
         sb.add("## Снапшот ~cfg_grid (детерминизм относителен CONFIG генератора)");
         sb.add("");
@@ -282,25 +324,48 @@
             };
         };
         sb.add("");
-        sb.add("## Census 5×5 (K[src][dst]; диагональ читает только макроформа)");
+        sb.add("## Рёбра графа (род: прямое/возврат — правило 7)");
+        sb.add("");
+        sb.add("| # | src | dst | род | сила | routeLen |");
+        sb.add("|" ++ "---|".dup(6).join);
+        (kon[\edgeTab] ? []).do { |e, k|
+            sb.add("| " ++ k ++ " | " ++ e[\src] ++ " | " ++ e[\dst]
+                ++ " | " ++ if(e[\ret]) { "возврат" } { "прямое" }
+                ++ " | " ++ if(e[\strong]) { "сильное" } { "слабое" }
+                ++ " | " ++ e[\routeLen] ++ " |");
+        };
+        sb.add("");
+        sb.add("## Census 5×5 (K[src][dst], по направлению рёбер; диагональ читает только макроформа)");
         sb.add("");
         sb.add("| src\\\\dst | " ++ ~konLayerOrder.join(" | ") ++ " |");
         sb.add("|" ++ "---|".dup(6).join);
         ~konLayerOrder.do { |a, ai|
             sb.add("| " ++ a ++ " | " ++ kon[\census][ai].join(" | ") ++ " |");
         };
+        kon[\loops] !? { |lp|
+            var pairs = List[];
+            (0..4).do { |a| (0..4).do { |b|
+                if((a < b) and: { lp[a][b] == true }) {
+                    pairs.add(~konLayerOrder[a] ++ "⇄" ++ ~konLayerOrder[b]);
+                };
+            } };
+            sb.add("");
+            sb.add("нарисованные петли (поправка II): "
+                ++ if(pairs.isEmpty) { "нет" } { pairs.join(" · ") });
+        };
         sb.add("");
         sb.add("## 16 линий модуляции");
         sb.add("");
         sb.add("| i | цель | Ф | srcLayer | src | shape | rate, Гц | fm, окт "
-            ++ "| depth | baseN | meanRoute | strongShare | cAB | derived |");
-        sb.add("|" ++ "---|".dup(14).join);
+            ++ "| depth | петля | baseN | meanRoute | strongShare | cAB | derived |");
+        sb.add("|" ++ "---|".dup(15).join);
         kon[\lines].do { |ln, i|
             sb.add("| " ++ i ++ " | " ++ ln[\target] ++ "." ++ ln[\param]
                 ++ " | " ++ ln[\family]
                 ++ " | " ++ (ln[\srcLayer] ? "—") ++ " | " ++ ln[\src]
                 ++ " | " ++ ln[\shape] ++ " | " ++ fmt.(ln[\rate])
                 ++ " | " ++ fmt.(ln[\fm], 3) ++ " | " ++ fmt.(ln[\depth], 3)
+                ++ " | " ++ (ln[\loopAB] ? 0)
                 ++ " | " ++ fmt.(ln[\baseN], 3)
                 ++ " | " ++ fmt.(ln[\meanRoute], 2)
                 ++ " | " ++ fmt.(ln[\strongShare], 3) ++ " | " ++ fmt.(ln[\cAB], 3)
