@@ -63,8 +63,7 @@
         seqView.background_(Color.gray(0.06));
         seqView.drawFunc_({ |uv|
             var bw = uv.bounds.width, bh = uv.bounds.height;
-            // runtime-слот Konstruktion читается В drawFunc (view анимирован):
-            // акт после открытия окна сразу виден, nil возвращает демо CONFIG
+            // ~seqTimeline читается В drawFunc (view анимирован): акт виден сразу
             var tl    = ~seqTimeline ? ~cfg_seq.timeline;
             var tMax  = (tl.collect { |b| b.t }.maxItem ? 1).max(1);
             tl.do { |b, i|

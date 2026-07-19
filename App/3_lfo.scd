@@ -31,11 +31,9 @@
 
 
 // ===== LOGIC — automation engine =====================================
-// Idempotent reload: clean the PREVIOUS run via our own registry ~lfoActive
-// (Ndef.all maps server names -> ProxySpace, useless for finding "lfo_*").
-// Lines whose key survives in the new config are left mapped (no audio gap);
-// vanished lines: unmap target FIRST, then clear the kr proxy (clear before
-// unmap would leave the target mapped to a foreign bus).
+// Идемпотентный reload по СОБСТВЕННОМУ реестру ~lfoActive (Ndef.all — не ключи
+// прокси, контракт §6); выжившие строки остаются смапленными (без разрыва),
+// исчезнувшие: unmap target СНАЧАЛА, потом clear (иначе target на чужой шине)
 ~lfoNewKeys = ~cfg_lfo.lines.collect { |line, i|
     ("lfo_" ++ i ++ "_" ++ line.target ++ "_" ++ line.param).asSymbol;
 };
@@ -66,8 +64,7 @@
     });
     Ndef(lfoKey).set(\rate, line.rate);
 
-    // .map (NOT .set): a control-rate proxy maps via a control bus;
-    // .set only accepts scalars -> "can't set a control to a UGen"
+    // .map, не .set: kr-прокси маппится через контрольную шину
     Ndef(line.target.asSymbol).map(line.param, Ndef(lfoKey));
 
     ~lfoKeys   = ~lfoKeys.add(lfoKey);

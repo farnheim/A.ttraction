@@ -1,42 +1,25 @@
-// App/8_modmatrix.scd — UNGRUND · MODULATION MATRIX: cross-layer coupling of
-// the 16 principal tone-forming parameters. Each line is a kr modulator whose
-// FREQUENCY is driven by another modulator's output (a single 16-cycle ring
-// across all five layers) — "частота одного параметра управляет другим". Each
-// line's DEPTH (influence level 0..1) is surfaced as a fader in the mixer
-// window (2_mixer.scd, nil-safe panel), with a "рандом связей" button ->
-// ~modRandomize (rate/fm/depth, topology untouched; disabled while a
-// Konstruktion piece is active — ~konActive guard). The build loop is exposed
-// as ~modBuild.(lines) so 9_konstruktion.scd can rebuild the 16 lines from a
-// derived topology. Loads BEFORE the mixer so
-// the panel can read ~modKeys; ON by default (~cfg_app.enableModMatrix).
-// Automation precedent: 3_lfo.scd. Reference + full table:
-// docs/features/parameters-ru.md.
+// App/8_modmatrix.scd — UNGRUND · MOD MATRIX: 16 kr-модуляторов, ЧАСТОТУ
+// каждого ведёт выход другого (одно 16-цикловое кольцо через все пять слоёв);
+// depth — фейдеры в окне микшера, ~modRandomize — рандом rate/fm/depth (guard
+// ~konActive), ~modBuild.(lines) — пересборка из деривации 9_konstruktion.
+// Грузится ДО микшера. Референс + полная таблица: docs/features/parameters-ru.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// Each line: ( target: \layer, param: \key, shape: \noise|\sine, rate: baseHz,
-//   src: <0..15 index of the modulator that drives THIS one's frequency>,
-//   fm: <octaves of frequency coupling>, depth: <initial influence 0..1> ).
-// Range + centre come from the target's ControlSpec (~ungSpecOf) — no numbers
-// hardcoded here. src forms one ring: 0→4→7→10→13→1→5→8→11→14→2→6→9→12→15→3→0
-// (alpha→delta→epsilon→zeta→theta→alpha…), so every layer both drives and is
-// driven — the "общая связь слоёв".
-// NOTE theta rows (13–15): ioi0/decel are never lagged and latch at the
-// population boundary; a slow kr drift is legitimate (the layer re-polls once
-// per population, its .clip stands). The §C.8 depth ceilings are LIFTED (user
-// override + amendment II, 2026-07-18): full 0..1 faders / 0.5 randomize,
-// protection is the layer's own clips. See docs/features/parameters-ru.md.
-// rates ×12 против первой редакции (user override 2026-07-18): пульсация
-// должна быть слышна как пульсация, не как дрейф — согласовано с rateScale
-// деривации Konstruktion (~cfg_kon), чтобы вне и внутри пьесы масштаб совпадал
+// Строка: ( target, param, shape: \noise|\sine, rate: baseHz, src: 0..15,
+//   fm: октавы связи, depth: 0..1 ); диапазон и центр — из ControlSpec цели.
+// src — одно кольцо alpha→delta→epsilon→zeta→theta→…: каждый слой и ведёт, и
+// ведом. Потолки depth theta СНЯТЫ (поправка II 2026-07-18, защита — клипы
+// слоя); rates ×12 (override 2026-07-18: пульс, не дрейф — синхронно с
+// rateScale деривации Konstruktion).
 ~cfg_modmtx = (
     lines: [
         ( target: \alpha,   param: \density,     shape: \noise, rate: 0.60, src: 3,  fm: 0.8, depth: 0.25 ),
         ( target: \alpha,   param: \oil,         shape: \noise, rate: 0.40, src: 13, fm: 0.7, depth: 0.30 ),
         ( target: \alpha,   param: \bright,      shape: \noise, rate: 0.84, src: 14, fm: 0.9, depth: 0.20 ),
         ( target: \alpha,   param: \metalAmt,    shape: \noise, rate: 0.54, src: 15, fm: 0.8, depth: 0.20 ),
-        ( target: \delta,   param: \windForce,   shape: \noise, rate: 0.34, src: 0,  fm: 0.7, depth: 0.25 ),
+        ( target: \delta,   param: \breathDepth, shape: \noise, rate: 0.34, src: 0,  fm: 0.7, depth: 0.25 ),
         ( target: \delta,   param: \metal,       shape: \noise, rate: 0.73, src: 1,  fm: 0.9, depth: 0.22 ),
         ( target: \delta,   param: \vowelSel,    shape: \sine,  rate: 0.44, src: 2,  fm: 0.8, depth: 0.25 ),
         ( target: \epsilon, param: \mWidth,      shape: \noise, rate: 0.28, src: 4,  fm: 0.6, depth: 0.18 ),
@@ -53,17 +36,13 @@
 
 
 // ===== LOGIC — coupled modulator network =============================
-// Two kr proxies per line: modmtx_osc_i (raw bipolar oscillator, its frequency
-// FM'd by modmtx_osc_<src>) and modmtx_map_i (osc shaped into the target's
-// spec range around the param's current centre, scaled by depth). Forward ring
-// references resolve through the shared kr bus (JITLib), the closed loop costs
-// one control block of latency (like InFeedback), never an error.
-// Idempotent reload via ~modActive: unmap the target FIRST, then clear the two
-// proxies (clear before unmap would leave the target on a freed bus — 3_lfo.scd
-// precedent).
+// Два kr-прокси на строку: modmtx_osc_i (биполярный осциллятор, частота FM'ится
+// от osc_<src>) и modmtx_map_i (осц в spec-диапазон цели вокруг центра, по
+// depth). Кольцо разрешается через общую kr-шину (JITLib) — один блок латентности,
+// не ошибка. Идемпотентный reload по ~modActive: unmap ДО clear (прецедент 3_lfo).
 ~modShort = [
     "a.dens", "a.oil",  "a.brgt", "a.metl",
-    "d.wind", "d.metl", "d.vwl",
+    "d.brth", "d.metl", "d.vwl",
     "e.mwid", "e.ceil", "e.flow",
     "z.hump", "z.fine", "z.pop",
     "t.edge", "t.ioi",  "t.decl"
@@ -72,10 +51,8 @@
 ~modOscKey = { |i| ("modmtx_osc_" ++ i).asSymbol };
 ~modMapKey = { |i| ("modmtx_map_" ++ i).asSymbol };
 
-// full (re)build of the 16 lines from any line-list (CONFIG on load; derived
-// lines from 9_konstruktion). Teardown FIRST, by the module's own registry:
-// unmap the target BEFORE clearing the proxies (3_lfo precedent — clear before
-// unmap leaves the target on a freed bus).
+// полная (пере)сборка 16 линий из любого списка (CONFIG или деривация);
+// teardown СНАЧАЛА, по собственному реестру, unmap до clear
 ~modBuild = { |lines|
     (~modActive ? []).do { |e|
         Ndef(e[\target]).unmap(e[\param]);
@@ -98,8 +75,13 @@
         pspec = ~ungSpecOf.(layer) !? { |s| s.params.detect { |p| p[\key] == param } };
 
         if(pspec.isNil) {
-            // layer not loaded (e.g. a ~cfg_app.layers subset) — panel shows the row disabled
-            ("8_modmatrix — строка " ++ i ++ ": слой " ++ layer ++ " не загружен, связь пропущена").warn;
+            // слой не загружен (subset ~cfg_app.layers) ИЛИ параметр выпал из
+            // spec (переписанный слой) — строка в панели disabled
+            ("8_modmatrix — строка " ++ i ++ ": "
+                ++ if(~ungSpecOf.(layer).isNil,
+                    { "слой " ++ layer ++ " не загружен" },
+                    { "параметра " ++ layer ++ "." ++ param ++ " нет в spec" })
+                ++ ", связь пропущена").warn;
             ~modKeys = ~modKeys.add((
                 index: i, label: ~modShort[line[\src]] ++ "→" ++ ~modShort[i],
                 target: layer, param: param, depth: line[\depth], enabled: false
@@ -121,12 +103,9 @@
             });
             Ndef(oscKey).set(\rate, line[\rate], \fm, line[\fm]);
 
-            // depth 0 -> constant centre (no influence). .map drives the param; while
-            // a line is active the tuner slider shows but does not move it (3_lfo.scd
-            // behaviour). Direct transfer (user override 2026-07-18): the unipolar
-            // oscillator is MIXED with the centre by depth — at depth 1 the param
-            // rides the function across the target's FULL spec range, not a swing
-            // around the centre. Normalised spec space keeps \exp params even.
+            // прямой перенос (override 2026-07-18): униполярный осц МИКСИРУЕТСЯ
+            // с центром по depth — при depth 1 параметр ходит ВЕСЬ spec-диапазон;
+            // нормализованное spec-пространство выравнивает \exp-параметры
             Ndef(mapKey, { |depth = 0|
                 var oscSig = Ndef(oscKey).kr(1);
                 var oscN = (oscSig + 1) * 0.5;
@@ -147,14 +126,11 @@
     };
 };
 
-// on load the matrix is the CONFIG one; a reload during an active Konstruktion
-// session restores the CONFIG topology over the derived one (hot-swap = rebuild
-// from CONFIG) — a repeat ~konGenerate act restores the piece
+// на load матрица — CONFIG; reload при активном акте вернёт CONFIG-топологию
+// (повторный ~konGenerate восстанавливает пьесу)
 ~modBuild.(~cfg_modmtx.lines);
 
-// live depth setter (mixer fader / MIDI): ~modDepthSet.(i, 0.4).
-// Театральный кламп theta ≤ 0.2 СНЯТ (user override §C.8, 2026-07-18):
-// фейдеры 13–15 ходят полный диапазон, защита слоя — его собственные .clip
+// живой depth-сеттер (фейдер/MIDI): ~modDepthSet.(i, 0.4)
 ~modDepthSet = { |i, v|
     var line = ~cfg_modmtx.lines[i];
     var entry = ~modKeys[i];
@@ -166,20 +142,16 @@
     };
 };
 
-// randomize the modulation parameters: rate (slow-LFO band), fm (coupling
-// octaves, kept ≤ 1.2 so the ring stays stable) and depth (influence). All
-// three are .set-able NamedControls -> live, no proxy rebuild. src/shape (the
-// coupling topology) are left intact so the ring stays a single cycle.
-// ~modRandomize.() = all connections; ~modRandomize.(5) = one. Depth range is
-// uniform 0..0.5 for all rows (№10, amendment II: theta ceiling lifted).
+// рандом rate/fm/depth (живые NamedControls, без пересборки); src/shape —
+// топология — не трогаются, кольцо остаётся одним циклом.
+// ~modRandomize.() = все связи; ~modRandomize.(5) = одна.
 ~modRandomize = { |i|
     var doLine = { |idx|
         var line  = ~cfg_modmtx.lines[idx];
         var entry = ~modKeys[idx];
         var newRate, newFm, newDepth;
         if(entry.notNil and: { entry[\enabled] }) {
-            // диапазон рандома ×12 — синхронно с CONFIG-ставками; потолок theta
-            // 0.2 снят (решение №10 поправки II: выровнен с фейдерами/деривацией)
+            // диапазон ×12 синхронно с CONFIG-ставками; depth 0..0.5 всем
             newRate  = 0.12.exprand(1.44);
             newFm    = 0.3.rrand(1.2);
             newDepth = 0.0.rrand(0.5);
@@ -190,8 +162,7 @@
             if(~modmatrixGuiSync.notNil) { ~modmatrixGuiSync.(idx, newDepth) };
         };
     };
-    // guard (решение 1 спеки Konstruktion): рандом rate/fm разрушил бы
-    // выведенные периоды пьесы; nil-safe — модуль формы может быть не загружен
+    // guard: рандом разрушил бы выведенные периоды пьесы (решение 1 спеки)
     if(~konActive == true) {
         "8_modmatrix — рандом отключён: активна пьеса Konstruktion (новая пьеса — кнопка «сгенерировать»)".postln;
         nil
@@ -202,10 +173,8 @@
     };
 };
 
-// set by the mixer window (nil without GUI); mirrors ~mixerGuiSync
+// GUI-хуки, ставит окно микшера (nil без GUI)
 ~modmatrixGuiSync = ~modmatrixGuiSync;
-// label hook (src→dst) — set by the mixer window next to ~modmatrixGuiSync;
-// called by ~konGenerate after ~modBuild
 ~modmatrixGuiRelabel = ~modmatrixGuiRelabel;
 
 ("8_modmatrix — модуляционная матрица: активных связей "

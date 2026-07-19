@@ -1,12 +1,9 @@
-// App/9_konstruktion.scd — UNGRUND · KONSTRUKTION: форма §E.6 — один акт
-// генерации сетки (0_grid) читается дважды: как макроформа (таймлайн для
-// 4_sequencer) и как топология модуляции (16 линий для 8_modmatrix).
-// Законы вывода: docs/features/grid-modulation/reference.md; спека:
-// docs/features/grid-modulation/dsp-spec.md. Грузится шагом 7b в 1_app.scd
-// (требует enableSequencer + enableModMatrix). Чистый sclang: не бутит
-// сервер, не пишет в шины, аудио-графов не создаёт; cleanup — в ~appCleanup.
-// API: ~konGenerate.(complexity, seed, tTier) — акт (три артефакта разом);
-//      ~konDerive.(grid, tTier) — чистая деривация; ~konSaveScore — партитура.
+// App/9_konstruktion.scd — UNGRUND · KONSTRUKTION (форма §E.6): один акт
+// генерации сетки читается дважды — макроформа (таймлайн 4_sequencer) и
+// топология модуляции (16 линий 8_modmatrix). Чистый sclang, без сервера.
+// Законы: docs/features/grid-modulation/reference.md; спека: там же dsp-spec.md.
+// API: ~konGenerate.(complexity, seed, tTier) · ~konDerive.(grid, tTier) ·
+//      ~konSaveScore.
 
 (
 // ===== CONFIG — edit here ============================================
@@ -27,8 +24,7 @@
 // ===== LOGIC — деривация, акт, партитура =============================
 ~konLayerOrder = [\alpha, \delta, \epsilon, \zeta, \theta];
 
-// ключи — String, не Char: символы Ф многобайтные (UTF-8), $-литерал их не
-// возьмёт; Dictionary (не IdentityDictionary/Event) сравнивает String по значению
+// ключи String, не Char (Ф многобайтные); Dictionary сравнивает по значению
 ~konLayerOf = Dictionary.newFrom([
     "█", \alpha, "▄", \delta, "▓", \epsilon, "░", \zeta, "▒", \theta
 ]);
@@ -40,9 +36,8 @@
     F: ( alpha: 1, delta: 5, epsilon: 7, theta: 13 )
 );
 
-// чистая функция графа: только опубликованные признаки экспорта 0_grid
-// (символ, ранг, степени остов/полный, strongIn, strong, routeLen, род ребра
-// ret и выводимый из него признак петли — поправка II) — третьего прочтения нет
+// чистая функция графа: только опубликованные признаки экспорта 0_grid —
+// третьего прочтения нет (reference, поправка II)
 ~konDerive = { |grid, tTier|
     var g = grid[\graph];
     var nodes = g[\nodes], edges = g[\edges];
@@ -54,8 +49,7 @@
     ~konLayerOrder.do { |l, k| layerIdx[l] = k };
     layerOfNode = { |n| ~konLayerOf[n[\ch]] };
 
-    // census по ПОЛНОМУ графу и ПО НАПРАВЛЕНИЮ ребра (поправка II): возврат
-    // B-нижний → A-верхний даёт вклад в K[B][A] — влияние течёт по стрелке
+    // census по ПОЛНОМУ графу, ПО НАПРАВЛЕНИЮ ребра (поправка II)
     census = Array.fill(5, { Array.fill(5, 0) });
     edges.do { |e|
         var a = layerIdx[layerOfNode.(nodes[e[\src]])];
@@ -63,8 +57,8 @@
         census[a][b] = census[a][b] + 1;
     };
 
-    // нарисованная петля A⇄B: оба направления ненулевые И хотя бы одно
-    // ребро пары — возвратное (поправка II референции)
+    // нарисованная петля A⇄B: оба направления ненулевые И хотя бы одно ребро
+    // пары возвратное (поправка II)
     loopPair = Array.fill(5, { Array.fill(5, false) });
     (0..4).do { |a|
         (0..4).do { |b|
@@ -121,17 +115,16 @@
         ~cfg_modmtx.lines.do { |lx, k|
             if((k < i) and: { lx[\target].asSymbol == b }) { j = j + 1 };
         };
-        // шаг 1: диагональ исключена из ВЫБОРА источников (census целиком — партитуре)
+        // шаг 1: диагональ исключена из выбора источников
         cands = (0..4).select { |a| (a != bIdx) and: { census[a][bIdx] > 0 } };
         ln = if(cands.isEmpty) {
-            // шаг 7: пустой census — автономная линия (rate/src/shape из CONFIG,
-            // при fm = 0 вход src не влияет)
+            // шаг 7: пустой census — автономная линия (fm = 0, src не влияет)
             ( target: b, param: param, shape: cfgLine[\shape], rate: cfgLine[\rate],
               src: cfgLine[\src], fm: 0, depth: 0, loopAB: 0,
               srcLayer: nil, family: family, nEdges: 0,
               meanRoute: nil, strongShare: nil, cAB: nil, derived: false )
         } {
-            // sort в SC не стабилен — tie-break порядка слоёв задан сравнением явно
+            // sort в SC не стабилен — tie-break задан сравнением явно
             sorted = cands.sort { |x, y|
                 (census[x][bIdx] > census[y][bIdx]) or: {
                     (census[x][bIdx] == census[y][bIdx]) and: { x < y }
@@ -149,16 +142,14 @@
                 .clip(~cfg_kon.rateClip[0], ~cfg_kon.rateClip[1]);
             strongShare = ab.count { |e| e[\strong] } / ab.size;
             fm = ~cfg_kon.fmBase + (~cfg_kon.fmSpan * strongShare);
-            // степени в cAB — по ПОЛНОМУ графу (indeg/outdeg экспорта включают
-            // возвраты): у листа с возвратом outdeg = 1, деление определено
+            // степени в cAB по ПОЛНОМУ графу (с возвратами): деление определено
             cAB = ab.collect { |e| nodes[e[\dst]][\indeg] }.mean
                 / ab.collect { |e| nodes[e[\src]][\outdeg] }.mean;
             isLoop = loopPair[aIdx][bIdx];
-            // шаг 5б (поправка II): нарисованная петля бустит обе встречные
-            // линии пары ×1.5; клип depthMax — ПОСЛЕ буста
+            // шаг 5б: петля бустит обе встречные линии ×1.5; клип ПОСЛЕ буста
             depth = (~cfg_kon.depthGain * cAB * if(isLoop) { 1.5 } { 1 })
                 .clip(~cfg_kon.depthFloor, ~cfg_kon.depthMax);
-            // шаг 6 расширен: петля периодична по построению => \sine
+            // шаг 6: петля периодична по построению => \sine
             shape = if(isLoop
                 or: { (ab.count { |e| nodes[e[\dst]][\indeg] >= 2 } * 2) > ab.size })
                 { \sine } { \noise };
@@ -168,9 +159,8 @@
               meanRoute: meanRoute, strongShare: strongShare, cAB: cAB,
               derived: true )
         };
-        // базовое значение цели (user override: акт = новая тембральная
-        // идентичность даже при depth 0): детерминированный скрэмбл seed +
-        // признаков графа/census золотым сечением, зажатый в baseRange
+        // базовое значение цели (override: акт = новая тембральная идентичность
+        // даже при depth 0) — детерминированный скрэмбл золотым сечением
         colSum = (0..4).sum { |a| census[a][bIdx] };
         baseLo = ~cfg_kon.baseRange[0];
         baseHi = ~cfg_kon.baseRange[1];
@@ -197,8 +187,8 @@
       timeline: timeline.asArray, lines: lines )
 };
 
-// акт генерации: один акт — одна пьеса — три артефакта разом.
-// Пьесу НЕ запускает: старт — отдельный акт перформера (~seqStart / кнопка).
+// акт: одна пьеса — три артефакта разом; пьесу НЕ запускает (старт — акт
+// перформера: ~seqStart / кнопка)
 ~konGenerate = { |complexity, seed, tTier|
     var grid, kon, dur, status;
     if(Tdef(\ung_sequencer).isPlaying and: { ~seqStop.notNil }) { ~seqStop.value };
@@ -217,13 +207,10 @@
         // детерминизм относителен ~cfg_grid — партитура пишет снапшот CONFIG
         kon[\cfgGrid] = ~cfg_grid.copy;
         ~seqTimeline = kon[\timeline];
-        // громкости — исполнителю (user override 2026-07-18): таймлайн живёт
-        // для viz и finish-блока, vols секвенсор не применяет, роутеры и их
-        // \fade акт не трогает
+        // громкости исполнителю (override 2026-07-18): vols секвенсор не применяет
         ~seqDriveVols = false;
-        // новая тембральная идентичность акта: базовые центры всех 16 целей
-        // из графа, ДО пересборки матрицы — modmtx_map_i захватывает centerN
-        // уже новых значений (~setParam: Ndef + ~ungVals + tuner-синк)
+        // базовые центры 16 целей из графа — ДО пересборки матрицы, чтобы
+        // modmtx_map_i захватил centerN уже новых значений
         if(~setParam.notNil) {
             kon[\lines].do { |ln|
                 var pspec = ~ungSpecOf.(ln[\target]) !? { |s|
@@ -376,8 +363,7 @@
                 ++ " | " ++ fmt.(ln[\strongShare], 3) ++ " | " ++ fmt.(ln[\cAB], 3)
                 ++ " | " ++ ln[\derived] ++ " |");
         };
-        // отчёт всегда доходит до панели: успех показывает путь партитуры,
-        // отказ записи — внятную ошибку (кнопка не имеет права молчать)
+        // кнопка не имеет права молчать: успех — путь, отказ записи — ошибка
         writeErr = nil;
         try {
             File.use(txtPath, "w", { |f| f.write(kon[\text] ++ "\n") });
@@ -398,7 +384,7 @@
     };
 };
 
-// идемпотентная перезагрузка: файл не пересоздаёт и не убивает текущий акт
+// идемпотентный reload: текущий акт не пересоздаётся и не убивается
 ~konActive  = ~konActive ? false;
 ~konCurrent = ~konCurrent;
 ~konTtier   = ~konTtier ? ~cfg_kon.tTier;

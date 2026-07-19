@@ -1,13 +1,9 @@
-// App/synths/delta.scd — UNGRUND class 4/8 `delta` (choir voices through
-// metal plates). REAL LAYER (rewritten per docs/features/delta/dsp-spec.md,
-// 2026-07-19). Premise §C.4 `binde`, AMENDED 2026-07-19: 5 glottal-pulse
-// voices (3 detuned Blip + breath noise) on the 3-limit 94 Hz lattice
-// (141/188/282/376/564 Hz), each feeding IN PARALLEL a 5-formant vocal BPF
-// bank and a 4-mode metal-plate Ringz bank; `metal` crossfades voice<->plate
-// (equal-power, level-normalised). §C.4 bans kept: no central-pitch glide,
-// band-identity modulation ≤ 0.25 Hz (amendment mark in
-// docs/architecture/system/README.md §C.4).
-// Tuning via 0_lib.scd; ~spec_delta is the single source of truth.
+// App/synths/delta.scd — UNGRUND class 4/8 `delta`, §C.4 `binde` (amended
+// 2026-07-19): 5 глоттальных голосов решётки 94 Hz, каждый ПАРАЛЛЕЛЬНО в
+// 5-формантный вокальный BPF-банк и 4-модовый Ringz-банк пластин; `metal` —
+// кроссфейд голос<->пластина. Запреты §C.4 в силе: без глайда, модуляции ≤ 0.25 Hz.
+// Спека + Post-tuning deviations: docs/features/delta/dsp-spec.md.
+// ~spec_delta — source of truth.
 
 
 // ===== CONFIG — edit here ============================================
@@ -62,9 +58,8 @@
 
 
 // ===== LOGIC — synthesis =============================================
-// 5 voices: glottal Blip ensemble + breath (Stage A) -> parallel vocal
-// 5-formant BPF bank (B1) and 4-mode plate Ringz bank (B2) -> XFade2 by
-// `metal` -> breathing/shimmer/pan (Stage C). Sum -> LeakDC -> Limiter.
+// 5 голосов: A (Blip-ансамбль + дыхание) -> B1 || B2 -> XFade2 по `metal` ->
+// C (дыхание/shimmer/pan); сумма -> LeakDC -> Limiter
 Ndef(\delta, { |amp = 0.18,
     f1 = 48.71, f2 = 53.71, f3 = 60.72, f4 = 65.71, f5 = 72.72,
     voiced = 0.8, breath = 0.3, bright = 9.0,
@@ -80,8 +75,7 @@ Ndef(\delta, { |amp = 0.18,
     var vowelSelL, vowelDriftL, formWidthL, formTrackL, ringL, beatRateL;
     var metalL, plateQL, plateSpreadL, breathDepthL, breathRateL;
     var voiceLevelL, panWidthL, panRateL;
-    // tenor singing-voice formant tables (5 vowels a-e-i-o-u × 5 formants):
-    // freq (Hz), bandwidth (Hz), amplitude (dB -> linear at build time)
+    // теноровые формантные таблицы (5 гласных a-e-i-o-u × 5 формант)
     var vowFreqs = #[
         [650, 1080, 2650, 2900, 3250],
         [400, 1700, 2600, 3200, 3580],
@@ -103,26 +97,23 @@ Ndef(\delta, { |amp = 0.18,
         [0, -10, -12, -12, -26],
         [0, -20, -17, -14, -26]
     ].collect { |row| row.collect(_.dbamp) };
-    // base vowel per voice chosen at BUILD time (a-o-e-u-i spread) — a UGen
-    // cannot be an array index; vowelSel interpolates toward the next vowel
+    // базовая гласная на голос выбрана на BUILD (UGen не индекс массива);
+    // vowelSel интерполирует к следующей
     var baseVowel = #[0, 3, 1, 4, 2];
     var vowelDriftRates = #[0.041, 0.053, 0.067, 0.079, 0.093];  // ≤ 0.1 Hz (§C.4)
     var subOffsets = Array.fill(5, { |i| [-1.0, 0.4, 1.0] * (0.82 + (i * 0.09)) });
     var subDriftIncom = Array.fill(5, { |i|
         Array.fill(3, { |j| 0.6 + (j * 0.17) + (i * 0.023) })
     });
-    // invariant inharmonic plate template (idiophone-like, NOT integer)
+    // инвариантный негармонический шаблон пластины (идиофон, НЕ целые)
     var plateRatios = #[1.0, 2.76, 5.40, 8.93];
     var plateModeAmps = #[0.35, 0.7, 0.6, 0.45];
-    // extra ×1-mode cut on the two lowest voices: their 141/188 Hz modes
-    // dominate the 20–80 Hz acceptance band via measurement-filter leakage
+    // срез ×1-моды двух нижних голосов: утечка в полосу 20–80 Hz (deviation спеки)
     var plateMode1Trim = #[0.4, 0.55, 1.0, 1.0, 1.0];
     var plateRingScale = #[1.0, 0.85, 0.72, 0.6];
-    // B1/B2 static balance trims: tuned by measurement so `metal` changes
-    // timbre, not loudness (acceptance: sweep RMS within ±2 dB)
+    // измеренные тримы: `metal` меняет тембр, не громкость (Post-tuning deviations)
     var b1Trim = 360.0, b2Trim = 0.675, makeup = 5.0;
-    // static compensation of the glottal LPF tilt at the upper formants —
-    // without it F2/singer's-formant zones starve (acceptance band shape)
+    // компенсация глоттального LPF-наклона на верхних формантах (deviation спеки)
     var formComp = #[1.0, 2.6, 2.4, 2.8, 3.2];
     var voices, sig, fieldDrift;
 
@@ -151,7 +142,7 @@ Ndef(\delta, { |amp = 0.18,
     panWidthL    = panWidth.lag(0.2).clip(0, 0.3);
     panRateL     = panRate.clip(0.01, 0.5);
 
-    // static fundamentals: .set + .lag only, never swept (§C.4 no glide)
+    // статичные фундаменты: только .set + .lag, никогда не свип (§C.4)
     funds = [f1, f2, f3, f4, f5].collect { |n| n.lag(0.2).midicps.clip(60, nyq) };
 
     voices = Array.fill(nVoices, { |i|
@@ -161,7 +152,7 @@ Ndef(\delta, { |amp = 0.18,
         var voiceOut, breathing, shimGain, pan;
 
         fund = funds[i];
-        // numHarm from the CLIPPED lagged fund: alias-free, never 0
+        // numHarm от КЛАМПЛЕННОГО fund: без алиасинга, никогда не 0
         numHarm = (nyq / fund).max(1);
         jit = 1 + (LFDNoise3.kr(7 + (i * 0.9)) * jitterL);
 
@@ -173,14 +164,14 @@ Ndef(\delta, { |amp = 0.18,
             Blip.ar(fund * jit * (2 ** (cents / 1200)), numHarm);
         })) * (1 / nSubs);
         src = LPF.ar(ensemble, (fund * brightL).clip(300, nyq));
-        // undo Blip's 1/numHarm normalisation: constant per-harmonic level
-        // across registers, so the soprano neither vanishes nor screams
+        // отмена 1/numHarm-нормализации Blip: постоянный уровень гармоники по
+        // регистрам — сопрано не исчезает и не кричит
         src = src * (numHarm * 0.016).clip(0.3, 3);
         breathNoise = HPF.ar(PinkNoise.ar, 250);
         bankIn = (src * voicedL) + (breathNoise * breathL);
 
-        // Stage B1: 5-formant vocal BPF bank (freq, bw AND amp interpolated
-        // together — morphing freqs alone yields wrong vowels)
+        // Stage B1: вокальный банк (freq, bw И amp интерполируются вместе —
+        // морф одних частот даёт неверные гласные)
         vowelIdx = baseVowel[i];
         nextIdx  = (vowelIdx + 1) % 5;
         pos      = (vowelSelL + (LFNoise2.kr(vowelDriftRates[i]) * vowelDriftL * 0.5))
@@ -195,18 +186,18 @@ Ndef(\delta, { |amp = 0.18,
                            .clip(0.02, 0.25)).range(0.55, 1.0);
             var gainK = if(k >= 2) { ringGain } { 1.0 };
             ff = ff * regScale;
-            // F1 tuned to the fundamental on high voices (soprano F1 rule)
+            // soprano F1 rule: F1 подтянут к фундаменту на высоких голосах
             if(k == 0) { ff = max(ff, fund * 1.05) };
             ff = ff.clip(60, nyq);
             BPF.ar(bankIn, ff, (bw * formWidthL / ff)) * ampF * formComp[k] * beat * gainK;
         })) * (1 / nForms) * formWidthL.sqrt.reciprocal * b1Trim;
 
-        // Stage B2: 4-mode plate Ringz bank, parallel to B1; mode freqs are
-        // pure functions of the static funds (clamp the WHOLE array)
+        // Stage B2: банк пластин параллельно B1; частоты мод — чистые функции
+        // статичных fund (кламп ВСЕГО массива)
         plateFreqs = (fund * plateRatios).clip(60, nyq);
         plateRings = (plateQL * (1 + ((i - 2) * plateSpreadL)) * plateRingScale)
                          .clip(0.02, 4.0);
-        // Q compensation: plateQ changes TIMBRE, not loudness
+        // Q-компенсация: plateQ меняет ТЕМБР, не громкость
         plateNorm = 0.25 / (1 + (plateQL * 0.7));
         plate = Mix(Ringz.ar(bankIn, plateFreqs, plateRings)
                     * (plateModeAmps * [plateMode1Trim[i], 1, 1, 1]))
@@ -215,7 +206,7 @@ Ndef(\delta, { |amp = 0.18,
         voiceOut = XFade2.ar(vocal, plate, (metalL * 2) - 1);
         voiceOut = voiceOut + (breathNoise * breathL * 0.15);
 
-        // Stage C: per-voice incoherent breathing (dip ≤ −6 dB) + shimmer
+        // Stage C: некогерентное дыхание голоса (dip ≤ −6 dB) + shimmer
         breathing = LFNoise2.kr((breathRateL * (0.7 + (i * 0.13))).clip(0.02, 0.25))
                         .range(1 - (breathDepthL * 0.5), 1.0);
         shimGain  = LFNoise2.kr(4.3 + (i * 0.6)).range(1 - shimmerL, 1.0);
@@ -226,24 +217,22 @@ Ndef(\delta, { |amp = 0.18,
         Pan2.ar(voiceOut, pan);
     });
 
-    // voices are partially decorrelated -> the sum grows ~√N; normalise by
-    // √N so voice count neither pumps nor starves loudness
+    // голоса частично декоррелированы (сумма растёт ~√N) — нормализация √N
     sig = Mix(voices) * (1 / nVoices.sqrt) * voiceLevelL;
 
-    // very slow whole-field drift within ±0.3 (§F)
+    // очень медленный дрейф всего поля в ±0.3 (§F)
     fieldDrift = LFNoise1.kr(0.03).range(-0.12, 0.12);
     sig = Balance2.ar(sig[0], sig[1], fieldDrift);
 
-    // internal makeup compensating the normalisation cascade; sits BEFORE
-    // master amp so amp stays the §K.4 layer level (0.18)
+    // makeup ДО мастер-amp: amp остаётся §K.4-уровнем слоя (0.18)
     sig = sig * makeup;
 
-    // §C.4 register 100 Hz – 6 kHz: triple HPF (~36 dB/oct) under f1 = 141 Hz
+    // регистр §C.4 100 Hz – 6 kHz: тройной HPF (~36 dB/окт) под f1 = 141 Hz
     sig = HPF.ar(HPF.ar(HPF.ar(sig, 120), 120), 120);
 
     sig = sig * amp.lag(0.05);
-    sig = LeakDC.ar(sig);                 // pulse trains + high-Q banks carry DC
-    sig = Limiter.ar(sig, 0.95);          // §DSP: ±1.0 guarantee under random extremes
+    sig = LeakDC.ar(sig);                 // импульсные трейны и high-Q банки несут DC
+    sig = Limiter.ar(sig, 0.95);          // §DSP: гарантия ±1.0 при рандом-экстремумах
     sig
 });
 

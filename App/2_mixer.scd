@@ -1,20 +1,13 @@
-// App/2_mixer.scd — UNGRUND · MIXER: per-layer vol + two fx sends (Space Echo
-// reverb-forward §K.1 / Space Echo multi-tap echo §K.2), one aggregator per
-// send bus, master (LeakDC + Limiter), solo, mute, recorder, mixer window.
-// Routes only layers listed in ~activeLayers (set by 1_app.scd).
-// Signal flow: docs/architecture/app/README.md.
+// App/2_mixer.scd — UNGRUND · MIXER: vol на слой + два fx-посыла (§K.1/§K.2),
+// по агрегатору на шину, master (LeakDC + Limiter), solo/mute, рекордер, окно.
+// Маршрутизирует только ~activeLayers. Сигнал-флоу: docs/architecture/app/README.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// Level table, key = layer name. vol = level into master; sendRev = Space Echo
-// reverb-forward send (§K.1 table), sendDly = Space Echo multi-tap echo send
-// (§K.2 table).
-// The two sends are independent by canon — see the aggregators below.
-// Entries for unloaded layers are simply ignored.
-// `? ()` like ~mixMuted/~mixRecOn: the live mix is STATE and must survive a
-// hot-reload of this module — the table below only seeds a fresh session
-// (and the project preset then overrides it at app start via autoPreset)
+// vol -> master; sendRev/sendDly -> таблицы §K.1/§K.2 (независимы по канону).
+// `? ()`: живое сведение — СОСТОЯНИЕ, переживает hot-reload; таблица лишь
+// сеет свежую сессию (авто-пресет затем перекрывает её)
 ~cfg_mixer = ~cfg_mixer ? (
     master:  0.9,
 
@@ -24,7 +17,7 @@
         delta:   ( vol: 0.80, sendRev: 0.45, sendDly: 0.00 ),   // §K.2: binde is not in the delay table
         epsilon: ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.1: self-diffuse — low send; §K.2: no delay
         zeta:    ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.2: kratzer is not in the delay table
-        theta:   ( vol: 0.80, sendRev: 0.16, sendDly: 0.00 )    // §K.1 splitter; §K.2 zero is a FORBIDDEN move, not a preference: a feedback echo replenishes at constant density exactly what the class's law is exhausting
+        theta:   ( vol: 0.80, sendRev: 0.16, sendDly: 0.00 )    // §K.2 ноль — ЗАПРЕТ, не вкус: эхо восполняло бы то, что истощает закон класса
     )
 );
 
@@ -45,10 +38,8 @@
     };
 };
 
-// per-layer router: dry only -> ~busDry (fx sends are collected by the
-// single aggregator below so the send bus has exactly ONE writer).
-// Konstruktion (user override 2026-07-18) volumes are the performer's — the
-// act touches neither \vol nor any fade here, so the plain 0.1 lag stands
+// роутер слоя: только dry -> ~busDry (посылы собирает агрегатор ниже — у шины
+// ровно ОДИН писатель); громкости у исполнителя (override 2026-07-18)
 ~mixerLayers.do { |layer|
     var routerKey = ("mix_" ++ layer).asSymbol;
     var lv = ~cfg_mixer.levels[layer];
@@ -61,13 +52,9 @@
     Ndef(routerKey).play(out: ~busDry.index, numChannels: 2);
 };
 
-// send aggregators: ONE PER EFFECT BUS, so the §K.1 and §K.2 send tables stay
-// independent — a layer may go to the reverb and NOT to the delay, which a
-// single shared send bus cannot express (both effects would read one sum).
-// Each aggregator is the SOLE writer of its bus; ReplaceOut => no
-// accumulation across blocks.
-// both aggregators expose the SAME param names (send_<layer>) — the Ndef they
-// live on is what distinguishes the §K.1 send from the §K.2 send
+// агрегаторы посылов: ПО ОДНОМУ НА ШИНУ (таблицы §K.1/§K.2 независимы), каждый
+// — единственный писатель своей шины (ReplaceOut: без накопления); имена
+// параметров send_<layer> одинаковы — различает их Ndef
 ~mixerSendMix = {
     Mix(~mixerLayers.collect { |layer|
         var amt = NamedControl.kr(("send_" ++ layer).asSymbol, 0);
@@ -88,15 +75,13 @@ Ndef(\fxsendDly, { ReplaceOut.ar(~busFxSendDly.index, ~mixerSendMix.value) });
         );
     };
     Ndef(aggKey).fadeTime = 1;
-    // NO .play: the proxy body already writes via ReplaceOut; a monitor would
-    // add a SECOND writer mixing the empty proxy bus on top of ReplaceOut
+    // БЕЗ .play: тело уже пишет через ReplaceOut, монитор стал бы ВТОРЫМ писателем
 };
 
 // master: (dry + fx return), LeakDC, Limiter
 Ndef(\master, { |amp = 0.9|
     var dry, fx, sig;
-    // InFeedback (NOT In): reads buses regardless of node order — routers
-    // and effects may sit later in the graph than the master
+    // InFeedback, не In: читает шины независимо от порядка узлов
     dry = InFeedback.ar(~busDry.index, 2);
     fx  = InFeedback.ar(~busFxReturn.index, 2);
     sig = dry + fx;
@@ -119,8 +104,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
     var agg = ~mixerSendAgg[which];
     if(~cfg_mixer.levels[layer].isNil) { ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy };
     ~cfg_mixer.levels[layer][which] = value;
-    // a muted / solo-hidden layer keeps its zero at the router; only its stored
-    // level moves, so unmuting restores the value the slider now shows
+    // у muted/solo-скрытого слоя двигается только хранимый уровень — unmute
+    // вернёт значение, которое сейчас показывает слайдер
     if(~mixLayerAudible.(layer)) {
         if(agg.notNil) {
             Ndef(agg).set(("send_" ++ layer).asSymbol, value);
@@ -135,12 +120,9 @@ Ndef(\master).play(out: 0, numChannels: 2);
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(\master, \amp, value) };
 };
 
-// mute + solo compose through ONE apply function: a layer is audible unless it
-// is muted, or a solo is active and it is not the soloed one. Levels are read
-// from ~cfg_mixer (never overwritten with zeros), so clearing mute/solo
-// restores the original mix. ~mixMuted survives a mixer-file reload, and
-// ~mixApplyLevels is re-run at load (below) so the rebuilt routers honour it.
-~mixMuted = ~mixMuted ? ();   // layer -> true when muted; survives reopen/reload
+// mute + solo сходятся в ОДНОЙ apply-функции; уровни читаются из ~cfg_mixer
+// (нулями не перетираются) — снятие mute/solo возвращает исходный микс
+~mixMuted = ~mixMuted ? ();   // layer -> true; переживает reopen/reload
 ~mixLayerAudible = { |layer|
     (~mixMuted[layer] != true) and: { ~mixSoloCur.isNil or: { ~mixSoloCur == layer } }
 };
@@ -163,26 +145,22 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixSoloCur = nil; ~mixApplyLevels.value;
     if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
 };
-// pressing solo on the same layer again removes solo
 ~mixSoloToggle = { |layer|
     if(~mixSoloCur == layer) { ~mixUnsolo.value } { ~mixSolo.(layer) };
 };
 
-// mute is per-layer and independent — many layers may be muted at once, and a
-// mute stands whether or not a solo is active
 ~mixMuteToggle = { |layer|
     ~mixMuted[layer] = (~mixMuted[layer] != true);
     ~mixApplyLevels.value;
     if(~mixerRefreshMute.notNil) { ~mixerRefreshMute.value };
 };
 
-// restore persisted mute/solo onto the freshly (re)built routers/aggregators
+// восстановить mute/solo на свежесобранных роутерах/агрегаторах
 ~mixApplyLevels.value;
 
-// recorder: records hardware bus 0 — the Recorder node sits at the TAIL of
-// the root group, i.e. AFTER Ndef(\master), so the file gets exactly what
-// is heard (dry + fx, LeakDC, Limiter, master amp)
-~mixRecOn   = ~mixRecOn ? false;   // survives file reload
+// recorder пишет шину 0 с ХВОСТА root-группы (после Ndef(\master)) — в файл
+// попадает ровно то, что слышно
+~mixRecOn   = ~mixRecOn ? false;   // переживает reload
 ~mixRecPath = ~mixRecPath;
 
 ~mixRecToggle = {
@@ -234,9 +212,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerKonBtns    = ();    // \start / \stop / \score Buttons
 ~gridLastText    = ~gridLastText;   // поле — партитура: переживает переоткрытие окна
 
-// enable-состояние кнопок пьесы от ~konActive (зовут постройка окна и акт).
-// Гейтится только старт/стоп: «партитура» всегда активна и сама отчитывается
-// статусом «нет акта» — молчащая выключенная кнопка читалась как поломка
+// enable кнопок пьесы от ~konActive; гейтится только старт/стоп — «партитура»
+// всегда активна и сама отчитывается статусом «нет акта»
 ~mixerKonSync = {
     {
         var on = (~konActive == true);
@@ -260,41 +237,9 @@ Ndef(\master).play(out: 0, numChannels: 2);
     } }.defer;
 };
 
-~ungBuildMixer = {
-    var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
-    var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
-    var konRange, konTtierBox, konStartBtn, konStopBtn, konScoreBtn;
-    var hasMod, modY;
-    var fxY, hasFx, fxModeItems;
-    var psY, presetName, presetPop;   // local capture, same reason as win
-    var win;   // local capture: closures must not depend on the global slot
-    layers = ~mixerLayers;
-    rowH = 30; y0 = 74;
-    by = y0 + (layers.size * rowH) + 14;
-    // space-echo control strip sits where the master row was; master + all
-    // panels below shift down by one row. Present only if effects are loaded
-    // (~cfg_effects created by 6_effects.scd; nil when enableEffects=false)
-    hasFx = ~cfg_effects.notNil;
-    fxY   = by;
-    if(hasFx) { by = by + 34 };
-    // project-preset row under the master row; mod matrix shifts below it
-    psY  = by + 34;
-    modY = psY + 40;
-    // поле фиксировано 16×16 (user override 2026-07-18): TextView подогнан
-    // ровно под 16 строк Menlo 17 (~10.3 px/символ, ~20 px/строка) + рамка.
-    // QTextView не умеет отключать перенос — ширина ОБЯЗАНА вмещать 16
-    // символов + скроллбар, иначе Qt переносит хвост и псевдографика рассыпается
-    gx = 1002; gw = 210;
-    w  = gx + gw + 16;
-    h  = (modY + 220).max(620);
-    gh = 332;
-    hasGrid = ~gridGenerate.notNil;
-    hasMod  = ~modKeys.notNil and: { ~modKeys.size > 0 };
-
-    // close previous window best-effort (reference may be a destroyed Qt
-    // object; .close without try would abort the rebuild — same as tuner)
-    if(~mixerWin.notNil) { try { ~mixerWin.close } };
-    // reset all slots so nothing touches old widgets during the rebuild gap
+// full slot reset shared by the pre-build teardown and onClose: nothing may
+// touch widgets of a dead window (~loadPreset defers updates through ~mixerFx)
+~mixerResetSlots = {
     ~mixerWin        = nil;
     ~mixerGuiSync    = nil;
     ~mixerEz         = ();
@@ -312,6 +257,37 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerGridEz     = nil;
     ~mixerKonTtier   = nil;
     ~mixerKonBtns    = ();
+};
+
+~ungBuildMixer = {
+    var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
+    var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
+    var konRange, konTtierBox, konStartBtn, konStopBtn, konScoreBtn;
+    var hasMod, modY;
+    var fxY, hasFx, fxModeItems;
+    var psY, presetName, presetPop;   // local capture, same reason as win
+    var win;   // local capture: closures must not depend on the global slot
+    layers = ~mixerLayers;
+    rowH = 30; y0 = 74;
+    by = y0 + (layers.size * rowH) + 14;
+    // fx-полоса есть только при загруженных эффектах; всё ниже сдвигается
+    hasFx = ~cfg_effects.notNil;
+    fxY   = by;
+    if(hasFx) { by = by + 34 };
+    psY  = by + 34;
+    modY = psY + 40;
+    // TextView подогнан под 16×16 Menlo 17; QTextView не отключает перенос —
+    // ширина ОБЯЗАНА вмещать 16 символов + скроллбар, иначе рисунок рассыпается
+    gx = 1002; gw = 210;
+    w  = gx + gw + 16;
+    h  = (modY + 220).max(620);
+    gh = 332;
+    hasGrid = ~gridGenerate.notNil;
+    hasMod  = ~modKeys.notNil and: { ~modKeys.size > 0 };
+
+    // close previous window best-effort (destroyed Qt object — contract §6)
+    if(~mixerWin.notNil) { try { ~mixerWin.close } };
+    ~mixerResetSlots.value;
 
     win = Window(
         "UNGRUND · mixer — живое сведение слоёв (App)",
@@ -404,8 +380,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .font_(Font("Menlo", 11, true))
         .action_({ ~mixUnsolo.value });
 
-    // record button state lives in ~mixRecOn, so it stays correct after
-    // close/reopen while recording
+    // состояние кнопки в ~mixRecOn: корректно после close/reopen во время записи
     recBtn = Button(~mixerWin, Rect(472, by, 110, 24))
         .states_([
             ["● rec",  Color.gray(0.9), Color.gray(0.26)],
@@ -450,13 +425,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .action_({ ~ungRefreshPresets.value });
     ~ungRefreshPresets.value;
 
-    // --- space echo control strip (mode selectors + tone) ---
-    // mode = head-mask × reverb table (12 positions). Rows 1–4 = ECHO/delay
-    // modes (reverb OFF); 5–12 include the spring reverb. Both instances get a
-    // selector so the delay modes are reachable, per the §K.2 unit. Tone (bass +
-    // treble) is a global fx tone wired to both instances' RE-201 shelves.
-    // All six params live in ~cfg_effects (rev_/dly_mode, rev_/dly_bass,
-    // rev_/dly_treble) and drive the Ndefs at load — the GUI rides on top.
+    // --- space echo strip: mode 1–4 = чистое эхо, 5–12 = с пружиной; тон
+    // (bass/treble) глобален для обоих экземпляров; GUI едет ПОВЕРХ ~cfg_effects
     if(hasFx) {
         var dlyPop, revPop, bassEz, trebEz;
         fxModeItems = [
@@ -470,8 +440,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
         StaticText(~mixerWin, Rect(112, fxY, 40, 24)).string_("echo")
             .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
-        // every knob action also writes ~cfg_effects: it is what ~savePreset
-        // reads and what a rebuilt window initializes from — cfg stays live
+        // каждая ручка пишет и ~cfg_effects: его читают ~savePreset и пересборка окна
         dlyPop = PopUpMenu(~mixerWin, Rect(154, fxY, 168, 24))
             .items_(fxModeItems).font_(Font("Menlo", 11))
             .value_((~cfg_effects.dly_mode - 1).clip(0, 11))
@@ -490,7 +459,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
                 ~cfg_effects.rev_mode = m.value + 1;
             });
 
-        // tone knobs set BOTH instances (global fx tone); init from rev values
+        // тон ставит ОБА экземпляра; инициализация от rev-значений
         bassEz = EZSlider(~mixerWin, Rect(552, fxY, 210, 24), "bass",
             ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_bass),
             { |ez|
@@ -514,12 +483,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
         ~mixerFx = ( dlyMode: dlyPop, revMode: revPop, bass: bassEz, treble: trebEz );
     };
 
-    // --- модуляционная матрица (панель слева, под master) ---
-    // nil-безопасна: без App/8_modmatrix.scd (enableModMatrix=false) панель
-    // выключена — тем же приёмом, что hasGrid у сетки. Индекс i строки == индекс
-    // в ~cfg_modmtx.lines, так что ~modDepthSet.(i, ...) адресует ту же связь.
-    // Заголовок ВНУТРИ ветки: безусловный заголовок над заглушкой читается как
-    // «пустое место» и путает (отсюда баг-репорт 2026-07-17).
+    // --- модуляционная матрица (панель слева, под master); nil-safe без
+    // 8_modmatrix; индекс i строки == индекс в ~cfg_modmtx.lines
     if(hasMod) {
         StaticText(~mixerWin, Rect(16, modY, 660, 16))
             .string_("модуляционная матрица — 16 уровней влияния (частота одной связи ведёт другую)")
@@ -549,9 +514,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
             .stringColor_(Color(0.85, 0.55, 0.2)).font_(Font("Menlo", 11, true));
     };
 
-    // --- структурная сетка (панель справа) ---
-    // панель nil-безопасна: без App/0_grid.scd кнопка выключена — тем же
-    // приёмом, что hasSpec у кнопки tuner
+    // --- структурная сетка (панель справа); nil-safe без 0_grid ---
     StaticText(~mixerWin, Rect(gx, 50, gw, 16))
         .string_("структурная сетка 16×16 (канон)")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
@@ -561,10 +524,10 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .editable_(false)
         .background_(Color.gray(0.08))
         .stringColor_(Color.white);
-    // Qt: плоский текст красится палитрой (baseText), stringColor_ его не берёт —
-    // см. note в TextView.schelp; после каждого string_ цвет добивается по диапазону
+    // Qt красит плоский текст палитрой (baseText), не stringColor_ — после
+    // каждого string_ цвет добивается по диапазону
     gridTv.palette_(gridTv.palette.baseText_(Color.white));
-    // поле — партитура текущего акта: обязано пережить переоткрытие окна
+    // поле — партитура акта: переживает переоткрытие окна
     if(~gridLastText.notNil) {
         gridTv.string_(~gridLastText);
         gridTv.setStringColor(Color.white, 0, ~gridLastText.size);
@@ -573,14 +536,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
     gridEz = EZSlider(~mixerWin, Rect(gx, y0 + gh + 8, gw, 24), "сложность",
         ControlSpec(0, 1, \lin, 0, ~gridComplexity ? 0.5),
-        // слайдер только пишет ~gridComplexity: перерисовывать поле на каждый
-        // пиксель движения незачем, структуру строит кнопка
+        // слайдер только пишет значение — структуру строит кнопка
         { |ez| ~gridComplexity = ez.value }, ~gridComplexity ? 0.5);
     gridEz.round_(0.01);
     ~mixerGridEz = gridEz;
 
-    // до 5 строк статуса Menlo 9: сюда пишутся и длинный статус акта,
-    // и путь записанной партитуры — StaticText переносит сам
+    // статус: длинный статус акта и путь партитуры, перенос сам
     gridStatus = StaticText(~mixerWin, Rect(gx, y0 + gh + 98, gw, 56))
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
     ~mixerGridStatus = gridStatus;
@@ -589,8 +550,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .states_([["сгенерировать", Color.white, Color(0.18, 0.34, 0.44)]])
         .font_(Font("Menlo", 11, true))
         .action_({
-            // с модулем Konstruktion кнопка = АКТ (поле + таймлайн + 16 линий,
-            // GUI обновляет сам акт); без него — прежний чистый рисунок
+            // с Konstruktion кнопка = АКТ; без него — прежний чистый рисунок
             if(~konGenerate.notNil) {
                 ~konGenerate.(~gridComplexity ? 0.5, nil, ~konTtier);
             } {
@@ -610,8 +570,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
             };
         });
 
-    // Konstruktion: T_tier — параметр партитуры (читается только актом),
-    // старт/стоп пьесы и партитура; всё nil-safe без 9_konstruktion.scd
+    // Konstruktion: T_tier (читается только актом), старт/стоп, партитура;
+    // всё nil-safe без 9_konstruktion.scd
     konRange = (~cfg_kon !? { ~cfg_kon[\tTierRange] }) ? [15, 60];
     StaticText(~mixerWin, Rect(gx + 122, y0 + gh + 38, 12, 24)).string_("T")
         .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
@@ -663,44 +623,21 @@ Ndef(\master).play(out: 0, numChannels: 2);
         }.defer;
     };
 
-    // modmatrix depth sync <- ~modDepthSet (value_ never fires the action, so
-    // no fader<->setter feedback loop — same reason as ~mixerGuiSync)
+    // depth-синк <- ~modDepthSet (value_ не зовёт action — без фидбек-петли)
     ~modmatrixGuiSync = { |i, v|
         { if(~mixerModEz[i].notNil) { ~mixerModEz[i].value_(v) } }.defer;
     };
 
-    // relabel hook <- ~konGenerate: после ~modBuild подписи src→dst меняются
-    // на месте, без пересборки окна
+    // relabel <- ~konGenerate: подписи src→dst меняются без пересборки окна
     ~modmatrixGuiRelabel = { |i, label|
         { if(~mixerModEz[i].notNil) { ~mixerModEz[i].labelView.string_(label) } }.defer;
     };
 
-    // clear registries only if this is still the CURRENT window (or it was
-    // already taken down by ~appCleanup, which nils ~mixerWin before the
-    // deferred close) — otherwise the deferred onClose of an OLD window
-    // would wipe slots registered by the NEW one (same trap as the tuner)
+    // guard: only the CURRENT window (or one already taken down by ~appCleanup)
+    // may clear the slots — the deferred onClose of an OLD window must not wipe
+    // registries of the NEW one (contract §6)
     win.onClose_({
-        if(~mixerWin.isNil or: { ~mixerWin === win }) {
-            ~mixerGuiSync    = nil;
-            ~mixerEz         = ();
-            ~mixerSoloBtn    = ();
-            ~mixerMuteBtn    = ();
-            ~mixerModEz      = ();
-            // ~mixerFx must not outlive the window: ~loadPreset defers widget
-            // updates through it, and a destroyed PopUpMenu would throw
-            ~mixerFx         = ();
-            ~mixerPresetPop  = nil;
-            ~mixerPresetName = nil;
-            ~modmatrixGuiSync = nil;
-            ~modmatrixGuiRelabel = nil;
-            ~mixerRecBtn     = nil;
-            ~mixerGridTxt    = nil;
-            ~mixerGridStatus = nil;
-            ~mixerGridEz     = nil;
-            ~mixerKonTtier   = nil;
-            ~mixerKonBtns    = ();
-            ~mixerWin        = nil;
-        };
+        if(~mixerWin.isNil or: { ~mixerWin === win }) { ~mixerResetSlots.value };
     });
     win.front;
 };

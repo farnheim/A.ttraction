@@ -1,13 +1,9 @@
-// App/synths/epsilon.scd — UNGRUND class 5/8 `epsilon` (cave bed).
-// REAL LAYER, premise §C.5 `schliere` as amended 2026-07-16 (cave bed;
-// supersedes the water engine's clause (c) and the comb mechanism):
-// a LOW TONAL MODE FIELD excited by a diffused noise flow, with one slow
-// band formant drifting through its lower octave. The modes are the
-// material and the flow is their excitation — not a bed with resonances
-// on top. Three strata, no events (§F density 0, no exception).
-// Identity guarantee: spectral flatness 20–300 Hz ≤ 0.2.
-// Reference: docs/features/epsilon/cave-reference.md. Tuning via
-// 0_lib.scd; ~spec_epsilon is the single source of truth.
+// App/synths/epsilon.scd — UNGRUND class 5/8 `epsilon`, §C.5 `schliere`
+// (amended 2026-07-16, cave bed): низкое тональное поле мод, возбуждаемое
+// диффузным потоком, + одна медленная полоса-формант. Три страты, без событий;
+// identity: spectral flatness 20–300 Hz ≤ 0.2.
+// Reference + implementation notes: docs/features/epsilon/cave-reference.md.
+// ~spec_epsilon — source of truth.
 
 
 // ===== CONFIG — edit here ============================================
@@ -54,10 +50,8 @@
 
 
 // ===== LOGIC — synthesis =============================================
-// Stage 0 brown source -> 1 diffusion haze (`diff`) -> the mode field and
-// the streak are both BAND-PASSES OF `diff` (excitation), the flow is
-// `diff` above the mode region; sum -> surface AM -> 2x LPF at flowCeil ->
-// decorrelation pair -> makeup -> amp -> LeakDC -> Limiter.
+// brown -> диффузия `diff` -> моды и полоса = BAND-PASS'ы от diff, поток =
+// diff выше мод; сумма -> AM -> 2x LPF -> декорреляция -> makeup -> LeakDC -> Limiter
 Ndef(\epsilon, { |amp = 0.14,
     freqLo = 30.28, freqHi = 49.30,
     m1 = 30.28, m2 = 37.30, m3 = 49.30, m4 = 54.28,
@@ -70,27 +64,18 @@ Ndef(\epsilon, { |amp = 0.14,
     var nyq;
     var diffCentres = #[0.011, 0.019, 0.028, 0.037, 0.046, 0.055];
     var diffRates   = #[0.15, 0.21, 0.27, 0.33, 0.39, 0.45];
-    // incommensurate AND all ≤ 1.0: the amendment bounds EACH mode's
-    // breathing LFN at 0.1 Hz = the mBreath slider ceiling
+    // несоизмеримы и все ≤ 1.0: поправка ограничивает дыхание моды 0.1 Hz
     var breathMults = #[1.0, 0.83, 0.67, 0.91];
-    // the flow's audible stratum starts ABOVE the mode field: a full-band
-    // brown flow would swamp 20–300 Hz and break the ≤ 0.2 flatness
-    // guarantee that IS this class's identity (§C.5 amendment (b)). The
-    // BPF excitation taps `diff` pre-HPF, so the modes still ride the flow.
+    // поток слышен ТОЛЬКО выше поля мод — полный brown утопил бы 20–300 Hz и
+    // сломал flatness-гарантию (cave-reference, implementation note 1)
     var flowFloor = 250;
-    // ONE BPF's skirts fall only 6 dB/oct, so the mode field alone filled
-    // 250–800 Hz to 7.6 dB under its own peak band (target: 16) — the exact
-    // masking that buries gamma's drips. Each mode is therefore a CASCADED
-    // pair (12 dB/oct skirts); both band strata additionally get a tracking
-    // ceiling above their own highest position.
+    // мода = каскадная пара BPF (12 dB/окт скаты) + трекинг-потолок обеих
+    // полосных страт: одиночный BPF маскировал 250–800 Hz (note 2)
     var modeCeilRatio   = 2.2;
     var streakCeilRatio = 2.5;
-    // the source's −6 dB/oct tilt would otherwise let m1/m2 dominate m3/m4;
-    // +3 dB/oct holds the four modes near equal loudness, which is what the
-    // reference's −0.3 / 0.0 near-tie of its two low bands reports
+    // +3 dB/окт против −6 dB/окт наклона источника: четыре моды равногромки (note 3)
     var modeTilt = 0.5;
-    // trims measured per-stratum in solo renders (band RMS), not derived
-    // analytically
+    // тримы измерены по-стратно в solo-рендерах (band RMS), не аналитически
     var modeTrim   = 1.0;
     var flowTrim   = 0.7;
     var streakTrim = 0.5;
@@ -114,19 +99,17 @@ Ndef(\epsilon, { |amp = 0.14,
     streakWidthL = streakWidth.lag(0.2).clip(0.1, 1.5);
     surfDepthL   = surfDepth.lag(0.2).clip(0, 6);
     wL           = decorrWidth.lag(0.2).clip(0, 0.3);
-    // LFN rate args: clip only, no lag — a lag on a rate is useless and a
-    // stall at the range floor is the real risk
+    // rate-аргументы LFN: clip без lag — lag на частоте бесполезен
     driftT       = driftPeriod.clip(20, 240);
     surfRateL    = surfRate.clip(0.05, 0.3);
     mBreathL     = mBreath.clip(0.02, 0.1);
 
-    // Stage 0: brown IS white with the -6 dB/oct tilt (darkest admitted
-    // colour, §C.5 amendment (a)); HPF 40 — brown is sub-heavy and would
-    // waste filter headroom on rumble under the §F 40 Hz pitch floor
+    // Stage 0: brown = white с наклоном −6 dB/окт (§C.5 (a)); HPF 40 — суб-гул
+    // ниже §F-пола 40 Hz не тратит запас фильтров
     src = HPF.ar(BrownNoise.ar, 40);
 
-    // Stage 1: diffusion haze; LFN rates fixed at build time (§C.5 card —
-    // diffDepth maps motion depth only)
+    // Stage 1: диффузионная дымка; rates LFN фиксированы на build (diffDepth
+    // маппит только глубину движения)
     diff = src;
     diffCentres.do { |c, i|
         diff = AllpassC.ar(diff, 0.06,
@@ -135,11 +118,9 @@ Ndef(\epsilon, { |amp = 0.14,
             1.0);
     };
 
-    // Stage 2: the mode field — 4 static NARROW NOISE BANDS on the lattice
-    // (no comb: no overtone series, no ring). Level-normalised against
-    // f × rq so all four positions breathe at equal loudness; the breath
-    // never reaches 0 — a continuum must not gate (acceptance: no 1-s
-    // window below mean − 6 dB)
+    // Stage 2: поле мод — 4 статичные узкие шумовые полосы решётки (не comb:
+    // без обертонов и звона), нормализованы против f×rq; дыхание не доходит
+    // до 0 — континуум не гейтится
     mFreqs = [m1, m2, m3, m4].collect { |n|
         n.lag(0.2).midicps.clip(47, nyq)
     };
@@ -154,35 +135,32 @@ Ndef(\epsilon, { |amp = 0.14,
     mCeil = (mFreqs.reduce(\max) * modeCeilRatio).clip(80, nyq);
     modes = LPF.ar(LPF.ar(modes, mCeil), mCeil);
 
-    // Stage 3: the flow — the modes' medium, above the mode region only.
-    // The extra LPF at flowCeil (the sum gets two more) darkens the flow to
-    // the measured cave's steep upper fall: 2500–6000 must stay ≤ −40 rel
+    // Stage 3: поток — среда мод, только выше их области; лишний LPF темнит
+    // к измеренному крутому верхнему спаду пещеры (2500–6000 ≤ −40 rel)
     flow = HPF.ar(diff, flowFloor);
     flow = LPF.ar(flow, flowCeilL) * flowLevelL * flowTrim;
 
-    // Stage 4: the ONE drifting streak — two incommensurate LFNs, never a
-    // sine; mapped in MIDI space for even pitch coverage. A BAND-PASS
-    // formant, not a comb (amendment (a)): a comb's overtone series + ring
-    // is a resonating body, a single moving noise band is a current
+    // Stage 4: ОДНА дрейфующая полоса — две несоизмеримые LFN (не синус),
+    // маппинг в MIDI-пространстве; band-pass-формант, не comb (§C.5 (a))
     drift = LFNoise2.kr(driftT.reciprocal)
         + (LFNoise2.kr((driftT * 1.37).reciprocal) * 0.5);
     sweepHz = drift.range(freqLoL, freqHiL).midicps.clip(47, nyq);
-    // level-normalised: BPF-on-noise RMS grows with sqrt(cf × rq), so an
-    // un-normalised streak would swell as it drifts upward
+    // нормализация: RMS BPF-на-шуме растёт как sqrt(cf×rq) — без неё полоса
+    // вздувалась бы при дрейфе вверх
     streak = BPF.ar(diff, sweepHz, streakWidthL)
         * (150 / (sweepHz * streakWidthL)).sqrt.clip(0.2, 5);
     streak = LPF.ar(streak, (sweepHz * streakCeilRatio).clip(80, nyq))
         * streakLevelL * streakTrim;
 
-    // Stage 5: surface AM on the whole field — a cave's air is not still
+    // Stage 5: поверхностная AM всего поля — воздух пещеры не неподвижен
     sum = modes + flow + streak;
     sum = sum * LFNoise2.kr(surfRateL).range(surfDepthL.neg.dbamp, 1);
 
     // Stage 6: ceiling — 2x LPF (-24 dB/oct)
     sum = LPF.ar(LPF.ar(sum, flowCeilL), flowCeilL);
 
-    // Stage 7: equal-power decorrelation pair, energy centre fixed at 0
-    // (§F) — no Pan2, no pan LFO anywhere in the layer
+    // Stage 7: equal-power декорреляция, центр энергии фиксирован в 0 (§F) —
+    // ни Pan2, ни pan-LFO в слое нет
     apL = AllpassC.ar(sum, 0.02, LFNoise2.kr(0.19).range(0.004, 0.016), 0.8);
     apR = AllpassC.ar(sum, 0.02, LFNoise2.kr(0.27).range(0.005, 0.018), 0.8);
     sig = [
@@ -190,8 +168,8 @@ Ndef(\epsilon, { |amp = 0.14,
         XFade2.ar(sum, apR, (wL * 2) - 1)
     ];
 
-    // Stage 8: internal makeup lands RMS -24 dBFS at amp 0.14 (delta
-    // precedent: tune internals, never spec defaults)
+    // Stage 8: makeup кладёт RMS −24 dBFS при amp 0.14 (прецедент delta:
+    // тюнить внутренности, не спек-дефолты)
     sig = sig * makeup * amp.lag(0.05);
     sig = LeakDC.ar(sig);
     sig = Limiter.ar(sig, 0.95);

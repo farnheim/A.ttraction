@@ -1,16 +1,13 @@
-// App/synths/zeta.scd — UNGRUND class 6/8 `zeta` (vinyl/tape surface noise).
-// REAL LAYER, premise §C.6 redesigned to Texture.wav: quiet "surface" —
-// continuous coloured bed (hump ~1.2 kHz, hard ceiling ~7 kHz, slow wow
-// drift) + impulsive crackle (dense frying ticks, rare pops with a low
-// resonant "thock" body). High crest factor; keep reverb send LOW.
-// Tuning via 0_lib.scd; full reference: docs/features/zeta/texture-reference.md.
+// App/synths/zeta.scd — UNGRUND class 6/8 `zeta` (vinyl/tape surface): тихая
+// «поверхность» — окрашенная подложка (горб ~1.2 kHz, wow) + треск (тики,
+// редкие щелчки с низким «thock»). Высокий крест-фактор, ревер-посыл низкий.
+// Reference: docs/features/zeta/texture-reference.md. ~spec_zeta — source of truth.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// group \freq — spectral anchors (noise has no "notes": bed edges/centre,
-// crackle HF tilts, pop body, sub); group \tone — texture/density/dynamics.
-// disp \hz shows the nearest note+cents beside the slider.
+// group \freq — спектральные якоря (у шума нет «нот»); group \tone —
+// текстура/плотность/динамика. disp \hz кажет ближайшую ноту+центы
 ~spec_zeta = (
     name: \zeta,
     params: [
@@ -48,9 +45,8 @@
 
 
 // ===== LOGIC — synthesis =============================================
-// bed + sub + fine crackle + pops, summed mono, Pan2, LeakDC, master amp,
-// soft limiter. All impulses live INSIDE the persistent Ndef graph
-// (Dust2/Decay2) — no per-event Synths.
+// bed + sub + fine + pops -> моно-сумма -> Pan2 -> LeakDC -> Limiter; все
+// импульсы ВНУТРИ персистентного графа (Dust2/Decay2), без per-event Synth
 Ndef(\zeta, { |amp = 0.32,
     bedHpf = 270, bedLpf = 11000, bedHumpFreq = 1200, bedHumpRq = 0.6, bedHumpAmt = 0.55,
     bedAmp = 0.6, bedDriftRate = 0.1, bedDriftDepth = 0.25,

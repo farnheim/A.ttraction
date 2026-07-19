@@ -26,14 +26,12 @@
 
 
 // ===== LOGIC — Tdef scheduler ========================================
-// ONE clock per session: re-running the file must NOT create another
-// (a permanent clock survives Cmd-.). Only ~appCleanup frees it.
+// ОДИН клок на сессию (permanent переживает Cmd-.); освобождает только ~appCleanup
 ~seqClock = ~seqClock ?? { TempoClock.new(~cfg_seq.tempo).permanent_(true) };
 ~seqClock.tempo = ~cfg_seq.tempo;
 
-// set layer volume DIRECTLY on the router Ndef, NOT via ~mixSet: ~mixSet
-// writes into ~cfg_mixer.levels and a sequencer run would overwrite the
-// original mix with zeros (runtime volume vs CONFIG mix, as in ~mixSolo)
+// громкость ПРЯМО на роутер-Ndef, не через ~mixSet: тот пишет в
+// ~cfg_mixer.levels и прогон перетёр бы сведение нулями (runtime vs CONFIG)
 ~seqSetVol = { |layer, v|
     Ndef(("mix_" ++ layer).asSymbol).set(\vol, v);
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(layer, \vol, v) };
@@ -44,23 +42,16 @@
 };
 ~seqMute = { |layer| ~seqSetVol.(layer, 0) };
 
-// runtime timeline slot (Konstruktion): the Tdef plays ~seqTimeline when set,
-// the CONFIG demo otherwise — same runtime-vs-CONFIG принцип, that ~seqSetVol
-// против ~mixSet; ~seqTimeline = nil возвращает демо
+// runtime-слот акта: Tdef играет ~seqTimeline, иначе CONFIG-демо
 ~seqTimeline = ~seqTimeline;
 
-// runtime-слот (user override 2026-07-18): false = секвенсор НЕ дирижирует
-// громкостями (vols/active/gone и глушение в start/stop пропускаются, set:
-// остаётся) — громкости у исполнителя. Акт Konstruktion ставит false ВМЕСТЕ
-// с ~seqTimeline; демо (~seqTimeline = nil) всегда дирижирует: ~seqStart и
-// Tdef восстанавливают true, когда таймлайна акта нет — false не защёлкивается
+// override 2026-07-18: false = секвенсор НЕ дирижирует громкостями (set:
+// остаётся) — громкости у исполнителя; демо всегда возвращает true
 ~seqDriveVols = ~seqDriveVols ? true;
 
-// apply one timeline block
 ~seqApplyBlock = { |block|
     if(~seqDriveVols == true) {
-        // block[\vols]: [[\layer, rel]] — уровень блока ОТНОСИТЕЛЬНО живого
-        // сведения (rel × ~cfg_mixer.levels), сведение нулями не перетирается
+        // block[\vols]: [[\layer, rel]] — уровень ОТНОСИТЕЛЬНО живого сведения
         (block[\vols]   ? []).do { |pair|
             var lv = ~cfg_mixer.levels[pair[0]];
             if(lv.notNil) { ~seqSetVol.(pair[0], pair[1] * lv.vol) };
@@ -75,8 +66,8 @@
 };
 
 // state for the viz window (7_viz.scd): current block index + start time
-~seqCurrentBlock = ~seqCurrentBlock ? nil;
-~seqStartTime    = ~seqStartTime    ? nil;
+~seqCurrentBlock = ~seqCurrentBlock;
+~seqStartTime    = ~seqStartTime;
 
 Tdef(\ung_sequencer, {
     var line, prevT = 0;
@@ -99,10 +90,8 @@ Tdef(\ung_sequencer, {
 // --- start / stop -----------------------------------------------------
 ~seqStart = {
     // демо всегда дирижирует: false акта не переживает возврат к демо
-    // (акт выставляет false вместе с ~seqTimeline — см. слот выше)
     if(~seqTimeline.isNil) { ~seqDriveVols = true };
-    // initial state: mute all layers, block t=0 raises the needed ones
-    // (only while the sequencer drives volumes — see ~seqDriveVols)
+    // старт: заглушить все слои, блок t=0 поднимет нужные
     if(~seqDriveVols == true) { ~mixerLayers.do { |l| ~seqMute.(l) } };
     ~seqCurrentBlock = nil;
     ~seqStartTime    = Main.elapsedTime;     // wall-clock mark for viz playhead

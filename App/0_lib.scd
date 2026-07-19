@@ -1,9 +1,6 @@
-// App/0_lib.scd — UNGRUND · LIB: shared layer-tuning infrastructure.
-// Spec registry ~ungSpecs, live values ~ungVals, ~setParam, randomizers,
-// project presets (save/load/list — one file covers all layers + mixer + fx),
-// per-layer tuner GUI (~openTuner).
-// Each synths/<layer>.scd registers its spec here; load this file FIRST.
-// Spec format and details: docs/architecture/app/README.md.
+// App/0_lib.scd — UNGRUND · LIB: реестр spec'ов ~ungSpecs, значения ~ungVals,
+// ~setParam, рандомайзеры, проектные пресеты, тюнер-GUI (~openTuner).
+// Грузится ПЕРВЫМ. Формат spec: docs/architecture/app/README.md.
 
 (
 // ----- registries (idempotent: reloading does not reset) -------------
@@ -21,11 +18,6 @@
 
 // ----- spec / values --------------------------------------------------
 ~ungSpecOf = { |layer| ~ungSpecs[layer.asSymbol] };
-
-~ungDefault = { |layer, key|
-    var p = ~ungSpecOf.(layer).params.detect { |e| e.key == key.asSymbol };
-    p !? { p.spec.default };
-};
 
 
 // ----- set parameter: Ndef + store + GUI sync -------------------------
@@ -62,9 +54,8 @@
 
 
 // ----- project presets: dir, save, load, list -------------------------
-// ONE file = the whole project state: layers (all spec params), mixer
-// (master + levels), fx (the four space-echo knobs of the mixer strip).
-// Every section is optional — a partial preset leaves the rest untouched.
+// ОДИН файл = всё состояние проекта (layers/mixer/fx); каждая секция
+// опциональна — частичный пресет не трогает остальное
 ~ungPresetDir = {
     var root = ~ungPresetRoot;
     if(File.exists(root).not) { File.mkdir(root) };
@@ -133,8 +124,7 @@
             e[\layers] !? { |ls|
                 ls.keysValuesDo { |layer, vals|
                     var spec = ~ungSpecOf.(layer);
-                    // spec present = layer loaded this session; unknown keys
-                    // (renamed/removed params) are skipped, not set blindly
+                    // spec есть = слой загружен; неизвестные ключи пропускаются
                     if(spec.notNil) {
                         vals.keysValuesDo { |k, v|
                             if(spec.params.any { |p| p.key == k.asSymbol }) {
@@ -149,8 +139,8 @@
                 if(~mixSet.notNil and: { ~cfg_mixer.notNil }) {
                     m[\levels] !? { |rows|
                         rows.keysValuesDo { |layer, lv|
-                            // only routed layers: ~mixSet on an unrouted name
-                            // would spawn an empty mix_<layer> proxy
+                            // только смаршрутизированные: ~mixSet на чужом имени
+                            // породил бы пустой mix_<layer>-прокси
                             if((~mixerLayers ? []).includes(layer.asSymbol)) {
                                 lv.keysValuesDo { |which, v|
                                     ~mixSet.(layer.asSymbol, which, v);
@@ -159,9 +149,8 @@
                         };
                     };
                     m[\master] !? { |v| ~masterSet.(v) };
-                    // presence of `muted` gates the whole audibility state:
-                    // presets saved before mute/solo entered the format leave
-                    // the current mute/solo untouched (partial-preset rule)
+                    // наличие `muted` гейтит всё mute/solo-состояние: старые
+                    // пресеты без него ничего не трогают (partial-preset rule)
                     m[\muted] !? { |ml|
                         ~mixMuted = ();
                         ml.do { |l| ~mixMuted[l.asSymbol] = true };
@@ -176,25 +165,16 @@
                 if(~cfg_effects.notNil) {
                     // ~cfg_effects is updated too, so a mixer window built
                     // AFTER the load still initializes its fx strip correctly
-                    fx[\rev_mode] !? { |v|
-                        Ndef(\space_echo_rev).set(\mode, v);
-                        ~cfg_effects.rev_mode = v;
-                    };
-                    fx[\dly_mode] !? { |v|
-                        Ndef(\space_echo_dly).set(\mode, v);
-                        ~cfg_effects.dly_mode = v;
-                    };
-                    fx[\bass] !? { |v|
-                        Ndef(\space_echo_rev).set(\bass, v);
-                        Ndef(\space_echo_dly).set(\bass, v);
-                        ~cfg_effects.rev_bass = v;
-                        ~cfg_effects.dly_bass = v;
-                    };
-                    fx[\treble] !? { |v|
-                        Ndef(\space_echo_rev).set(\treble, v);
-                        Ndef(\space_echo_dly).set(\treble, v);
-                        ~cfg_effects.rev_treble = v;
-                        ~cfg_effects.dly_treble = v;
+                    [
+                        [\rev_mode, \mode,   [\space_echo_rev], [\rev_mode]],
+                        [\dly_mode, \mode,   [\space_echo_dly], [\dly_mode]],
+                        [\bass,     \bass,   [\space_echo_rev, \space_echo_dly], [\rev_bass, \dly_bass]],
+                        [\treble,   \treble, [\space_echo_rev, \space_echo_dly], [\rev_treble, \dly_treble]]
+                    ].do { |row|
+                        fx[row[0]] !? { |v|
+                            row[2].do { |n| Ndef(n).set(row[1], v) };
+                            row[3].do { |k| ~cfg_effects[k] = v };
+                        };
                     };
                     {
                         ~mixerFx !? { |wid|
@@ -265,9 +245,8 @@
     };
 };
 
-// ----- GUI: authoritative pull-resync of ALL layer sliders from ~ungVals.
-// Bypasses per-key ~ungTunerSync; called after any bulk operation
-// (preset load / random) so sliders always end up matching the values.
+// ----- GUI: авторитетный ресинк ВСЕХ слайдеров слоя из ~ungVals — после
+// массовых операций (пресет/рандом), в обход по-ключевого ~ungTunerSync
 ~ungSyncAll = { |layer|
     layer = layer.asSymbol;
     if(~ungTuner[layer].notNil and: { ~ungTunerEz[layer].notNil }) {
@@ -304,19 +283,16 @@
     by = slBottom + 16;             // randomizer row
     w  = 964; h = by + 38 + 16;
 
-    // close previous window best-effort: the reference may point to an
-    // already destroyed Qt object (.close without try would abort the build)
+    // закрыть прежнее окно best-effort (мёртвый Qt-объект — контракт §6) и
+    // сбросить ВСЕ слоты слоя: в паузе пересборки никто не трогает старые виджеты
     if(~ungTuner[layer].notNil) { try { ~ungTuner[layer].close } };
-    // reset ALL layer slots consistently so nothing touches widgets of the
-    // OLD window during the rebuild gap
     ~ungTuner[layer]        = nil;
     ~ungTunerEz[layer]      = ();
     ~ungTunerNoteTxt[layer] = ();
     ~ungTunerSync[layer]    = nil;
 
-    // window position: wrap the stagger AND hard-clamp the rect into the
-    // visible screen — otherwise the offset grows all session and the window
-    // "opens" off-screen
+    // позицию окна заворачивать И клампить в экран — иначе оффсет растёт всю
+    // сессию и окно «открывается» за кадром
     off = ((~ungTunerOffset % 12) * 26);
     ~ungTunerOffset = ~ungTunerOffset + 1;
     scr = Window.availableBounds;
@@ -327,9 +303,7 @@
         (70 + off).clip(scr.top,  scr.top  + scr.height - h),
         w, h
     );
-    // NOTE: do NOT chain `win = ~ungTuner[layer] = Window(...)` — in SC
-    // `dict[k] = v` returns the DICT, so win would bind to the registry Event
-    // (onClose/close become no-ops, buttons fail). Assign separately.
+    // НЕ чейнить `win = dict[k] = Window(...)` — вернётся словарь (контракт §6)
     win = Window(
         "UNGRUND · tuner — " ++ layer ++ " (живой Ndef в App)",
         winRect
@@ -408,9 +382,8 @@
         .font_(Font("Menlo", 11))
         .action_({ if(win.notNil) { win.close } });
 
-    // clear the registry ONLY if this is still the layer's current window —
-    // otherwise the deferred onClose of the OLD window (close->reopen) would
-    // wipe slots registered by the NEW window
+    // guard: отложенный onClose СТАРОГО окна не должен стереть реестры
+    // НОВОГО (контракт §6)
     win.onClose_({
         if(~ungTuner[layer] === win) {
             ~ungTuner[layer]        = nil;
@@ -419,9 +392,8 @@
             ~ungTunerSync[layer]    = nil;
         };
     });
-    // show as ONE deferred event: Qt lays the heavy window out asynchronously,
-    // an immediate .front lands before layout and the window stays invisible;
-    // a retry loop on AppClock starves Qt and never shows it either
+    // один .defer(0.3) после раскладки: немедленный .front тяжёлого Qt-окна
+    // опережает layout и окно остаётся невидимым (контракт §6)
     { ~ungTuner[layer].bounds_(winRect).front }.defer(0.3);
 };
 

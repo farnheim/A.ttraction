@@ -26,12 +26,8 @@
 // ===== LOGIC — boot, load, wire, start ===============================
 ~appDir = thisProcess.nowExecutingPath.dirname;
 
-// scsynth's default of 64 interconnect buffers is not enough for the largest
-// layer graph: theta's 8-voice aggregate needs ~130–256 (measured — it fails
-// to load at 128 with "exceeded number of interconnect buffers", and the
-// server then reports "SynthDef not found" while the app otherwise starts
-// normally, i.e. the layer goes SILENT rather than erroring visibly).
-// Costs ~131 KB. Takes effect at BOOT only — reboot the server after changing.
+// дефолтных 64 wire-буферов графу theta мало — слой падает МОЛЧА (тихий
+// "SynthDef not found"); действует только с БУТА. docs/architecture/app/README.md §5
 s.options.numWireBufs = 512;
 
 // master cleanup (idempotent)
@@ -44,17 +40,14 @@ s.options.numWireBufs = 512;
     Pdef.all.do(_.clear);
     MIDIdef.all.do(_.free);
     Ndef.all.do(_.clear);
-    // the sequencer TempoClock is permanent (survives Cmd-.) — stop it
-    // explicitly, otherwise clocks would pile up run after run
+    // клок секвенсора permanent (переживает Cmd-.) — гасить явно, иначе копятся
     if(~seqClock.notNil) {
         ~seqClock.clear;
         ~seqClock.permanent_(false);
         ~seqClock.stop;
         ~seqClock = nil;
     };
-    // Konstruktion (9_konstruktion.scd): runtime-таймлайн и состояние акта;
-    // Tdef/Ndef/клок уже очищены строками выше; nil у ~seqDriveVols вернёт
-    // дефолт true при следующей загрузке секвенсора
+    // состояние акта Konstruktion; nil у ~seqDriveVols вернёт дефолт true
     ~seqTimeline  = nil;
     ~seqDriveVols = nil;
     ~konActive    = false;
@@ -69,20 +62,16 @@ s.options.numWireBufs = 512;
 
 s.waitForBoot({
 
-    // 0a. tuning infrastructure first: synths/*.scd register specs in ~ungSpecs
+    // 0a. сначала инфраструктура: слои регистрируют spec'и в ~ungSpecs, окно
+    // микшера (шаг 4) читает ~gridGenerate
     (~appDir +/+ "0_lib.scd").load;
-    // structure-grid generator: pure logic, no server; the mixer window (step 4)
-    // reads ~gridGenerate, so it must exist before the mixer is loaded
     (~appDir +/+ "0_grid.scd").load;
 
     // 0b. clean start
     ~appCleanup.value(false);
 
-    // 1. buses
+    // 1. buses; посылов ДВА, не один — таблицы §K.1/§K.2 независимы по канону
     ~busDry       = Bus.audio(s, 2);   // dry layer sum -> master
-    // two send buses, NOT one: §K.1 and §K.2 prescribe independent per-class
-    // send tables (delta/epsilon/zeta: reverb yes, delay 0.0) — a shared bus
-    // cannot express that, since both effects would read the same sum
     ~busFxSendRev = Bus.audio(s, 2);   // layer sends -> \space_echo_rev (§K.1)
     ~busFxSendDly = Bus.audio(s, 2);   // layer sends -> \space_echo_dly (§K.2)
     ~busFxReturn  = Bus.audio(s, 2);   // effect returns -> master (§K)
@@ -109,8 +98,7 @@ s.waitForBoot({
         "UNGRUND app — НЕ найдено ни одного синт-слоя для загрузки.".warn;
     };
 
-    // ~activeLayers — single source of truth about loaded layers; mixer and
-    // viz read it, so set it BEFORE loading the mixer
+    // ~activeLayers — source of truth о загруженных слоях; ставится ДО микшера
     ~activeLayers = ~synthFiles.collect { |p|
         PathName(p).fileNameWithoutExtension.asSymbol;
     };
@@ -129,16 +117,13 @@ s.waitForBoot({
         "UNGRUND app — эффекты ВЫКЛ (enableEffects=false).".postln;
     };
 
-    // 3b. modulation matrix (BEFORE the mixer: the mixer window builds the
-    // 16 depth faders and must see ~modKeys — same "loads before mixer"
-    // constraint as 0_grid). Maps onto layer params (loaded at step 2).
+    // 3b. modulation matrix — ДО микшера (окно строит 16 фейдеров по ~modKeys)
     if(~cfg_app.enableModMatrix) {
         (~appDir +/+ "8_modmatrix.scd").load;
         s.sync;
     } {
-        // disabled: drop any registry lingering from a prior enabled run so the
-        // mixer shows the placeholder, not stale/dead faders (~modActive holds
-        // the maps to release; ? [] covers "never loaded")
+        // выключена: снять остатки прежнего включённого прогона, иначе окно
+        // покажет мёртвые фейдеры вместо заглушки
         (~modActive ? []).do { |e| Ndef(e[\target]).unmap(e[\param]) };
         ~modKeys = nil; ~modActive = nil;
         "UNGRUND app — модуляционная матрица ВЫКЛ (enableModMatrix=false).".postln;
@@ -155,12 +140,10 @@ s.waitForBoot({
         "UNGRUND app — микшер ВЫКЛ (enableMixer=false) — слои не маршрутизированы.".warn;
     };
 
-    // 4b. auto-load the project preset "default": AFTER the mixer, because
-    // its mixer section goes through ~mixSet/~masterSet; loader is nil-safe
-    // per section, so it also works with mixer/effects disabled
+    // 4b. авто-пресет "default" — ПОСЛЕ микшера (его mixer-секция идёт через
+    // ~mixSet/~masterSet); загрузчик nil-safe по секциям
     if(~cfg_app.autoPreset) {
-        // .any with == (value compare), NOT .includes: Array:includes
-        // compares by identity (===) and two equal Strings are not identical
+        // .any с ==, не .includes: String-членство — identity-ловушка (контракт §6)
         if(~listPresets.value.any { |n| n == "default" }) {
             ~loadPreset.("default");
         };
@@ -190,8 +173,7 @@ s.waitForBoot({
         "UNGRUND app — секвенсор ВЫКЛ (enableSequencer=false).".postln;
     };
 
-    // 7b. konstruktion (после секвенсора, до viz): форма §E.6 — акт генерации
-    // сетки = макроформа + топология модуляции; требует оба модуля-исполнителя
+    // 7b. konstruktion (форма §E.6): требует оба модуля-исполнителя
     if(~cfg_app.enableKonstruktion) {
         if(~cfg_app.enableSequencer and: { ~cfg_app.enableModMatrix }) {
             (~appDir +/+ "9_konstruktion.scd").load;

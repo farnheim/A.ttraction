@@ -1,16 +1,12 @@
-// App/synths/alpha.scd — UNGRUND class 1/8 `alpha` (sustained sine / Grund).
-// REAL LAYER: physical model "bundle of 10 springs in oil" (ported from
-// Tests/test_monade.scd). Tones in MIDI notes (.midicps inside).
-// Tuning via 0_lib.scd: ~openTuner/~rndFreq/~rndParams; presets are
-// project-level (~savePreset/~loadPreset, mixer window row).
-// ~spec_alpha is the single source of truth (sliders/randomizers/presets);
-// layer contract: docs/architecture/app/layer-contract.md.
+// App/synths/alpha.scd — UNGRUND class 1/8 `alpha` (sustained sine / Grund):
+// физмодель «пучок 10 пружин в масле» (порт из Tests/test_monade.scd), тоны в
+// MIDI-нотах. Разбор: docs/architecture/app/README.md, приложение A.
+// ~spec_alpha — source of truth.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// group \freq — tones; group \tone — timbre/medium. spec gives range,
-// warp and DEFAULT (applied at layer load).
+// group \freq — тоны; group \tone — тембр/среда
 ~spec_alpha = (
     name: \alpha,
     params: [
@@ -72,13 +68,12 @@ Ndef(\alpha, { |amp = 0.30, density = 8.65, contact = 0.464,
     dens     = (density.lag(0.2) * sway).clip(0.05, 400);
     contacts = Dust2.ar(dens);
 
-    // dry contact — bright, no low overtone content
+    // сухой контакт — яркий, без низких обертонов
     ticks = Decay2.ar(contacts.abs, 0.0004, 0.006 + (oilL * 0.02));
     ticks = ticks * ((BrownNoise.ar * 0.7) + 0.5);
     ticks = HPF.ar(ticks, bright.lag(0.2).clip(500, 10000));
-    // metal — spring-contact ring: inharmonic modal bank with a HIGH spectral
-    // centre; high modes louder and longer (shimmer), lows only a short
-    // weight thump (metalWeight), no ringing wooden note
+    // металл — негармонический банк с ВЫСОКИМ центром (shimmer), низ только
+    // короткий weight thump, без деревянной ноты
     mRing  = metalRing.lag(0.2).clip(0.01, 0.4);
     mDet   = LFNoise0.kr([7, 9, 11, 13, 6, 8, 10, 12, 5]).range(0.985, 1.015);
     mFreqs = [413, 661, 977, 1490, 2137, 3001, 4313, 5897, 7639] * mDet;
@@ -90,10 +85,10 @@ Ndef(\alpha, { |amp = 0.30, density = 8.65, contact = 0.464,
                 * 0.45 * metalAmt.lag(0.2);
     ticks = ((ticks * 0.7) + metal) * contact.lag(0.2);
 
-    // body — continuous low noise: the bundle's mass in motion
+    // тело — непрерывный низкий шум: масса пучка в движении
     body = BrownNoise.ar(bodyLevel.lag(0.2)) * LFNoise2.kr(0.35).range(0.3, 1.0);
 
-    // bundle of 10 springs, each on its own tone (note -> Hz)
+    // пучок из 10 пружин, каждая на своём тоне (note -> Hz)
     notes = [n1, n2, n3, n4, n5, n6, n7, n8, n9, n10];
     springs = Array.fill(nSprings, { |i|
         var sf, sd, collGain, ringGain, voice;
