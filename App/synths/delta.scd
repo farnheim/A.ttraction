@@ -1,5 +1,5 @@
 // App/synths/delta.scd — UNGRUND class 4/8 `delta` (choir voices through
-// metal plates). REAL LAYER (rewritten per plans/active/delta-choir-voices.md,
+// metal plates). REAL LAYER (rewritten per docs/features/delta/dsp-spec.md,
 // 2026-07-19). Premise §C.4 `binde`, AMENDED 2026-07-19: 5 glottal-pulse
 // voices (3 detuned Blip + breath noise) on the 3-limit 94 Hz lattice
 // (141/188/282/376/564 Hz), each feeding IN PARALLEL a 5-formant vocal BPF

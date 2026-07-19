@@ -1,7 +1,8 @@
 // App/synths/alpha.scd — UNGRUND class 1/8 `alpha` (sustained sine / Grund).
 // REAL LAYER: physical model "bundle of 10 springs in oil" (ported from
 // Tests/test_monade.scd). Tones in MIDI notes (.midicps inside).
-// Tuning via 0_lib.scd: ~openTuner/~rndFreq/~rndParams/~save~loadPreset.
+// Tuning via 0_lib.scd: ~openTuner/~rndFreq/~rndParams; presets are
+// project-level (~savePreset/~loadPreset, mixer window row).
 // ~spec_alpha is the single source of truth (sliders/randomizers/presets);
 // layer contract: docs/architecture/app/layer-contract.md.
 

@@ -12,7 +12,10 @@
 // (§K.2 table).
 // The two sends are independent by canon — see the aggregators below.
 // Entries for unloaded layers are simply ignored.
-~cfg_mixer = (
+// `? ()` like ~mixMuted/~mixRecOn: the live mix is STATE and must survive a
+// hot-reload of this module — the table below only seeds a fresh session
+// (and the project preset then overrides it at app start via autoPreset)
+~cfg_mixer = ~cfg_mixer ? (
     master:  0.9,
 
     levels: (
@@ -216,6 +219,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerSoloBtn = ();    // layer -> Button (solo)
 ~mixerMuteBtn = ();    // layer -> Button (mute)
 ~mixerModEz   = ();    // modmatrix line index -> depth EZSlider (nil-safe; 8_modmatrix.scd)
+~mixerPresetPop  = nil;   // PopUpMenu (project presets; read by ~ungRefreshPresets)
+~mixerPresetName = nil;   // TextField (preset name)
 ~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
 
 // structure-grid panel slots (0_grid.scd may be absent — panel is nil-safe)
@@ -259,8 +264,9 @@ Ndef(\master).play(out: 0, numChannels: 2);
     var layers, rowH, y0, w, h, by, mkRow, masterEz, recBtn;
     var gx, gw, gh, hasGrid, gridTv, gridEz, gridStatus, gridBtn;
     var konRange, konTtierBox, konStartBtn, konStopBtn, konScoreBtn;
-    var hasMod;
+    var hasMod, modY;
     var fxY, hasFx, fxModeItems;
+    var psY, presetName, presetPop;   // local capture, same reason as win
     var win;   // local capture: closures must not depend on the global slot
     layers = ~mixerLayers;
     rowH = 30; y0 = 74;
@@ -271,13 +277,16 @@ Ndef(\master).play(out: 0, numChannels: 2);
     hasFx = ~cfg_effects.notNil;
     fxY   = by;
     if(hasFx) { by = by + 34 };
+    // project-preset row under the master row; mod matrix shifts below it
+    psY  = by + 34;
+    modY = psY + 40;
     // поле фиксировано 16×16 (user override 2026-07-18): TextView подогнан
     // ровно под 16 строк Menlo 17 (~10.3 px/символ, ~20 px/строка) + рамка.
     // QTextView не умеет отключать перенос — ширина ОБЯЗАНА вмещать 16
     // символов + скроллбар, иначе Qt переносит хвост и псевдографика рассыпается
     gx = 1002; gw = 210;
     w  = gx + gw + 16;
-    h  = (by + 40 + 40).max(620);
+    h  = (modY + 220).max(620);
     gh = 332;
     hasGrid = ~gridGenerate.notNil;
     hasMod  = ~modKeys.notNil and: { ~modKeys.size > 0 };
@@ -293,6 +302,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerMuteBtn    = ();
     ~mixerModEz      = ();
     ~mixerFx         = ();
+    ~mixerPresetPop  = nil;
+    ~mixerPresetName = nil;
     ~modmatrixGuiSync = nil;
     ~modmatrixGuiRelabel = nil;
     ~mixerRecBtn     = nil;
@@ -409,6 +420,36 @@ Ndef(\master).play(out: 0, numChannels: 2);
         .font_(Font("Menlo", 11))
         .action_({ win.close });
 
+    // --- project presets: name | save | list | load | refresh ---
+    StaticText(~mixerWin, Rect(16, psY + 2, 58, 22))
+        .string_("preset:").stringColor_(Color.gray(0.75)).font_(Font("Menlo", 11));
+    // separate assignment (see comment at win): chaining via [k]= returns the Event
+    presetName = TextField(~mixerWin, Rect(80, psY, 168, 24))
+        .string_("").font_(Font("Menlo", 11));
+    ~mixerPresetName = presetName;
+    Button(~mixerWin, Rect(254, psY, 90, 24))
+        .states_([["save", Color.white, Color(0.20, 0.40, 0.24)]])
+        .font_(Font("Menlo", 11, true))
+        .action_({ if(presetName.notNil) { ~savePreset.(presetName.string) } });
+    presetPop = PopUpMenu(~mixerWin, Rect(352, psY, 200, 24))
+        .font_(Font("Menlo", 11));
+    ~mixerPresetPop = presetPop;
+    Button(~mixerWin, Rect(560, psY, 90, 24))
+        .states_([["load", Color.white, Color(0.20, 0.34, 0.44)]])
+        .font_(Font("Menlo", 11, true))
+        .action_({
+            var items = ~listPresets.value;
+            var idx = presetPop !? { presetPop.value };
+            if(idx.notNil and: { items.notEmpty } and: { idx < items.size }) {
+                ~loadPreset.(items[idx]);
+            };
+        });
+    Button(~mixerWin, Rect(658, psY, 90, 24))
+        .states_([["обновить", Color.gray(0.9), Color.gray(0.28)]])
+        .font_(Font("Menlo", 11))
+        .action_({ ~ungRefreshPresets.value });
+    ~ungRefreshPresets.value;
+
     // --- space echo control strip (mode selectors + tone) ---
     // mode = head-mask × reverb table (12 positions). Rows 1–4 = ECHO/delay
     // modes (reverb OFF); 5–12 include the spring reverb. Both instances get a
@@ -429,17 +470,25 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
         StaticText(~mixerWin, Rect(112, fxY, 40, 24)).string_("echo")
             .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
+        // every knob action also writes ~cfg_effects: it is what ~savePreset
+        // reads and what a rebuilt window initializes from — cfg stays live
         dlyPop = PopUpMenu(~mixerWin, Rect(154, fxY, 168, 24))
             .items_(fxModeItems).font_(Font("Menlo", 11))
             .value_((~cfg_effects.dly_mode - 1).clip(0, 11))
-            .action_({ |m| Ndef(\space_echo_dly).set(\mode, m.value + 1) });
+            .action_({ |m|
+                Ndef(\space_echo_dly).set(\mode, m.value + 1);
+                ~cfg_effects.dly_mode = m.value + 1;
+            });
 
         StaticText(~mixerWin, Rect(332, fxY, 34, 24)).string_("rev")
             .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 10));
         revPop = PopUpMenu(~mixerWin, Rect(368, fxY, 174, 24))
             .items_(fxModeItems).font_(Font("Menlo", 11))
             .value_((~cfg_effects.rev_mode - 1).clip(0, 11))
-            .action_({ |m| Ndef(\space_echo_rev).set(\mode, m.value + 1) });
+            .action_({ |m|
+                Ndef(\space_echo_rev).set(\mode, m.value + 1);
+                ~cfg_effects.rev_mode = m.value + 1;
+            });
 
         // tone knobs set BOTH instances (global fx tone); init from rev values
         bassEz = EZSlider(~mixerWin, Rect(552, fxY, 210, 24), "bass",
@@ -447,6 +496,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
             { |ez|
                 Ndef(\space_echo_rev).set(\bass, ez.value);
                 Ndef(\space_echo_dly).set(\bass, ez.value);
+                ~cfg_effects.rev_bass = ez.value;
+                ~cfg_effects.dly_bass = ez.value;
             }, ~cfg_effects.rev_bass);
         bassEz.round_(0.01);
 
@@ -455,6 +506,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
             { |ez|
                 Ndef(\space_echo_rev).set(\treble, ez.value);
                 Ndef(\space_echo_dly).set(\treble, ez.value);
+                ~cfg_effects.rev_treble = ez.value;
+                ~cfg_effects.dly_treble = ez.value;
             }, ~cfg_effects.rev_treble);
         trebEz.round_(0.01);
 
@@ -468,10 +521,10 @@ Ndef(\master).play(out: 0, numChannels: 2);
     // Заголовок ВНУТРИ ветки: безусловный заголовок над заглушкой читается как
     // «пустое место» и путает (отсюда баг-репорт 2026-07-17).
     if(hasMod) {
-        StaticText(~mixerWin, Rect(16, by + 40, 660, 16))
+        StaticText(~mixerWin, Rect(16, modY, 660, 16))
             .string_("модуляционная матрица — 16 уровней влияния (частота одной связи ведёт другую)")
             .stringColor_(Color.gray(0.6)).font_(Font("Menlo", 9));
-        Button(~mixerWin, Rect(684, by + 37, 140, 20))
+        Button(~mixerWin, Rect(684, modY - 3, 140, 20))
             .states_([["рандом связей", Color.white, Color(0.28, 0.2, 0.44)]])
             .font_(Font("Menlo", 10, true))
             .action_({ if(~modRandomize.notNil) { ~modRandomize.value } });
@@ -479,7 +532,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
             var col = i div: 8;
             var row = i mod: 8;
             var mx  = 16 + (col * 492);
-            var my  = by + 60 + (row * 24);
+            var my  = modY + 20 + (row * 24);
             var ez;
             ez = EZSlider(~mixerWin, Rect(mx, my, 470, 22), e[\label],
                 ControlSpec(0, 1, \lin, 0, e[\depth]),
@@ -491,7 +544,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
             ~mixerModEz[i] = ez;
         };
     } {
-        StaticText(~mixerWin, Rect(16, by + 40, 900, 18))
+        StaticText(~mixerWin, Rect(16, modY, 900, 18))
             .string_("модуляционная матрица ВЫКЛ — включи ~cfg_app.enableModMatrix = true и перезапусти весь блок 1_app.scd")
             .stringColor_(Color(0.85, 0.55, 0.2)).font_(Font("Menlo", 11, true));
     };
@@ -633,6 +686,11 @@ Ndef(\master).play(out: 0, numChannels: 2);
             ~mixerSoloBtn    = ();
             ~mixerMuteBtn    = ();
             ~mixerModEz      = ();
+            // ~mixerFx must not outlive the window: ~loadPreset defers widget
+            // updates through it, and a destroyed PopUpMenu would throw
+            ~mixerFx         = ();
+            ~mixerPresetPop  = nil;
+            ~mixerPresetName = nil;
             ~modmatrixGuiSync = nil;
             ~modmatrixGuiRelabel = nil;
             ~mixerRecBtn     = nil;

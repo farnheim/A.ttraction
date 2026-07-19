@@ -8,7 +8,7 @@
 (
 ~cfg_app = (
     layers:          nil,     // nil = all synths/*.scd; or e.g. [\alpha, \theta]
-    autoPreset:      true,    // auto-load preset "default" per layer if present
+    autoPreset:      true,    // auto-load project preset "default" (layers+mixer+fx) if present
     enableEffects:   true,    // 6_effects.scd
     enableMixer:     true,    // 2_mixer.scd
     enableMixerGui:  true,    // open mixer window after load
@@ -121,17 +121,6 @@ s.waitForBoot({
     };
     s.sync;
 
-    // 2b. auto-load per-layer preset "default" if present
-    if(~cfg_app.autoPreset) {
-        ~activeLayers.do { |layer|
-            // .any with == (value compare), NOT .includes: Array:includes
-            // compares by identity (===) and two equal Strings are not identical
-            if(~listPresets.(layer).any { |n| n == "default" }) {
-                ~loadPreset.(layer, "default");
-            };
-        };
-    };
-
     // 3. effects (read ~busFxSendRev/~busFxSendDly, write ~busFxReturn)
     if(~cfg_app.enableEffects) {
         (~appDir +/+ "6_effects.scd").load;
@@ -164,6 +153,17 @@ s.waitForBoot({
         };
     } {
         "UNGRUND app — микшер ВЫКЛ (enableMixer=false) — слои не маршрутизированы.".warn;
+    };
+
+    // 4b. auto-load the project preset "default": AFTER the mixer, because
+    // its mixer section goes through ~mixSet/~masterSet; loader is nil-safe
+    // per section, so it also works with mixer/effects disabled
+    if(~cfg_app.autoPreset) {
+        // .any with == (value compare), NOT .includes: Array:includes
+        // compares by identity (===) and two equal Strings are not identical
+        if(~listPresets.value.any { |n| n == "default" }) {
+            ~loadPreset.("default");
+        };
     };
 
     // 5. lfo (after mixer)

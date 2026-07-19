@@ -1,0 +1,35 @@
+// UNGRUND project preset · alpha_test_1 · 260719
+// partial: alpha only (converted from archives/presets-perlayer/alpha/alpha_test_1.scd)
+(
+    layers: (
+        alpha: (
+            n1: 29.91,
+            n2: 43.87,
+            n3: 54.2,
+            n4: 18.97,
+            n5: 27.2,
+            n6: 26.68,
+            n7: 80.12,
+            n8: 87.0,
+            n9: 58.14,
+            n10: 16.69,
+            amp: 0.9499,
+            density: 0.3014,
+            contact: 0.1416,
+            decay: 5.407,
+            disperse: 0.6726,
+            oil: 0.7847,
+            muffle: 0.204,
+            bright: 3068.239,
+            metalAmt: 0.4437,
+            metalRing: 0.028,
+            metalWeight: 0.1091,
+            bodyLevel: 0.3,
+            drive: 3.2272,
+            sprGain: 6.6991,
+            swayRate: 0.0613,
+            cutTop: 4998.6341,
+            cutOil: 3800.0
+        )
+    )
+)

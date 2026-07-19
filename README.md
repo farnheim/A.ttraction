@@ -14,7 +14,8 @@ lattice underneath everything.
 
 1. Open `App/1_app.scd` in the SuperCollider IDE.
 2. Select all (Cmd-A) and execute (Shift-Return) — the server boots, layers
-   load with their `default` presets, and the mixer window opens.
+   load, the project preset `default.scd` auto-loads (layers + mixer + fx),
+   and the mixer window opens.
 3. Stop with **Cmd-.**; full reset: run the `// CLEANUP` paragraph or
    `~appCleanup.value(true)`.
 
