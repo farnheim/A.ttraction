@@ -3,7 +3,8 @@
 // закон размера T20 = min(40 ms, 45100/f)) + kante; истощение популяции §D.2:
 // IOI_k = ioi0 * decel^k * versatz. NO random / noise / nonlinearity (Axiom III:
 // период, не розыгрыш); слой сухой — §K.2 send 0.0 это ЗАПРЕТ, не вкус.
-// Spec: plans/active/theta-splitter-population.md; reference + implementation
+// Specs: plans/active/theta-crystalline-decay.md (итерация M1–M4) поверх
+// docs/features/theta/dsp-spec.md (база); reference + implementation
 // notes: docs/features/theta/fragment-reference.md. ~spec_theta — source of truth.
 
 
@@ -26,11 +27,14 @@
         ( key: \ioiMax, label: "потолок истощ.",     group: \tone, unit: " s", spec: ControlSpec(0.4, 1.5, \lin, 0, 0.60)    ),  // exhaustion floor -> kMax
         ( key: \popScale, label: "разм. популяции",   group: \tone,             spec: ControlSpec(0.5, 2.0, \lin, 0, 1.0)     ),  // scales wheel 6
         ( key: \gapScale, label: "пауза",   group: \tone,             spec: ControlSpec(0.3, 3.0, \lin, 0, 1.0)     ),  // scales wheel 7
+        // \lin нарочно (\exp не содержит 0 = hard off); экспонента живёт в
+        // 6**(1-2d) на межпопуляционной паузе. НЕ «гармонизировать» с alpha
+        ( key: \density, label: "плотность",  group: \tone,             spec: ControlSpec(0, 1, \lin, 0, 0.5)         ),  // layer mean 0..~6 /s; <=0.02 = off-gate
 
         // --- group \tone: the contact + level ---
         ( key: \edgeWidth, label: "ширина контакта",  group: \tone,             spec: ControlSpec(0.2, 1.0, \lin, 0, 0.7)     ),  // scales wheel 2's rq; narrow = clean ping, wide = grain survives
         ( key: \edgeAmp, label: "уровень контакта",    group: \tone,             spec: ControlSpec(0.0, 1.0, \lin, 0, 0.45)    ),  // kante level vs the mode sum; 0.0 = a bell (a control, not a defect)
-        ( key: \decayScale, label: "масшт. затух.", group: \tone,             spec: ControlSpec(0.3, 1.0, \lin, 0, 1.0)     ),  // can only SHORTEN the size law
+        ( key: \decayScale, label: "масшт. затух.", group: \tone,             spec: ControlSpec(0.3, 1.0, \lin, 0, 0.68)    ),  // can only SHORTEN the size law
         ( key: \spread, label: "разброс пан.",     group: \tone,             spec: ControlSpec(0.0, 1.0, \lin, 0, 0.8)     ),  // scales wheel 4; never moves one position
         ( key: \amp, label: "громкость",        group: \tone,             spec: ControlSpec(0.0, 0.30, \lin, 0, 0.09)   )   // §K.4; §F band −24…−10 dBFS peak
     ]
@@ -42,8 +46,8 @@
 // gamma): hot-swap идемпотентен. Scheduler -> odometer -> ONE global cascade ->
 // round-robin по 14 голосам -> (korn + kante) -> pan -> LeakDC -> Limiter.
 Ndef(\theta, { |fragOct = 0, ioi0 = 0.018, decel = 1.22, ioiMax = 0.60,
-    popScale = 1.0, gapScale = 1.0, edgeWidth = 0.7, edgeAmp = 0.45,
-    decayScale = 1.0, spread = 0.8, amp = 0.09|
+    popScale = 1.0, gapScale = 1.0, density = 0.5, edgeWidth = 0.7,
+    edgeAmp = 0.45, decayScale = 0.68, spread = 0.8, amp = 0.09|
 
     var nyq, fund = 94;
     // 12 доказуемо steal-free, 14 — запас под правку таблиц; украденный onset
@@ -112,8 +116,8 @@ Ndef(\theta, { |fragOct = 0, ioi0 = 0.018, decel = 1.22, ioiMax = 0.60,
     var makeup   = 0.58;   // peak -12 dBFS при amp 0.09; peak-метрика §F бьёт RMS
 
     var fragOctL, fragFund, edgeWidthL, edgeAmpL, decayScaleL, spreadL;
-    var ioi0L, decelL, ioiMaxL, popScaleL, gapScaleL, kMax, nEffA, nEffB;
-    var kStream, isFirst, geom, durs, tFrag, vals;
+    var ioi0L, decelL, ioiMaxL, popScaleL, gapScaleL, densL, gapMul, kMax, nEffA, nEffB;
+    var kStream, isFirst, geom, durs, tEvt, vals;
     var wR0, wR1, wR2, wN, wRq, wLevel, wPan;
     var imp, casc, vIdx, sig;
 
@@ -130,14 +134,20 @@ Ndef(\theta, { |fragOct = 0, ioi0 = 0.018, decel = 1.22, ioiMax = 0.60,
     spreadL     = spread.lag(0.2).clip(0, 1);
 
     // --- block 1: the population scheduler (demand rate) ---
-    // пять контролов плотности клампятся и НИКОГДА не лагаются: они читаются
-    // раз в популяцию, на границе (Dgeom/Ddup re-poll при ресете Dseq) — lag
-    // гнул бы закон в момент установления (спека, «density-control latching»)
+    // пять контролов плотности + density клампятся и НИКОГДА не лагаются: они
+    // читаются раз в популяцию, на границе (Dgeom/Ddup re-poll при ресете
+    // Dseq) — lag гнул бы закон в момент установления (спека, «density-control
+    // latching»)
     ioi0L     = ioi0.clip(0.012, 0.120);
     decelL    = decel.clip(1.05, 1.40);
     ioiMaxL   = ioiMax.clip(0.4, 1.5);
     popScaleL = popScale.clip(0.5, 2.0);
     gapScaleL = gapScale.clip(0.3, 3.0);
+    densL     = density.clip(0, 1);
+    // ТОЛЬКО на межпопуляционный член: множитель на весь durs (или на ioi0)
+    // гнул бы закон прибытия §D.2 и молча пере-связал бы density с ним; пол
+    // ioi0 6.6 ms несёт глобальный каскад-гейт 2.5 ms (база, footgun 8)
+    gapMul    = 6 ** (1 - (2 * densL));
 
     // exit-тест замкнут на kr (по закону ДО versatz-отклонения): IOI_k > ioiMax
     // решается точно, никакого demand-ветвления
@@ -163,15 +173,23 @@ Ndef(\theta, { |fragOct = 0, ioi0 = 0.018, decel = 1.22, ioiMax = 0.60,
     // старт ioi0/decel из-за one-pull сдвига TDuty vs Demand.ar; НЕ «чинить»
     // через ControlDur.ir — рассинхронизирует узлы навсегда. Спека, footgun 2.
     geom = Dseq([ Dgeom(ioi0L / decelL, decelL, nEffA) ], inf);
-    durs = (geom * Dseq(versatz, inf)) + (isFirst * Dseq(gapTable, inf) * gapScaleL);
-    tFrag = TDuty.ar(durs);
+    durs = (geom * Dseq(versatz, inf))
+        + (isFirst * Dseq(gapTable, inf) * gapScaleL * gapMul);
+    // гейт ОДНОТОЧЕЧНЫЙ, все потребители такта читают tEvt: один потребитель
+    // на сыром TDuty рассинхронизировал бы round-robin с одометром молча (все
+    // уровневые метрики пройдут). При density<=0.02 durs-потоки внутри TDuty
+    // едут дальше, а колёса значений замирают (нет пулов) — взаимный фазовый
+    // дрейф групп безвреден: колёса взаимно просты и бесфазны по построению,
+    // «ресинхронизация» была бы новым состоянием даром. НЕ лагировать density
+    // (семейство density-контролов; off-gate не должен ждать лаг)
+    tEvt = TDuty.ar(durs) * (densL > 0.02);
 
     // --- block 2: the wheel odometer (demand rate) ---
     // колесо длины L ЕСТЬ Dseq(таблица, inf). PULL-ИНВАРИАНТ: каждый stream
     // тянется ровно раз на фрагмент ЭТИМ ОДНИМ Demand.ar; второй Demand / Dpoll
     // / viz-tap ломает одометр молча (все метрики уровней пройдут) — спека,
     // footgun 1. Поэтому mode-гейты ниже выводятся на ar (ar можно реюзать).
-    vals = Demand.ar(tFrag, 0, [
+    vals = Demand.ar(tEvt, 0, [
         Dseq(rowR0, inf), Dseq(rowR1, inf), Dseq(rowR2, inf), Dseq(rowN, inf),
         Dseq(rqTable, inf), Dseq(levelTable, inf), Dseq(panTable, inf)
     ]);
@@ -188,7 +206,7 @@ Ndef(\theta, { |fragOct = 0, ioi0 = 0.018, decel = 1.22, ioiMax = 0.60,
     };
     // выход TDuty — уже бэндлимитный дискретный импульс; алиасить в слое
     // нечему (нужна нелинейность/ресемплинг, карта запрещает обе)
-    imp  = tFrag;
+    imp  = tEvt;
     casc = Mix(cascTimes.collect { |t, i|
         if(t <= 0) { imp * cascLevels[i] } { DelayN.ar(imp, 0.002, t) * cascLevels[i] }
     });
@@ -197,13 +215,13 @@ Ndef(\theta, { |fragOct = 0, ioi0 = 0.018, decel = 1.22, ioiMax = 0.60,
 
     // --- block 4: детерминированный round-robin (Stepper, не TIRand: random
     // UGen в этом слое аннулирует класс — §C.8)
-    vIdx = Stepper.ar(tFrag, 0, 0, nVoices - 1, 1);
+    vIdx = Stepper.ar(tEvt, 0, 0, nVoices - 1, 1);
 
     sig = Mix.fill(nVoices, { |v|
-        var trig, gate, excite, nMod, g1, g2, ratios, freqs, t20s, ringTs, eNorms;
+        var trig, gate, excite, nMod, g1, g2, ratios, freqs, fLow, ringT, target, envT;
         var modes, fTop, rqL, edgeNorm, kante, levelW, panW, voice;
 
-        trig = tFrag * ((vIdx - v).abs < 0.5);
+        trig = tEvt * ((vIdx - v).abs < 0.5);
         gate   = Trig.ar(trig, cascGate);
         excite = casc * gate;
 
@@ -216,18 +234,32 @@ Ndef(\theta, { |fragOct = 0, ioi0 = 0.018, decel = 1.22, ioiMax = 0.60,
         // кламп не зацепляется по построению — страхует будущую правку таблиц
         freqs = ratios.collect { |r| Latch.ar(r * fragFund, trig).clip(20, nyq) };
 
-        // korn: закон размера, decaytime Ringz — время −60 dB => T60 = 3*T20.
-        // Кламп на ringT, НЕ на T20 (клип T20 разрешал бы нарушение 15 ms-пола
-        // карты — Implementation notes)
-        t20s   = freqs.collect { |f| (45.1 / f).min(0.040) };
-        ringTs = t20s.collect { |t| (3 * t * decayScaleL).clip(0.015, 0.150) };
-        eNorms = t20s.collect { |t| (t60Ref / (3 * t)).sqrt };
-        // power-нормализация: 3-модовая строка не громче 1-модовой
+        // korn: закон размера ОДИН НА ФРАГМЕНТ от нижней моды (R1 2026-07-19:
+        // «высота и распад — один факт»; общий распад = common-fate фузия,
+        // центроид хвоста не съезжает). min работает потому, что unused slots
+        // REPEAT r0. Ringz всегда на ПОЛНОМ законе — decayScale его не трогает
+        // (T60 и полоса у Ringz сварены: короткий ринг = широкая резонанса =
+        // пластик); слышимое укорочение — Decay2-огибающей на сумме мод,
+        // произведение экспонент точное: 1/T = 1/T_ringz + 1/T_env. decaytime
+        // Ringz/Decay2 — время −60 dB => T60 = 3*T20; кламп на ringT, НЕ на
+        // T20 (клип T20 разрешал бы нарушение 15 ms-пола карты)
+        fLow   = freqs[0].min(freqs[1]).min(freqs[2]);
+        ringT  = (3 * (45.1 / fLow).min(0.040)).clip(0.015, 0.120);
+        target = (ringT * decayScaleL).clip(0.015, 0.150);
+        // guard .max(0.0002) несущий: при target -> ringT (пол 15 ms, верхние
+        // строки) envT >= ~1 s и огибающая ИНЕРТНА (семантика F4 базы); наивный
+        // .max(0.003) уронил бы пол до ~12.5 ms. НЕ «упрощать» формулу
+        envT   = (ringT * target / (ringT - target).max(0.0002)).clip(0.001, 10);
+        // power-нормализация: 3-модовая строка не громче 1-модовой; eNorm из
+        // pitch-only закона (ringT), НИКОГДА из decayScale/envT — «короче =
+        // тише» ЕСТЬ закон, компенсация огибающей стёрла бы его
         modes = Mix([
-            Ringz.ar(excite, freqs[0], ringTs[0]) * eNorms[0],
-            Ringz.ar(excite, freqs[1], ringTs[1]) * eNorms[1] * g1,
-            Ringz.ar(excite, freqs[2], ringTs[2]) * eNorms[2] * g2
-        ]) / nMod.max(1).sqrt;
+            Ringz.ar(excite, freqs[0], ringT),
+            Ringz.ar(excite, freqs[1], ringT) * g1,
+            Ringz.ar(excite, freqs[2], ringT) * g2
+        ]) / nMod.max(1).sqrt
+            * Decay2.ar(trig, 0.001, envT)
+            * (t60Ref / ringT).sqrt;
 
         // kante: тот же каскад через один BPF на ВЕРХНЕЙ моде строки; narrow rq
         // = чистый ping, wide rq = зерно каскада доживает до фрагмента
