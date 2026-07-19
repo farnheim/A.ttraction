@@ -1,185 +1,232 @@
-// App/synths/delta.scd — UNGRUND class 4/8 `delta` (formant-cluster wind /
-// metal plates). REAL LAYER (rewritten from stub per docs/features/delta/dsp-spec.md,
-// 2026-06-10). Premise §C.4 `binde`, EXTENDED: 5 wind streams, each
-// exciting a metal plate (Ringz bank) plus a 3-formant vowel BPF bank;
-// tones from the 3-limit 94 Hz lattice. §C.4 bans kept: no central-pitch
-// glide, band-identity modulation ≤ 0.25 Hz (supersede flag in docs/features/delta/dsp-spec.md).
+// App/synths/delta.scd — UNGRUND class 4/8 `delta` (choir voices through
+// metal plates). REAL LAYER (rewritten per plans/active/delta-choir-voices.md,
+// 2026-07-19). Premise §C.4 `binde`, AMENDED 2026-07-19: 5 glottal-pulse
+// voices (3 detuned Blip + breath noise) on the 3-limit 94 Hz lattice
+// (141/188/282/376/564 Hz), each feeding IN PARALLEL a 5-formant vocal BPF
+// bank and a 4-mode metal-plate Ringz bank; `metal` crossfades voice<->plate
+// (equal-power, level-normalised). §C.4 bans kept: no central-pitch glide,
+// band-identity modulation ≤ 0.25 Hz (amendment mark in
+// docs/architecture/system/README.md §C.4).
 // Tuning via 0_lib.scd; ~spec_delta is the single source of truth.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// group \freq — 5 voice fundamentals (MIDI notes); group \tone — wind /
-// plates / vowels / space. Tone defaults on the 3-limit lattice from 94 Hz:
-// 141/188/282/376/564 Hz.
+// group \freq — 5 voice fundamentals (MIDI notes) on the 3-limit lattice
+// from 94 Hz; group \tone — glottal source / vowel bank / plates /
+// breathing / space.
 ~spec_delta = (
     name: \delta,
     params: [
         // --- group \freq: 5 voice fundamentals (MIDI notes) ---
-        ( key: \f1, label: "нота 1", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 48.71) ),  // 141 Hz
-        ( key: \f2, label: "нота 2", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 53.71) ),  // 188 Hz
-        ( key: \f3, label: "нота 3", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 60.72) ),  // 282 Hz
-        ( key: \f4, label: "нота 4", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 65.71) ),  // 376 Hz
-        ( key: \f5, label: "нота 5", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 72.72) ),  // 564 Hz
+        ( key: \f1, label: "нота 1", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 48.71) ),  // 141 Hz ×3/2
+        ( key: \f2, label: "нота 2", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 53.71) ),  // 188 Hz ×2
+        ( key: \f3, label: "нота 3", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 60.72) ),  // 282 Hz ×3
+        ( key: \f4, label: "нота 4", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 65.71) ),  // 376 Hz ×4
+        ( key: \f5, label: "нота 5", group: \freq, disp: \note, spec: ControlSpec(36, 84, \lin, 0, 72.72) ),  // 564 Hz ×6
 
-        // --- group \tone: wind ---
-        ( key: \amp, label: "громкость",        group: \tone,              spec: ControlSpec(0.0, 0.5, \lin, 0, 0.18)  ),  // layer level (§K.4)
-        ( key: \windForce, label: "сила ветра",  group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.6)   ),  // stream force
-        ( key: \turbulence, label: "турбулентн.", group: \tone,              spec: ControlSpec(0.0, 0.9, \lin, 0, 0.45)  ),  // gust depth
-        ( key: \gustRate, label: "част. порывов",   group: \tone, unit: " Hz",  spec: ControlSpec(0.02, 0.25, \exp, 0, 0.08) ),  // gust rate (§C.4 ≤0.25)
-        ( key: \flutter, label: "дрожание",    group: \tone,              spec: ControlSpec(0.0, 0.3, \lin, 0, 0.12)  ),  // fast small air flutter
-        ( key: \edge, label: "свист кромки",       group: \tone,              spec: ControlSpec(0.0, 0.6, \lin, 0, 0.18)  ),  // edge whistle
-        ( key: \edgeRatio, label: "отнош. свиста",  group: \tone,              spec: ControlSpec(3.0, 12.0, \exp, 0, 7.0)  ),  // whistle = fund × edgeRatio
+        // --- group \tone: glottal source ---
+        ( key: \amp,        label: "громкость",        group: \tone,               spec: ControlSpec(0.0, 0.5, \lin, 0, 0.18)     ),  // layer level (§K.4)
+        ( key: \voiced,     label: "голос",            group: \tone,               spec: ControlSpec(0.0, 1.0, \lin, 0, 0.8)      ),  // phonation level
+        ( key: \breath,     label: "дыхание",          group: \tone,               spec: ControlSpec(0.0, 1.0, \lin, 0, 0.3)      ),  // aspiration level
+        ( key: \bright,     label: "яркость истока",   group: \tone,               spec: ControlSpec(3.0, 20.0, \exp, 0, 9.0)     ),  // glottal tilt (LPF = fund×bright)
+
+        ( key: \detune,     label: "расстройка",       group: \tone, unit: " ct",  spec: ControlSpec(0.0, 15.0, \lin, 0, 6.0)     ),  // unison scatter
+        ( key: \driftRate,  label: "дрейф хора",       group: \tone, unit: " Hz",  spec: ControlSpec(0.02, 0.2, \exp, 0, 0.07)    ),  // detune wander (§C.4 ≤0.25)
+        ( key: \jitter,     label: "дрожь тона",       group: \tone,               spec: ControlSpec(0.0, 0.004, \lin, 0, 0.0015) ),  // aperiodic micro-jitter ≤0.4%
+        ( key: \shimmer,    label: "мерцание",         group: \tone,               spec: ControlSpec(0.0, 0.2, \lin, 0, 0.06)     ),  // fast shallow amp flutter
+
+        // --- group \tone: vowel bank ---
+        ( key: \vowelSel,   label: "выбор гласной",    group: \tone,               spec: ControlSpec(0.0, 1.0, \lin, 0, 0.5)      ),  // interpolate to next vowel
+        ( key: \vowelDrift, label: "дрейф гласной",    group: \tone,               spec: ControlSpec(0.0, 0.3, \lin, 0, 0.1)      ),  // slow vowel wander (≤0.1 Hz)
+        ( key: \formWidth,  label: "ширина формант",   group: \tone,               spec: ControlSpec(0.7, 2.0, \lin, 0, 1.0)      ),  // bandwidth scale (static)
+        ( key: \formTrack,  label: "форм. за высотой", group: \tone,               spec: ControlSpec(0.0, 0.7, \lin, 0, 0.35)     ),  // formant register tracking
+        ( key: \ring,       label: "певч. форманта",   group: \tone,               spec: ControlSpec(0.0, 1.0, \lin, 0, 0.4)      ),  // 2.6–3.6 kHz cluster gain
+        ( key: \beatRate,   label: "биения",           group: \tone, unit: " Hz",  spec: ControlSpec(0.05, 0.25, \exp, 0, 0.15)   ),  // §C.4 formant beating (≤0.25)
 
         // --- group \tone: metal plates ---
-        ( key: \metal, label: "металл/ветер",      group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.55)  ),  // plate resonance vs raw wind
-        ( key: \plateQ, label: "звон пластины",     group: \tone,              spec: ControlSpec(0.05, 3.0, \exp, 0, 0.9)  ),  // plate ring time
-        ( key: \plateBright, label: "ярк. пластины",group: \tone,              spec: ControlSpec(0.3, 2.0, \lin, 0, 1.0)   ),  // excitation brightness
-        ( key: \plateSpread, label: "расстройка",group: \tone,              spec: ControlSpec(0.0, 0.05, \lin, 0, 0.015)),  // ring detune across voices
+        ( key: \metal,      label: "голос/металл",     group: \tone,               spec: ControlSpec(0.0, 1.0, \lin, 0, 0.35)     ),  // bank crossfade (0 = choir)
+        ( key: \plateQ,     label: "звон пластины",    group: \tone,               spec: ControlSpec(0.05, 3.0, \exp, 0, 0.9)     ),  // plate ring time
+        ( key: \plateSpread,label: "разброс звона",    group: \tone,               spec: ControlSpec(0.0, 0.05, \lin, 0, 0.015)   ),  // ring detune across voices
 
-        // --- group \tone: formant "human" filter ---
-        ( key: \vowelMix, label: "гласная",   group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7)   ),  // vowel prominence (§C.4)
-        ( key: \vowelSel, label: "выбор гласной",   group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.5)   ),  // vowel-set shift (a-e-i-o-u)
-        ( key: \formRq, label: "ширина форм.",     group: \tone,              spec: ControlSpec(0.03, 0.3, \exp, 0, 0.09)  ),  // formant width
-        ( key: \formScale, label: "высота форм.",  group: \tone,              spec: ControlSpec(0.6, 1.6, \lin, 0, 1.0)   ),  // formant pitch vs fundamental
-        ( key: \beatRate, label: "биения",   group: \tone, unit: " Hz",  spec: ControlSpec(0.05, 0.25, \exp, 0, 0.15) ),  // §C.4 formant beating (≤0.25 Hz)
+        // --- group \tone: breathing ---
+        ( key: \breathDepth,label: "глуб. дыхания",    group: \tone,               spec: ControlSpec(0.0, 1.0, \lin, 0, 0.5)      ),  // dip ≤ −6 dB (§C.4)
+        ( key: \breathRate, label: "част. дыхания",    group: \tone, unit: " Hz",  spec: ControlSpec(0.02, 0.25, \exp, 0, 0.08)   ),  // §C.4 period ≥ 4 s
 
         // --- group \tone: levels and space ---
-        ( key: \voiceLevel, label: "уровень голосов", group: \tone,              spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7)   ),  // voice-sum level (pre master amp)
-        ( key: \panWidth, label: "ширина пан.",   group: \tone,              spec: ControlSpec(0.0, 0.3, \lin, 0, 0.22)  ),  // §F: pan ≤ ±0.3
-        ( key: \panRate, label: "част. пан.",    group: \tone, unit: " Hz",  spec: ControlSpec(0.01, 0.5, \exp, 0, 0.06) )   // §F: slow pan drift
+        ( key: \voiceLevel, label: "уровень голосов",  group: \tone,               spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7)      ),  // voice-sum level (pre amp)
+        ( key: \panWidth,   label: "ширина пан.",      group: \tone,               spec: ControlSpec(0.0, 0.3, \lin, 0, 0.22)     ),  // §F: pan ≤ ±0.3
+        ( key: \panRate,    label: "част. пан.",       group: \tone, unit: " Hz",  spec: ControlSpec(0.01, 0.5, \exp, 0, 0.06)    )   // §F: slow pan drift
     ]
 );
 
 
 // ===== LOGIC — synthesis =============================================
-// 5 voices: wind (Stage A) -> plate Ringz (Stage B) -> vowel formant bank
-// (Stage C). Sum -> pan -> LeakDC -> Limiter.
+// 5 voices: glottal Blip ensemble + breath (Stage A) -> parallel vocal
+// 5-formant BPF bank (B1) and 4-mode plate Ringz bank (B2) -> XFade2 by
+// `metal` -> breathing/shimmer/pan (Stage C). Sum -> LeakDC -> Limiter.
 Ndef(\delta, { |amp = 0.18,
     f1 = 48.71, f2 = 53.71, f3 = 60.72, f4 = 65.71, f5 = 72.72,
-    windForce = 0.6, turbulence = 0.45, gustRate = 0.08, flutter = 0.12,
-    edge = 0.18, edgeRatio = 7.0,
-    metal = 0.55, plateQ = 0.9, plateBright = 1.0, plateSpread = 0.015,
-    vowelMix = 0.7, vowelSel = 0.5, formRq = 0.09, formScale = 1.0, beatRate = 0.15,
+    voiced = 0.8, breath = 0.3, bright = 9.0,
+    detune = 6.0, driftRate = 0.07, jitter = 0.0015, shimmer = 0.06,
+    vowelSel = 0.5, vowelDrift = 0.1, formWidth = 1.0, formTrack = 0.35,
+    ring = 0.4, beatRate = 0.15,
+    metal = 0.35, plateQ = 0.9, plateSpread = 0.015,
+    breathDepth = 0.5, breathRate = 0.08,
     voiceLevel = 0.7, panWidth = 0.22, panRate = 0.06|
 
-    var nyq, funds, fundMid, nVoices = 5;
-    var windForceL, turbL, gustRateL, flutterL, edgeL, edgeRatioL;
-    var metalL, plateQL, plateBrightL, plateSpreadL;
-    var vowelMixL, vowelSelL, formRqL, formScaleL, beatRateL;
+    var nyq, funds, nVoices = 5, nSubs = 3, nForms = 5;
+    var voicedL, breathL, brightL, detuneL, driftRateL, jitterL, shimmerL;
+    var vowelSelL, vowelDriftL, formWidthL, formTrackL, ringL, beatRateL;
+    var metalL, plateQL, plateSpreadL, breathDepthL, breathRateL;
     var voiceLevelL, panWidthL, panRateL;
-    // invariant inharmonic templates (idiophone-like, NOT integer ratios)
-    var plateRatios = #[1.0, 2.76, 5.40, 8.93, 13.34];
-    var plateModAmps = #[0.55, 0.7, 0.6, 0.45, 0.3];
-    // classic vowel formants (3 lowest, Hz): a e i o u
-    var vowelTable = [
-        [ 730, 1090, 2440 ],  // a
-        [ 530, 1840, 2480 ],  // e
-        [ 270, 2290, 3010 ],  // i
-        [ 570,  840, 2410 ],  // o
-        [ 300,  870, 2240 ]   // u
+    // tenor singing-voice formant tables (5 vowels a-e-i-o-u × 5 formants):
+    // freq (Hz), bandwidth (Hz), amplitude (dB -> linear at build time)
+    var vowFreqs = #[
+        [650, 1080, 2650, 2900, 3250],
+        [400, 1700, 2600, 3200, 3580],
+        [290, 1870, 2800, 3250, 3540],
+        [400,  800, 2600, 2800, 3000],
+        [350,  600, 2700, 2900, 3300]
     ];
-    var formGains = #[1.0, 0.95, 0.75];
+    var vowBws = #[
+        [80, 90, 120, 130, 140],
+        [70, 80, 100, 120, 120],
+        [40, 90, 100, 120, 120],
+        [70, 80, 100, 130, 135],
+        [40, 60, 100, 120, 120]
+    ];
+    var vowAmps = [
+        [0, -6,  -7,  -8,  -22],
+        [0, -14, -12, -14, -20],
+        [0, -15, -18, -20, -30],
+        [0, -10, -12, -12, -26],
+        [0, -20, -17, -14, -26]
+    ].collect { |row| row.collect(_.dbamp) };
+    // base vowel per voice chosen at BUILD time (a-o-e-u-i spread) — a UGen
+    // cannot be an array index; vowelSel interpolates toward the next vowel
+    var baseVowel = #[0, 3, 1, 4, 2];
+    var vowelDriftRates = #[0.041, 0.053, 0.067, 0.079, 0.093];  // ≤ 0.1 Hz (§C.4)
+    var subOffsets = Array.fill(5, { |i| [-1.0, 0.4, 1.0] * (0.82 + (i * 0.09)) });
+    var subDriftIncom = Array.fill(5, { |i|
+        Array.fill(3, { |j| 0.6 + (j * 0.17) + (i * 0.023) })
+    });
+    // invariant inharmonic plate template (idiophone-like, NOT integer)
+    var plateRatios = #[1.0, 2.76, 5.40, 8.93];
+    var plateModeAmps = #[0.35, 0.7, 0.6, 0.45];
+    // extra ×1-mode cut on the two lowest voices: their 141/188 Hz modes
+    // dominate the 20–80 Hz acceptance band via measurement-filter leakage
+    var plateMode1Trim = #[0.4, 0.55, 1.0, 1.0, 1.0];
+    var plateRingScale = #[1.0, 0.85, 0.72, 0.6];
+    // B1/B2 static balance trims: tuned by measurement so `metal` changes
+    // timbre, not loudness (acceptance: sweep RMS within ±2 dB)
+    var b1Trim = 360.0, b2Trim = 0.675, makeup = 5.0;
+    // static compensation of the glottal LPF tilt at the upper formants —
+    // without it F2/singer's-formant zones starve (acceptance band shape)
+    var formComp = #[1.0, 2.6, 2.4, 2.8, 3.2];
     var voices, sig, fieldDrift;
 
     nyq = SampleRate.ir * 0.45;
 
-    // control lags
-    windForceL   = windForce.lag(0.2).clip(0, 1);
-    turbL        = turbulence.lag(0.2).clip(0, 0.9);
-    gustRateL    = gustRate.clip(0.02, 0.25);
-    flutterL     = flutter.lag(0.2).clip(0, 0.3);
-    edgeL        = edge.lag(0.2).clip(0, 0.6);
-    edgeRatioL   = edgeRatio.lag(0.2).clip(3, 12);
+    // control lags + §C.4 rate guards
+    voicedL      = voiced.lag(0.2).clip(0, 1);
+    breathL      = breath.lag(0.2).clip(0, 1);
+    brightL      = bright.lag(0.2).clip(3, 20);
+    detuneL      = detune.lag(0.2).clip(0, 15);
+    driftRateL   = driftRate.clip(0.02, 0.2);
+    jitterL      = jitter.lag(0.2).clip(0, 0.004);
+    shimmerL     = shimmer.lag(0.2).clip(0, 0.2);
+    vowelSelL    = vowelSel.lag(0.2).clip(0, 1);
+    vowelDriftL  = vowelDrift.lag(0.2).clip(0, 0.3);
+    formWidthL   = formWidth.lag(0.2).clip(0.7, 2.0);
+    formTrackL   = formTrack.lag(0.2).clip(0, 0.7);
+    ringL        = ring.lag(0.2).clip(0, 1);
+    beatRateL    = beatRate.clip(0.05, 0.25);
     metalL       = metal.lag(0.2).clip(0, 1);
     plateQL      = plateQ.lag(0.2).clip(0.05, 3.0);
-    plateBrightL = plateBright.lag(0.2).clip(0.3, 2.0);
     plateSpreadL = plateSpread.lag(0.2).clip(0, 0.05);
-    vowelMixL    = vowelMix.lag(0.2).clip(0, 1);
-    vowelSelL    = vowelSel.lag(0.2).clip(0, 1);
-    formRqL      = formRq.lag(0.2).clip(0.03, 0.3);
-    formScaleL   = formScale.lag(0.2).clip(0.6, 1.6);
-    beatRateL    = beatRate.clip(0.05, 0.25);
+    breathDepthL = breathDepth.lag(0.2).clip(0, 1);
+    breathRateL  = breathRate.clip(0.02, 0.25);
     voiceLevelL  = voiceLevel.lag(0.1).clip(0, 1);
     panWidthL    = panWidth.lag(0.2).clip(0, 0.3);
     panRateL     = panRate.clip(0.01, 0.5);
 
-    // voice fundamentals (MIDI -> Hz, Nyquist clamp after lag)
-    funds   = [f1, f2, f3, f4, f5].collect { |n| n.lag(0.2).midicps.clip(40, nyq) };
-    fundMid = funds[2];   // f3 as reference register for formant scaling
+    // static fundamentals: .set + .lag only, never swept (§C.4 no glide)
+    funds = [f1, f2, f3, f4, f5].collect { |n| n.lag(0.2).midicps.clip(60, nyq) };
 
     voices = Array.fill(nVoices, { |i|
-        var fund, wind, gust, flut, gustRi, edgeFreq, edgeWhistle;
-        var plateFreqs, plateRings, plate, voiceSig;
-        var vowelIdx, vowelLo, vowelHi, regScale, formant;
-        var plateNorm;
+        var fund, numHarm, jit, ensemble, src, breathNoise, bankIn;
+        var vowelIdx, nextIdx, pos, regScale, ringGain, vocal;
+        var plateFreqs, plateRings, plateNorm, plate;
+        var voiceOut, breathing, shimGain, pan;
 
         fund = funds[i];
+        // numHarm from the CLIPPED lagged fund: alias-free, never 0
+        numHarm = (nyq / fund).max(1);
+        jit = 1 + (LFDNoise3.kr(7 + (i * 0.9)) * jitterL);
 
-        // Stage A: wind stream
-        wind = PinkNoise.ar;
-        // slow gust (≤0.25 Hz), incommensurate rate per voice
-        gustRi = gustRateL * (0.7 + (i * 0.13));
-        gust   = LFNoise2.kr(gustRi.clip(0.01, 0.25)).range(1 - turbL, 1.0);
-        flut   = LFNoise2.kr(2.5 + (i * 0.9)).range(1 - flutterL, 1.0);
-        wind   = wind * windForceL * gust * flut;
+        // Stage A: glottal unison ensemble (fixed scatter + slow drift)
+        ensemble = Mix(Array.fill(nSubs, { |j|
+            var cents = (subOffsets[i][j] * detuneL)
+                + (LFNoise2.kr((driftRateL * subDriftIncom[i][j]).clip(0.01, 0.2))
+                    * (detuneL * 0.4));
+            Blip.ar(fund * jit * (2 ** (cents / 1200)), numHarm);
+        })) * (1 / nSubs);
+        src = LPF.ar(ensemble, (fund * brightL).clip(300, nyq));
+        // undo Blip's 1/numHarm normalisation: constant per-harmonic level
+        // across registers, so the soprano neither vanishes nor screams
+        src = src * (numHarm * 0.016).clip(0.3, 3);
+        breathNoise = HPF.ar(PinkNoise.ar, 250);
+        bankIn = (src * voicedL) + (breathNoise * breathL);
 
-        // edge whistle: narrow Resonz on a high harmonic
-        edgeFreq    = (fund * edgeRatioL * (1 + (i * 0.08))).clip(40, nyq);
-        edgeWhistle = Resonz.ar(PinkNoise.ar, edgeFreq, 0.03)
-                        * gust * windForceL * edgeL * 6;
-        wind = wind + edgeWhistle;
+        // Stage B1: 5-formant vocal BPF bank (freq, bw AND amp interpolated
+        // together — morphing freqs alone yields wrong vowels)
+        vowelIdx = baseVowel[i];
+        nextIdx  = (vowelIdx + 1) % 5;
+        pos      = (vowelSelL + (LFNoise2.kr(vowelDriftRates[i]) * vowelDriftL * 0.5))
+                       .clip(0, 1);
+        regScale = (fund * (1/282)) ** formTrackL;
+        ringGain = ringL.linlin(0, 1, 0.3, 1.6);
+        vocal = Mix(Array.fill(nForms, { |k|
+            var ff   = pos.linlin(0, 1, vowFreqs[vowelIdx][k], vowFreqs[nextIdx][k]);
+            var bw   = pos.linlin(0, 1, vowBws[vowelIdx][k], vowBws[nextIdx][k]);
+            var ampF = pos.linlin(0, 1, vowAmps[vowelIdx][k], vowAmps[nextIdx][k]);
+            var beat = LFNoise2.kr((beatRateL * (0.6 + (k * 0.22) + (i * 0.07)))
+                           .clip(0.02, 0.25)).range(0.55, 1.0);
+            var gainK = if(k >= 2) { ringGain } { 1.0 };
+            ff = ff * regScale;
+            // F1 tuned to the fundamental on high voices (soprano F1 rule)
+            if(k == 0) { ff = max(ff, fund * 1.05) };
+            ff = ff.clip(60, nyq);
+            BPF.ar(bankIn, ff, (bw * formWidthL / ff)) * ampF * formComp[k] * beat * gainK;
+        })) * (1 / nForms) * formWidthL.sqrt.reciprocal * b1Trim;
 
-        // Stage B: metal-plate resonance (inharmonic bank; clamp the whole
-        // freq array under Nyquist)
-        plateFreqs = (fund * plateRatios * (1 + ((i - 2) * plateBrightL * 0.04)))
-                        .clip(40, nyq);
-        plateRings = plateQL * (1 + ((i - 2) * plateSpreadL))
-                        * #[1.0, 0.85, 0.72, 0.6, 0.5];
-        plateRings = plateRings.clip(0.02, 4.0);
-        // Q compensation: normalize by mode count AND ring time so plateQ
-        // changes TIMBRE, not loudness
-        plateNorm = (1 / plateRatios.size) / (1 + (plateQL * 0.7));
-        plate = Mix(Ringz.ar(wind, plateFreqs, plateRings) * plateModAmps)
-                    * plateNorm * 2.0;
+        // Stage B2: 4-mode plate Ringz bank, parallel to B1; mode freqs are
+        // pure functions of the static funds (clamp the WHOLE array)
+        plateFreqs = (fund * plateRatios).clip(60, nyq);
+        plateRings = (plateQL * (1 + ((i - 2) * plateSpreadL)) * plateRingScale)
+                         .clip(0.02, 4.0);
+        // Q compensation: plateQ changes TIMBRE, not loudness
+        plateNorm = 0.25 / (1 + (plateQL * 0.7));
+        plate = Mix(Ringz.ar(bankIn, plateFreqs, plateRings)
+                    * (plateModeAmps * [plateMode1Trim[i], 1, 1, 1]))
+                    * plateNorm * b2Trim;
 
-        voiceSig = XFade2.ar(wind * 0.9, plate, (metalL * 2) - 1);
+        voiceOut = XFade2.ar(vocal, plate, (metalL * 2) - 1);
+        voiceOut = voiceOut + (breathNoise * breathL * 0.15);
 
-        // Stage C: vowel formant bank. Base vowel chosen at BUILD time
-        // (voices spread over a-o-e-u-i); vowelSel live-INTERPOLATES formant
-        // freqs towards the next vowel — a UGen cannot be an array index.
-        vowelIdx = #[0, 3, 1, 4, 2][i];          // build-time Integer
-        vowelLo  = vowelTable.at(vowelIdx);
-        vowelHi  = vowelTable.at((vowelIdx + 1) % 5);
-        // register scale: higher voice -> higher formants
-        regScale = (fund / fundMid).clip(0.7, 1.6) * formScaleL;
-        // 3 parallel BPFs, each with independent slow beating (§C.4);
-        // formants are excited by BROADBAND wind (the plate-filtered voice
-        // has no energy left in the vowel zone)
-        formant = Mix(Array.fill(3, { |k|
-            var ffLo  = vowelLo[k];
-            var ffHi  = vowelHi[k];
-            var ff    = (vowelSelL.linlin(0, 1, ffLo, ffHi) * regScale).clip(40, nyq);
-            var beat  = LFNoise2.kr(beatRateL * (0.6 + (k * 0.3) + (i * 0.07)))
-                        .range(0.4, 1.0);
-            BPF.ar(voiceSig + (wind * 1.1), ff, formRqL) * formGains[k] * beat;
-        }));
-        // Q compensation: normalize by formant count and rq narrowness
-        formant = formant * (1 / formGains.size) * (formRqL / 0.09).sqrt * 13.0;
+        // Stage C: per-voice incoherent breathing (dip ≤ −6 dB) + shimmer
+        breathing = LFNoise2.kr((breathRateL * (0.7 + (i * 0.13))).clip(0.02, 0.25))
+                        .range(1 - (breathDepthL * 0.5), 1.0);
+        shimGain  = LFNoise2.kr(4.3 + (i * 0.6)).range(1 - shimmerL, 1.0);
+        voiceOut  = voiceOut * breathing * shimGain * (1 - (i * 0.07));
 
-        voiceSig = XFade2.ar(voiceSig, formant, (vowelMixL * 2) - 1);
-
-        // per-voice trim: higher voices slightly quieter
-        voiceSig * (1 - (i * 0.07));
+        pan = LFNoise1.kr((panRateL * (0.5 + (i * 0.21))).clip(0.01, 0.67))
+                  .range(panWidthL.neg, panWidthL);
+        Pan2.ar(voiceOut, pan);
     });
 
-    // incommensurate slow pan drift per voice within ±panWidth
-    voices = voices.collect { |v, i|
-        var pan = LFNoise1.kr(panRateL * (0.5 + (i * 0.21)))
-                    .range(panWidthL.neg, panWidthL);
-        Pan2.ar(v, pan);
-    };
-    // voices are partially decorrelated -> the sum grows ~√N; normalize by
+    // voices are partially decorrelated -> the sum grows ~√N; normalise by
     // √N so voice count neither pumps nor starves loudness
     sig = Mix(voices) * (1 / nVoices.sqrt) * voiceLevelL;
 
@@ -187,17 +234,16 @@ Ndef(\delta, { |amp = 0.18,
     fieldDrift = LFNoise1.kr(0.03).range(-0.12, 0.12);
     sig = Balance2.ar(sig[0], sig[1], fieldDrift);
 
-    // internal makeup gain compensating the normalization cascade; sits
-    // BEFORE master amp so amp stays the §K.4 layer level (0.18)
-    sig = sig * 3.3;
+    // internal makeup compensating the normalisation cascade; sits BEFORE
+    // master amp so amp stays the §K.4 layer level (0.18)
+    sig = sig * makeup;
 
-    // §C.4 register 100 Hz – 6 kHz: 3 cascaded HPFs (~36 dB/oct) cut the
-    // residual Ringz sub below the lowest fundamental (141 Hz)
-    sig = HPF.ar(HPF.ar(HPF.ar(sig, 125), 125), 125);
+    // §C.4 register 100 Hz – 6 kHz: triple HPF (~36 dB/oct) under f1 = 141 Hz
+    sig = HPF.ar(HPF.ar(HPF.ar(sig, 120), 120), 120);
 
     sig = sig * amp.lag(0.05);
-    sig = LeakDC.ar(sig);                 // §DSP: after sum + high-Q content
-    sig = Limiter.ar(sig, 0.95);          // §DSP: ±1.0 guarantee under random high Q
+    sig = LeakDC.ar(sig);                 // pulse trains + high-Q banks carry DC
+    sig = Limiter.ar(sig, 0.95);          // §DSP: ±1.0 guarantee under random extremes
     sig
 });
 
