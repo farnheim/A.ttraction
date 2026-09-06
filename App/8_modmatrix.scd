@@ -60,7 +60,7 @@
         Ndef(e[\oscKey]).clear;
     };
 
-    ~modKeys   = [];   // per-line descriptor read by the mixer panel (index, label, depth, enabled)
+    ~modKeys   = [];   // per-line descriptor read by the mixer panel (index, label, depth, enabled, src, shape, rate, fm)
     ~modActive = [];   // osc/map keys + target/param of the current run (teardown above)
 
     lines.do { |line, i|
@@ -84,7 +84,8 @@
                 ++ ", связь пропущена").warn;
             ~modKeys = ~modKeys.add((
                 index: i, label: ~modShort[line[\src]] ++ "→" ++ ~modShort[i],
-                target: layer, param: param, depth: line[\depth], enabled: false
+                target: layer, param: param, depth: line[\depth], enabled: false,
+                src: line[\src], shape: shape, rate: line[\rate], fm: line[\fm]
             ));
         } {
             cspec   = pspec[\spec];
@@ -117,7 +118,8 @@
 
             ~modKeys = ~modKeys.add((
                 index: i, label: ~modShort[line[\src]] ++ "→" ++ ~modShort[i],
-                target: layer, param: param, depth: line[\depth], enabled: true
+                target: layer, param: param, depth: line[\depth], enabled: true,
+                src: line[\src], shape: shape, rate: line[\rate], fm: line[\fm]
             ));
             ~modActive = ~modActive.add((
                 oscKey: oscKey, mapKey: mapKey, target: layer, param: param
@@ -158,7 +160,7 @@
             Ndef(~modOscKey.(idx)).set(\rate, newRate, \fm, newFm);
             Ndef(~modMapKey.(idx)).set(\depth, newDepth);
             line[\rate] = newRate; line[\fm] = newFm; line[\depth] = newDepth;
-            entry[\depth] = newDepth;
+            entry[\rate] = newRate; entry[\fm] = newFm; entry[\depth] = newDepth;
             if(~modmatrixGuiSync.notNil) { ~modmatrixGuiSync.(idx, newDepth) };
         };
     };

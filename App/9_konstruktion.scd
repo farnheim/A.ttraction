@@ -195,8 +195,8 @@
     grid = ~gridGenerate.(complexity ? 0.5, seed);
     if(grid.isNil) {
         // отказ: акт прерван БЕЗ частичных артефактов — старая пьеса действует
-        status = "отказ: не разложилось за " ++ ~cfg_grid.graphTries
-            ++ " графов — акт прерван";
+        status = "refused: no layout after " ++ ~cfg_grid.graphTries
+            ++ " graphs — act aborted";
         ("9_konstruktion — " ++ status).postln;
         { ~mixerGridStatus !? { |st| st.string_(status) } }.defer;
         nil
@@ -230,15 +230,15 @@
         ~konActive = true;
         ~gridLastText = grid[\text];
         dur = kon[\tiers] * kon[\tTier];
-        status = "Ф: " ++ grid[\nodes] ++ " · поле: " ++ grid[\cols] ++ "×"
-            ++ grid[\rows] ++ " · seed: " ++ grid[\seed]
-            ++ " · пьеса: " ++ kon[\tiers] ++ "×" ++ kon[\tTier] ++ " = "
+        status = "Φ " ++ grid[\nodes] ++ " · field " ++ grid[\cols] ++ "×"
+            ++ grid[\rows] ++ " · seed " ++ grid[\seed]
+            ++ " · piece " ++ kon[\tiers] ++ " × " ++ kon[\tTier] ++ " s = "
             ++ (dur / 60).floor.asInteger ++ ":"
             ++ (dur - ((dur / 60).floor * 60)).round.asInteger.asString.padLeft(2, "0");
         {
             ~mixerGridTxt !? { |tv|
                 tv.string_(grid[\text]);
-                tv.setStringColor(Color.white, 0, grid[\text].size);
+                tv.setStringColor((~uiPal !? { ~uiPal.ink }) ? Color.black, 0, grid[\text].size);
             };
             ~mixerGridStatus !? { |st| st.string_(status) };
         }.defer;
@@ -258,7 +258,7 @@
     var dir, existing, nnnn, base, txtPath, mdPath, sb, fmt;
     var writeErr, statusStr;
     if(kon.isNil) {
-        statusStr = "партитуры нет: сначала акт (кнопка «сгенерировать»)";
+        statusStr = "no score yet: generate an act first";
         ("9_konstruktion — " ++ statusStr).postln;
         { ~mixerGridStatus !? { |st| st.string_(statusStr) } }.defer;
         nil
@@ -370,12 +370,12 @@
             File.use(mdPath, "w", { |f| f.write(sb.join("\n") ++ "\n") });
         } { |err| writeErr = err };
         if(writeErr.notNil) {
-            statusStr = "ошибка записи партитуры: " ++ writeErr.errorString;
+            statusStr = "score write error: " ++ writeErr.errorString;
             ("9_konstruktion — " ++ statusStr).postln;
             { ~mixerGridStatus !? { |st| st.string_(statusStr) } }.defer;
             nil
         } {
-            statusStr = "партитура: " ++ ~cfg_kon.scoreDir ++ "/" ++ base ++ ".score.md";
+            statusStr = "score: " ++ ~cfg_kon.scoreDir ++ "/" ++ base ++ ".score.md";
             ("9_konstruktion — записано: " ++ txtPath).postln;
             ("9_konstruktion — записано: " ++ mdPath).postln;
             { ~mixerGridStatus !? { |st| st.string_(statusStr) } }.defer;
