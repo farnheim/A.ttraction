@@ -1,7 +1,7 @@
-// App/6_effects.scd — UNGRUND · EFFECTS (§K): один корпус RE-201
-// (~spaceEchoBody) в двух экземплярах — \space_echo_rev (§K.1, ~busFxSendRev)
-// и \space_echo_dly (§K.2, ~busFxSendDly); возвраты обоих -> ~busFxReturn.
-// Спека + Post-tuning deviations: docs/features/effects/dsp-spec.md.
+// App/6_effects.scd — UNGRUND · EFFECTS (§K): one RE-201 body (~spaceEchoBody)
+// in two instances — \space_echo_rev (§K.1, ~busFxSendRev) and \space_echo_dly
+// (§K.2, ~busFxSendDly); both returns -> ~busFxReturn.
+// Spec + post-tuning deviations: docs/features/effects/dsp-spec.md.
 
 
 // ===== CONFIG — edit here ============================================
@@ -26,9 +26,10 @@
 
 
 // ===== LOGIC — RE-201 Space Echo body + two proxies ==================
-// Один моно tape/regeneration-цикл, стерео восстанавливается на тапах и
-// пружинах; единственная разница экземпляров — индекс входной шины (замыкание).
-// Сатурация и потери головок ВНУТРИ LocalIn/LocalOut-петли: каждый проход темнее.
+// One mono tape/regeneration loop, stereo is recovered at the taps and springs;
+// the only difference between instances is the input bus index (a closure).
+// Saturation and head losses live INSIDE the LocalIn/LocalOut loop: every pass
+// is darker than the last.
 ~spaceEchoBody = { |inBusIndex|
     var mode, tapTime, intensity, echoVol, reverbVol, wet, drive, bias,
         wow, flutter, age, headBump, headSpread, bass, treble,
@@ -63,20 +64,20 @@
     in  = Mix(InFeedback.ar(inBusIndex, 2)) * 0.5;
     fb  = LocalIn.ar(1);
     rec = (in * drive.linlin(0, 1, 0.5, 4.0)) + (intensity * fb);
-    // tanh = защита от разгона: у intensity 1.0 петля сатурирует, не расходится
+    // tanh = runaway protection: at intensity 1.0 the loop saturates, not diverges
     rec = tanh(rec);
 
     // --- S1  record pre-emphasis (HF boost, net-flat vs S6 de-emphasis) ---
     preEmph = BHiShelf.ar(rec, 3000, 1.0, 4.0);
 
     // --- S2  hysteresis saturation (asym, memoryful — J-A approximation) --
-    // /g.max(1) держит small-signal gain ≈ 1, иначе петля самовозбуждается от
-    // пола шипения (deviation 1 спеки); mem — лёгкий гистерезисный лаг, НЕ
-    // путь регенерации (deviation 3)
+    // /g.max(1) keeps the small-signal gain ≈ 1, else the loop self-oscillates off
+    // the hiss floor (deviation 1); mem is a light hysteresis lag, NOT a
+    // regeneration path (deviation 3)
     g   = drive.linlin(0, 1, 1.0, 4.0);
     mem = LPF.ar(fb, 1500) * 0.08;
     sat = tanh(g * (preEmph + bias + mem)) / g.max(1.0);
-    // убить DC от bias/асимметрии до того, как он накопится в петле
+    // kill DC from bias/asymmetry before it accumulates in the loop
     sat = LeakDC.ar(sat);
 
     // --- S3  head-gap HF loss (speed + age dependent) --------------------
@@ -85,14 +86,15 @@
     tape = LPF.ar(sat, gapCorner);
 
     // --- S4  head bump (LF resonant boost, center falls as tape slows) ----
-    // потолок +4 dB, не +6: каскад ВНУТРИ петли, +6 давал LF-boom на пороге
-    // самовозбуждения (deviation 7)
+    // ceiling +4 dB, not +6: the cascade is INSIDE the loop, and +6 gave an LF
+    // boom at the self-oscillation threshold (deviation 7)
     bumpCenter = tapTime.explin(0.045, 0.30, 120, 55).clip(20, SampleRate.ir * 0.45);
     tape = MidEQ.ar(tape, bumpCenter, 1.0, headBump.linlin(0, 1, 0, 4));
 
     // --- S5  aging: dropouts (in-loop multiplier, injects no energy) ------
-    // сплайс-клик НЕ здесь: аддитивный Impulse в петле — вечный источник,
-    // петля не гасла бы; он на выходном пути S7b (deviation 8)
+    // the splice click is NOT here: an additive Impulse inside the loop is an
+    // eternal source and the loop would never decay; it lives on the S7b output
+    // path (deviation 8)
     loopRate = (tapTime * 3).reciprocal;
     dropTrig = Dust.kr(age * 0.8);
     dip      = 1 - (Decay2.kr(dropTrig, 0.005, 0.06) * (age * 0.5));
@@ -124,8 +126,8 @@
     revEnable = Select.kr(midx, revTab).lag(0.05);
     tapSum = (t1 * g1) + (t2 * g2) + (t3 * g3);
 
-    // feedback tap нормализован числом активных головок: порог самовозбуждения
-    // задаёт только intensity, не режим (deviation 2 — главный фикс стабильности)
+    // the feedback tap is normalized by the number of active heads: only
+    // intensity sets the self-oscillation threshold, not the mode (deviation 2)
     LocalOut.ar(tapSum / (g1 + g2 + g3).max(1.0));
 
     // --- S6  playback de-emphasis + RE-201 Bass/Treble tone (output path) -
@@ -141,7 +143,7 @@
     echoStereo = Pan2.ar(p1 * g1, headSpread.neg)
         + Pan2.ar(p2 * g2, 0)
         + Pan2.ar(p3 * g3, headSpread);
-    // сплайс-клик только на выходном пути (deviation 8): петля гаснет в ноль
+    // splice click on the output path only (deviation 8): the loop decays to zero
     click = BPF.ar(Impulse.ar(loopRate), 2500, 0.5) * age * 0.3;
     echoStereo = echoStereo + Pan2.ar(click, 0);
 
@@ -155,7 +157,7 @@
             s = AllpassC.ar(s, 0.05, mt, 0.08);
         };
         s = CombC.ar(s, 0.2, baseDelay, springDecay);
-        // LPF + лёгкий Resonz вместо узкого band-pass — иначе низ тощий (dev. 9)
+        // LPF + a light Resonz instead of a narrow band-pass — else the low end is thin (dev. 9)
         s = LPF.ar(s, springTone.linexp(0, 1, 1800, 6000).clip(300, SampleRate.ir * 0.45));
         s = s + (Resonz.ar(s, springTone.linexp(0, 1, 600, 2200).clip(200, SampleRate.ir * 0.45), 0.5) * 0.9);
         s;
@@ -166,7 +168,7 @@
     reverbStereo = [sp1 + (sp2 * 0.5), sp3 + (sp2 * 0.5)] * 0.3 * revEnable;
 
     // --- S10  mix / condition --------------------------------------------
-    // фиксированный makeup вне петли (не влияет на стабильность) — deviation 4
+    // fixed makeup outside the loop (no effect on stability) — deviation 4
     out = wet * 3.5 * ((echoVol * echoStereo) + (reverbVol * reverbStereo));
     hissSig = PinkNoise.ar([1, 1]) * (hiss * (0.5 + age) * 0.01);
     out = out + hissSig;

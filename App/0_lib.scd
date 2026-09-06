@@ -1,6 +1,6 @@
-// App/0_lib.scd — UNGRUND · LIB: реестр spec'ов ~ungSpecs, значения ~ungVals,
-// ~setParam, рандомайзеры, проектные пресеты, UI-kit (~ui*), тюнер-GUI (~openTuner).
-// Грузится ПЕРВЫМ. Формат spec: docs/architecture/app/README.md.
+// App/0_lib.scd — UNGRUND · LIB: spec registry ~ungSpecs, values ~ungVals,
+// ~setParam, randomizers, project presets, UI kit (~ui*), tuner GUI (~openTuner).
+// Loads FIRST. Spec format: docs/architecture/app/README.md.
 
 (
 // ----- registries (idempotent: reloading does not reset) -------------
@@ -22,8 +22,15 @@
 
 // ----- set parameter: Ndef + store + GUI sync -------------------------
 ~setParam = { |layer, key, v|
+    var accepted;
     layer = layer.asSymbol; key = key.asSymbol;
-    Ndef(layer).set(key, v);
+    // a koppelfeld node owns the control: Ndef.set would drop its mapping
+    // silently (n_set evicts n_mapa). Module off -> ~kfRestSet nil -> old path.
+    // The return is the value the node ACCEPTED (a destination rest is clamped
+    // into the scheme window) and that is what gets stored: otherwise ~ungVals,
+    // the tuner and the preset would carry something other than what sounds
+    accepted = ~kfRestSet !? { ~kfRestSet.(layer, key, v) };
+    if(accepted.isNumber) { v = accepted } { Ndef(layer).set(key, v) };
     if(~ungVals[layer].isNil) { ~ungVals[layer] = () };
     ~ungVals[layer][key] = v;
     if(~ungTuner[layer].notNil and: { ~ungTunerSync[layer].notNil }) {
@@ -54,8 +61,8 @@
 
 
 // ----- project presets: dir, save, load, list -------------------------
-// ОДИН файл = всё состояние проекта (layers/mixer/fx); каждая секция
-// опциональна — частичный пресет не трогает остальное
+// ONE file = the whole project state (layers/mixer/fx); every section is
+// optional — a partial preset leaves the rest alone
 ~ungPresetDir = {
     var root = ~ungPresetRoot;
     if(File.exists(root).not) { File.mkdir(root) };
@@ -124,7 +131,7 @@
             e[\layers] !? { |ls|
                 ls.keysValuesDo { |layer, vals|
                     var spec = ~ungSpecOf.(layer);
-                    // spec есть = слой загружен; неизвестные ключи пропускаются
+                    // spec present = layer loaded; unknown keys are skipped
                     if(spec.notNil) {
                         vals.keysValuesDo { |k, v|
                             if(spec.params.any { |p| p.key == k.asSymbol }) {
@@ -139,8 +146,8 @@
                 if(~mixSet.notNil and: { ~cfg_mixer.notNil }) {
                     m[\levels] !? { |rows|
                         rows.keysValuesDo { |layer, lv|
-                            // только смаршрутизированные: ~mixSet на чужом имени
-                            // породил бы пустой mix_<layer>-прокси
+                            // routed layers only: ~mixSet on a foreign name
+                            // would spawn an empty mix_<layer> proxy
                             if((~mixerLayers ? []).includes(layer.asSymbol)) {
                                 lv.keysValuesDo { |which, v|
                                     ~mixSet.(layer.asSymbol, which, v);
@@ -149,8 +156,8 @@
                         };
                     };
                     m[\master] !? { |v| ~masterSet.(v) };
-                    // наличие `muted` гейтит всё mute/solo-состояние: старые
-                    // пресеты без него ничего не трогают (partial-preset rule)
+                    // the presence of `muted` gates all mute/solo state: older
+                    // presets without it touch nothing (partial-preset rule)
                     m[\muted] !? { |ml|
                         ~mixMuted = ();
                         ml.do { |l| ~mixMuted[l.asSymbol] = true };
@@ -202,7 +209,7 @@
 };
 
 
-// ----- UI kit: монохром бумага/тушь; макеты и правила нотации: docs/architecture/app/ui/ -----
+// ----- UI kit: monochrome paper/ink; layouts and notation: docs/architecture/app/ui/ -----
 ~uiPal = (
     paper:  Color.new255(241, 236, 226),
     paper2: Color.new255(231, 224, 209),
@@ -232,14 +239,14 @@
     StaticText(parent, rect).string_(string).font_(~uiSerif.(26)).stringColor_(~uiPal.ink);
 };
 ~uiRule  = { |parent, rect| UserView(parent, rect).background_(~uiPal.ink) };
-// фиксированное число знаков после точки (round(0.01).asString теряет нули)
+// fixed number of decimals (round(0.01).asString drops trailing zeros)
 ~uiFmt = { |v, d = 2|
     var m = (10 ** d).asInteger, n = (v * m).round.asInteger;
     if(n < 0, "−", "") ++ (n.abs div: m).asString ++ "." ++ (n.abs mod: m).asString.padLeft(d, "0");
 };
-// кнопка = рамка макета; Qt-Button рисуется стилем ОС (скруглённый градиент)
-// и палитру не берёт, поэтому рисуется вручную. label — строка или [off, on];
-// on — инверсия (нажатое состояние ИЛИ постоянно инверсная главная кнопка)
+// a button is a layout frame; Qt Button draws in the OS style (rounded
+// gradient) and ignores the palette, so it is drawn by hand. label is a string
+// or [off, on]; on = inverted (pressed state OR a permanently inverted primary)
 ~uiBtn = { |parent, rect, label, action, on = false|
     var labels = if(label.isKindOf(String)) { [label, label] } { label };
     var b = ( on: on, enabled: true, pressed: false, act: action, labels: labels );
@@ -262,8 +269,8 @@
         var hit = (x >= 0) and: { y >= 0 } and: { x <= u.bounds.width } and: { y <= u.bounds.height };
         b[\pressed] = false;
         uv.refresh;
-        // состояние `on` двигают только синк-хуки (~mixerRefreshMute и др.) —
-        // сама кнопка его не переключает, иначе модель и вид разойдутся
+        // only the sync hooks move `on` (~mixerRefreshMute and friends) — the
+        // button never toggles it itself, or model and view drift apart
         if(b[\enabled] and: hit) { b[\act].value(b) };
     });
     b;
@@ -271,9 +278,9 @@
 ~uiBtnSet    = { |b, on| b !? { b[\on] = on; { b[\view].refresh }.defer } };
 ~uiBtnEnable = { |b, flag| b !? { b[\enabled] = flag; { b[\view].refresh }.defer } };
 
-// список = рамка макета + собственный выпадающий слой; PopUpMenu рисуется
-// стилем ОС. Слой живёт В ТОМ ЖЕ окне (порядок создания = порядок наложения),
-// поэтому не нужен фокус второго окна; клик мимо ловит прозрачная подложка
+// a popup is a layout frame plus its own drop layer; PopUpMenu draws in the OS
+// style. The layer lives IN THE SAME window (creation order = stacking order),
+// so no second window needs focus; a transparent backdrop catches outside clicks
 ~uiPopup = { |parent, rect, items, index = 0, action|
     var p = ( items: items, index: index, act: action, enabled: true, hover: -1 );
     var uv = UserView(parent, rect).background_(~uiPal.paper);
@@ -302,7 +309,7 @@
     if(p[\close].notNil) { p[\close].value };
     if(items.isEmpty) { nil } {
         if(top + listH > host.bounds.height) { top = (rect.top - listH).max(0) };
-        // подложка чуть непрозрачна: полностью прозрачный виджет не получает клик
+        // the backdrop is slightly opaque: a fully transparent widget gets no click
         scrim = UserView(p[\parent], Rect(0, 0, host.bounds.width, host.bounds.height))
             .background_(Color(0, 0, 0, 0.01));
         list = UserView(p[\parent], Rect(rect.left, top, rect.width, listH))
@@ -342,7 +349,7 @@
 ~uiPopupItems  = { |p, items| p !? { p[\items] = items; p[\index] = p[\index].clip(0, items.size - 1); { p[\view].refresh }.defer } };
 ~uiPopupEnable = { |p, flag| p !? { p[\enabled] = flag; { p[\view].refresh }.defer } };
 
-// точечный растр макета: панель структурной сетки (dither) + карточка поля
+// layout dot raster: structure-grid panel (dither) + field card
 ~uiDrawDither = { |u, cardRect|
     var w = u.bounds.width, h = u.bounds.height;
     Pen.fillColor = ~uiPal.paper2; Pen.fillRect(Rect(0, 0, w, h));
@@ -352,8 +359,8 @@
     Pen.strokeRect(Rect(0.5, 0.5, w - 1, h - 1));
     cardRect !? { |r| Pen.fillColor = ~uiPal.paper; Pen.fillRect(r) };
 };
-// глубина связи читается ДЛИНОЙ штриха: толщина линий постоянна, иначе
-// сильная связь заливает поле и слабые рядом с ней перестают читаться
+// coupling depth reads as stroke LENGTH: line weight stays constant, else a
+// strong coupling floods the field and the weak ones next to it vanish
 ~uiLineWidth = 1.1;
 ~uiLineDash = { |depth, shape|
     var on = 1.5 + (depth.clip(0, 1) * 14);
@@ -417,8 +424,8 @@
 ~uiRulerGet    = { |r| r[\spec].map(r[\norm]) };
 ~uiRulerEnable = { |r, on| r[\enabled] = on; { r[\view].refresh }.defer };
 
-// |b| ≤ 3: дальше квинтовая координата перестаёт читаться и высота всё равно
-// уходит в ус центов (решётка — docs/architecture/system/composition.md)
+// |b| ≤ 3: beyond that the fifths coordinate stops reading and the pitch drifts
+// into a cent tail anyway (lattice — docs/architecture/system/composition.md)
 ~uiLattice = { |hz|
     var c = 1200 * log2(hz / 94), best;
     (-3..3).do { |b|
@@ -522,8 +529,8 @@
     };
 };
 
-// ----- GUI: авторитетный ресинк ВСЕХ линеек слоя из ~ungVals — после
-// массовых операций (пресет/рандом), в обход по-ключевого ~ungTunerSync
+// ----- GUI: authoritative resync of ALL layer rulers from ~ungVals — after
+// bulk operations (preset/random), bypassing per-key ~ungTunerSync
 ~ungTunerRefresh = ~ungTunerRefresh ? ();   // \layer -> { lattice/rose refresh }
 ~ungSyncAll = { |layer|
     layer = layer.asSymbol;
@@ -543,7 +550,7 @@
 };
 
 
-// ----- GUI: окно тюнера слоя (макет: docs/architecture/app/ui/Station.dc.html) -----
+// ----- GUI: layer tuner window (layout: docs/architecture/app/ui/Station.dc.html) -----
 ~ungBuildTuner = { |layer|
     var spec, freqs, tones, w, h, off, scr, winRect, win;
     var x0 = 28, top = 84, latH = 200, rowH = 22, colW = 460, roseS = 340, midX, rightX, by;
@@ -560,8 +567,8 @@
     w = rightX + 118 + 150 + 70 + 28;
     h = by + 26 + 18;
 
-    // закрыть прежнее окно best-effort (мёртвый Qt-объект — контракт §6) и
-    // сбросить ВСЕ слоты слоя: в паузе пересборки никто не трогает старые виджеты
+    // close the previous window best-effort (a dead Qt object — §6) and reset
+    // ALL layer slots: during the rebuild nobody may touch the old widgets
     if(~ungTuner[layer].notNil) { try { ~ungTuner[layer].close } };
     ~ungTuner[layer]        = nil;
     ~ungTunerEz[layer]      = ();
@@ -569,8 +576,8 @@
     ~ungTunerSync[layer]    = nil;
     ~ungTunerRefresh[layer] = nil;
 
-    // позицию окна заворачивать И клампить в экран — иначе оффсет растёт всю
-    // сессию и окно «открывается» за кадром
+    // wrap AND clamp the window position to the screen — otherwise the offset
+    // grows all session and the window "opens" off screen
     off = ((~ungTunerOffset % 12) * 26);
     ~ungTunerOffset = ~ungTunerOffset + 1;
     scr = Window.availableBounds;
@@ -581,7 +588,7 @@
         (70 + off).clip(scr.top,  scr.top  + scr.height - h),
         w, h
     );
-    // НЕ чейнить `win = dict[k] = Window(...)` — вернётся словарь (контракт §6)
+    // do NOT chain `win = dict[k] = Window(...)` — that returns the dict (§6)
     win = Window("UNGRUND · " ++ layer, winRect).background_(~uiPal.paper);
     ~ungTuner[layer] = win;
 
@@ -610,7 +617,7 @@
     };
     if(freqs.notEmpty) { ~uiBtn.(win, Rect(x0, by, 130, 26), "random pitch", { ~rndFreq.(layer) }) };
 
-    // роза + линейки тембра
+    // rose + tone rulers
     ~uiCap.(win, Rect(midX, top - 16, roseS, 14), "rose · tone");
     roseView = UserView(win, Rect(midX, top, roseS, roseS)).background_(~uiPal.paper);
     roseView.drawFunc_({ |u|
@@ -642,8 +649,8 @@
         ~ungTunerRefresh[layer] !? { |f| f.value };
     };
 
-    // guard: отложенный onClose СТАРОГО окна не должен стереть реестры
-    // НОВОГО (контракт §6)
+    // guard: a deferred onClose of the OLD window must not wipe the registries
+    // of the NEW one (§6)
     win.onClose_({
         if(~ungTuner[layer] === win) {
             ~ungTuner[layer]        = nil;
@@ -653,8 +660,8 @@
             ~ungTunerRefresh[layer] = nil;
         };
     });
-    // один .defer(0.3) после раскладки: немедленный .front тяжёлого Qt-окна
-    // опережает layout и окно остаётся невидимым (контракт §6)
+    // one .defer(0.3) after layout: an immediate .front on a heavy Qt window
+    // outruns layout and the window stays invisible (§6)
     { ~ungTuner[layer].bounds_(winRect).front }.defer(0.3);
 };
 

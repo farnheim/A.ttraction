@@ -26,12 +26,12 @@
 
 
 // ===== LOGIC — Tdef scheduler ========================================
-// ОДИН клок на сессию (permanent переживает Cmd-.); освобождает только ~appCleanup
+// ONE clock per session (permanent survives Cmd-.); only ~appCleanup frees it
 ~seqClock = ~seqClock ?? { TempoClock.new(~cfg_seq.tempo).permanent_(true) };
 ~seqClock.tempo = ~cfg_seq.tempo;
 
-// громкость ПРЯМО на роутер-Ndef, не через ~mixSet: тот пишет в
-// ~cfg_mixer.levels и прогон перетёр бы сведение нулями (runtime vs CONFIG)
+// volume goes STRAIGHT to the router Ndef, not through ~mixSet: that writes
+// ~cfg_mixer.levels and a run would overwrite the mix with zeros (runtime vs CONFIG)
 ~seqSetVol = { |layer, v|
     Ndef(("mix_" ++ layer).asSymbol).set(\vol, v);
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(layer, \vol, v) };
@@ -42,16 +42,16 @@
 };
 ~seqMute = { |layer| ~seqSetVol.(layer, 0) };
 
-// runtime-слот акта: Tdef играет ~seqTimeline, иначе CONFIG-демо
+// runtime act slot: Tdef plays ~seqTimeline, else the CONFIG demo
 ~seqTimeline = ~seqTimeline;
 
-// override 2026-07-18: false = секвенсор НЕ дирижирует громкостями (set:
-// остаётся) — громкости у исполнителя; демо всегда возвращает true
+// override 2026-07-18: false = the sequencer does NOT conduct volumes (set:
+// stays) — volumes belong to the performer; the demo always returns true
 ~seqDriveVols = ~seqDriveVols ? true;
 
 ~seqApplyBlock = { |block|
     if(~seqDriveVols == true) {
-        // block[\vols]: [[\layer, rel]] — уровень ОТНОСИТЕЛЬНО живого сведения
+        // block[\vols]: [[\layer, rel]] — level RELATIVE to the live mix
         (block[\vols]   ? []).do { |pair|
             var lv = ~cfg_mixer.levels[pair[0]];
             if(lv.notNil) { ~seqSetVol.(pair[0], pair[1] * lv.vol) };
@@ -59,9 +59,11 @@
         (block.active   ? []).do { |l| ~seqRaise.(l) };
         (block.gone     ? []).do { |l| ~seqMute.(l) };
     };
-    // block[\set] (NOT block.set): .set is an Event method shadowing the key
+    // block[\set] (NOT block.set): .set is an Event method shadowing the key.
+    // ~setParam, NOT Ndef.set: a koppelfeld node owns the layer control, and a
+    // direct n_set would drop its mapping silently — the param would freeze
     (block[\set]    ? []).do { |triple|
-        Ndef(triple[0].asSymbol).set(triple[1], triple[2]);
+        ~setParam.(triple[0].asSymbol, triple[1], triple[2]);
     };
 };
 
@@ -89,9 +91,9 @@ Tdef(\ung_sequencer, {
 
 // --- start / stop -----------------------------------------------------
 ~seqStart = {
-    // демо всегда дирижирует: false акта не переживает возврат к демо
+    // the demo always conducts: an act's false does not survive the fallback
     if(~seqTimeline.isNil) { ~seqDriveVols = true };
-    // старт: заглушить все слои, блок t=0 поднимет нужные
+    // start: mute every layer, the t=0 block raises the ones it wants
     if(~seqDriveVols == true) { ~mixerLayers.do { |l| ~seqMute.(l) } };
     ~seqCurrentBlock = nil;
     ~seqStartTime    = Main.elapsedTime;     // wall-clock mark for viz playhead

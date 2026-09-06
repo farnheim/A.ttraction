@@ -1,30 +1,34 @@
-// App/9_konstruktion.scd — UNGRUND · KONSTRUKTION (форма §E.6): один акт
-// генерации сетки читается дважды — макроформа (таймлайн 4_sequencer) и
-// топология модуляции (16 линий 8_modmatrix). Чистый sclang, без сервера.
-// Законы: docs/features/grid-modulation/reference.md; спека: там же dsp-spec.md.
+// App/9_konstruktion.scd — UNGRUND · KONSTRUKTION (form §E.6): one grid
+// generation act is read twice — macroform (4_sequencer timeline) and
+// modulation topology. Pure sclang, no server.
+// BRANCH experiment/patchbay: the reading-2 executor (8_modmatrix, 16 lines) is
+// deleted; its replacement — the `schaltung` derivation in koppelfeld — arrives
+// at stage S6. While ~cfg_modmtx is absent reading 2 yields an empty line list;
+// reading 1 (timeline, levels, finish) works as before.
+// Laws: docs/features/grid-modulation/reference.md; spec: dsp-spec.md there.
 // API: ~konGenerate.(complexity, seed, tTier) · ~konDerive.(grid, tTier) ·
 //      ~konSaveScore.
 
 (
 // ===== CONFIG — edit here ============================================
 ~cfg_kon = (
-    tTier:        30,              // умолчание партитурного T_tier, с
-    tTierRange:   [15, 60],        // границы поля T_tier в панели микшера
-    weakLevel:    0.5,             // слабая связь: ×0.5 = −6 dB (решение 3)
-    rateScale:    12,              // множитель закона rate (user override: пульс, не дрейф)
-    rateClip:     [0.05, 2.0],     // Гц, шаг 3 деривации (расширен под rateScale)
+    tTier:        30,              // default score T_tier, s
+    tTierRange:   [15, 60],        // T_tier field bounds in the mixer panel
+    weakLevel:    0.5,             // weak coupling: x0.5 = -6 dB (decision 3)
+    rateScale:    12,              // rate-law multiplier (user override: pulse, not drift)
+    rateClip:     [0.05, 2.0],     // Hz, derivation step 3 (widened for rateScale)
     fmBase:       0.3, fmSpan: 0.9,        // fm = fmBase + fmSpan·strongShare
     depthGain:    0.22, depthFloor: 0.06,  // depth = clip(depthGain·cAB, floor, max)
-    depthMax:     0.5,             // общий потолок, theta включительно (user override §C.8)
-    baseRange:    [0.15, 0.85],    // нормализованный диапазон базовых значений целей
-    scoreDir:     "docs/architecture/structure-grid"  // относительно корня проекта
+    depthMax:     0.5,             // shared ceiling, theta included (user override §C.8)
+    baseRange:    [0.15, 0.85],    // normalized range of destination base values
+    scoreDir:     "docs/architecture/structure-grid"  // relative to the project root
 );
 
 
-// ===== LOGIC — деривация, акт, партитура =============================
+// ===== LOGIC — derivation, act, score ================================
 ~konLayerOrder = [\alpha, \delta, \epsilon, \zeta, \theta];
 
-// ключи String, не Char (Ф многобайтные); Dictionary сравнивает по значению
+// String keys, not Char (the glyphs are multibyte); Dictionary compares by value
 ~konLayerOf = Dictionary.newFrom([
     "█", \alpha, "▄", \delta, "▓", \epsilon, "░", \zeta, "▒", \theta
 ]);
@@ -36,8 +40,8 @@
     F: ( alpha: 1, delta: 5, epsilon: 7, theta: 13 )
 );
 
-// чистая функция графа: только опубликованные признаки экспорта 0_grid —
-// третьего прочтения нет (reference, поправка II)
+// pure function of the graph: only the published features of the 0_grid export
+// — there is no third reading (reference, amendment II)
 ~konDerive = { |grid, tTier|
     var g = grid[\graph];
     var nodes = g[\nodes], edges = g[\edges];
@@ -49,7 +53,7 @@
     ~konLayerOrder.do { |l, k| layerIdx[l] = k };
     layerOfNode = { |n| ~konLayerOf[n[\ch]] };
 
-    // census по ПОЛНОМУ графу, ПО НАПРАВЛЕНИЮ ребра (поправка II)
+    // census over the FULL graph, BY EDGE DIRECTION (amendment II)
     census = Array.fill(5, { Array.fill(5, 0) });
     edges.do { |e|
         var a = layerIdx[layerOfNode.(nodes[e[\src]])];
@@ -57,8 +61,8 @@
         census[a][b] = census[a][b] + 1;
     };
 
-    // нарисованная петля A⇄B: оба направления ненулевые И хотя бы одно ребро
-    // пары возвратное (поправка II)
+    // a drawn loop A<->B: both directions non-zero AND at least one edge of the
+    // pair is a back edge (amendment II)
     loopPair = Array.fill(5, { Array.fill(5, false) });
     (0..4).do { |a|
         (0..4).do { |b|
@@ -78,7 +82,7 @@
         };
     };
 
-    // чтение 1 — макроформа: уровень слоя на ранге = max по его узлам
+    // reading 1 — macroform: a layer's level at a tier = max over its nodes
     levels = Array.fill(tiers, { () });
     nodes.do { |n|
         var l = layerOfNode.(n);
@@ -102,8 +106,8 @@
         finish: true
     ));
 
-    // чтение 2 — 16 линий: 7 шагов референции (rate ×rateScale — user override)
-    lines = ~cfg_modmtx.lines.collect { |cfgLine, i|
+    // reading 2 — 16 lines: the reference's 7 steps (rate x rateScale is a user override)
+    lines = (~cfg_modmtx !? { |c| c.lines } ? []).collect { |cfgLine, i|
         var b = cfgLine[\target].asSymbol;
         var param = cfgLine[\param].asSymbol;
         var family = ~konLineFamily[i];
@@ -115,16 +119,16 @@
         ~cfg_modmtx.lines.do { |lx, k|
             if((k < i) and: { lx[\target].asSymbol == b }) { j = j + 1 };
         };
-        // шаг 1: диагональ исключена из выбора источников
+        // step 1: the diagonal is excluded from source selection
         cands = (0..4).select { |a| (a != bIdx) and: { census[a][bIdx] > 0 } };
         ln = if(cands.isEmpty) {
-            // шаг 7: пустой census — автономная линия (fm = 0, src не влияет)
+            // step 7: empty census — an autonomous line (fm = 0, src has no effect)
             ( target: b, param: param, shape: cfgLine[\shape], rate: cfgLine[\rate],
               src: cfgLine[\src], fm: 0, depth: 0, loopAB: 0,
               srcLayer: nil, family: family, nEdges: 0,
               meanRoute: nil, strongShare: nil, cAB: nil, derived: false )
         } {
-            // sort в SC не стабилен — tie-break задан сравнением явно
+            // sort is not stable in SC — the tie-break is spelled out
             sorted = cands.sort { |x, y|
                 (census[x][bIdx] > census[y][bIdx]) or: {
                     (census[x][bIdx] == census[y][bIdx]) and: { x < y }
@@ -142,14 +146,14 @@
                 .clip(~cfg_kon.rateClip[0], ~cfg_kon.rateClip[1]);
             strongShare = ab.count { |e| e[\strong] } / ab.size;
             fm = ~cfg_kon.fmBase + (~cfg_kon.fmSpan * strongShare);
-            // степени в cAB по ПОЛНОМУ графу (с возвратами): деление определено
+            // cAB degrees over the FULL graph (back edges included): division defined
             cAB = ab.collect { |e| nodes[e[\dst]][\indeg] }.mean
                 / ab.collect { |e| nodes[e[\src]][\outdeg] }.mean;
             isLoop = loopPair[aIdx][bIdx];
-            // шаг 5б: петля бустит обе встречные линии ×1.5; клип ПОСЛЕ буста
+            // step 5b: a loop boosts both facing lines x1.5; clip AFTER the boost
             depth = (~cfg_kon.depthGain * cAB * if(isLoop) { 1.5 } { 1 })
                 .clip(~cfg_kon.depthFloor, ~cfg_kon.depthMax);
-            // шаг 6: петля периодична по построению => \sine
+            // step 6: a loop is periodic by construction => \sine
             shape = if(isLoop
                 or: { (ab.count { |e| nodes[e[\dst]][\indeg] >= 2 } * 2) > ab.size })
                 { \sine } { \noise };
@@ -159,8 +163,8 @@
               meanRoute: meanRoute, strongShare: strongShare, cAB: cAB,
               derived: true )
         };
-        // базовое значение цели (override: акт = новая тембральная идентичность
-        // даже при depth 0) — детерминированный скрэмбл золотым сечением
+        // destination base value (override: an act is a new timbral identity even
+        // at depth 0) — deterministic golden-ratio scramble
         colSum = (0..4).sum { |a| census[a][bIdx] };
         baseLo = ~cfg_kon.baseRange[0];
         baseHi = ~cfg_kon.baseRange[1];
@@ -187,14 +191,14 @@
       timeline: timeline.asArray, lines: lines )
 };
 
-// акт: одна пьеса — три артефакта разом; пьесу НЕ запускает (старт — акт
-// перформера: ~seqStart / кнопка)
+// the act: one piece, three artefacts at once; it does NOT start the piece
+// (starting is the performer's act: ~seqStart / the button)
 ~konGenerate = { |complexity, seed, tTier|
     var grid, kon, dur, status;
     if(Tdef(\ung_sequencer).isPlaying and: { ~seqStop.notNil }) { ~seqStop.value };
     grid = ~gridGenerate.(complexity ? 0.5, seed);
     if(grid.isNil) {
-        // отказ: акт прерван БЕЗ частичных артефактов — старая пьеса действует
+        // refusal: the act aborts with NO partial artefacts — the old piece stands
         status = "refused: no layout after " ++ ~cfg_grid.graphTries
             ++ " graphs — act aborted";
         ("9_konstruktion — " ++ status).postln;
@@ -204,13 +208,13 @@
         kon = ~konDerive.(grid, tTier ? ~cfg_kon.tTier);
         kon[\text] = grid[\text];
         kon[\counts] = grid[\counts];
-        // детерминизм относителен ~cfg_grid — партитура пишет снапшот CONFIG
+        // determinism is relative to ~cfg_grid — the score stores a CONFIG snapshot
         kon[\cfgGrid] = ~cfg_grid.copy;
         ~seqTimeline = kon[\timeline];
-        // громкости исполнителю (override 2026-07-18): vols секвенсор не применяет
+        // volumes belong to the performer (override 2026-07-18): the sequencer skips vols
         ~seqDriveVols = false;
-        // базовые центры 16 целей из графа — ДО пересборки матрицы, чтобы
-        // modmtx_map_i захватил centerN уже новых значений
+        // base centres of the 16 destinations from the graph — BEFORE the matrix
+        // rebuild, so modmtx_map_i captures the new centreN values
         if(~setParam.notNil) {
             kon[\lines].do { |ln|
                 var pspec = ~ungSpecOf.(ln[\target]) !? { |s|
@@ -222,10 +226,15 @@
             };
             if(~ungSyncAll.notNil) { ~konLayerOrder.do { |l| ~ungSyncAll.(l) } };
         };
-        ~modBuild.(kon[\lines].collect { |ln|
-            ( target: ln[\target], param: ln[\param], shape: ln[\shape],
-              rate: ln[\rate], src: ln[\src], fm: ln[\fm], depth: ln[\depth] )
-        });
+        if(~modBuild.notNil) {
+            ~modBuild.(kon[\lines].collect { |ln|
+                ( target: ln[\target], param: ln[\param], shape: ln[\shape],
+                  rate: ln[\rate], src: ln[\src], fm: ln[\fm], depth: ln[\depth] )
+            });
+        } {
+            "9_konstruktion — Чтение 2 пропущено: исполнителя топологии нет "
+                "(деривация schaltung — этап S6 ветки patchbay). Чтение 1 (таймлайн) действует.".postln;
+        };
         ~konCurrent = kon;
         ~konActive = true;
         ~gridLastText = grid[\text];
@@ -252,7 +261,7 @@
     };
 };
 
-// партитура (решение 6): пара construction-NNNN.txt + construction-NNNN.score.md
+// score (decision 6): the pair construction-NNNN.txt + construction-NNNN.score.md
 ~konSaveScore = {
     var kon = ~konCurrent;
     var dir, existing, nnnn, base, txtPath, mdPath, sb, fmt;
@@ -348,6 +357,11 @@
         sb.add("");
         sb.add("## 16 линий модуляции");
         sb.add("");
+        if(kon[\lines].isEmpty) {
+            sb.add("_Чтение 2 не выполнено: исполнителя топологии нет "
+                "(деривация schaltung — этап S6)._");
+            sb.add("");
+        };
         sb.add("| i | цель | Ф | srcLayer | src | shape | rate, Гц | fm, окт "
             ++ "| depth | петля | baseN | meanRoute | strongShare | cAB | derived |");
         sb.add("|" ++ "---|".dup(15).join);
@@ -363,7 +377,7 @@
                 ++ " | " ++ fmt.(ln[\strongShare], 3) ++ " | " ++ fmt.(ln[\cAB], 3)
                 ++ " | " ++ ln[\derived] ++ " |");
         };
-        // кнопка не имеет права молчать: успех — путь, отказ записи — ошибка
+        // the button may never stay silent: success = a path, a write failure = an error
         writeErr = nil;
         try {
             File.use(txtPath, "w", { |f| f.write(kon[\text] ++ "\n") });
@@ -384,7 +398,7 @@
     };
 };
 
-// идемпотентный reload: текущий акт не пересоздаётся и не убивается
+// idempotent reload: the current act is neither rebuilt nor killed
 ~konActive  = ~konActive ? false;
 ~konCurrent = ~konCurrent;
 ~konTtier   = ~konTtier ? ~cfg_kon.tTier;

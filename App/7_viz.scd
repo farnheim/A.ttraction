@@ -1,7 +1,7 @@
 // App/7_viz.scd — UNGRUND · VIZ: one window — timeline of the running act
 // (tiers + playhead) and live LFO values (control-bus polling ~10 Hz on
 // AppClock). All dependencies are soft/nil-safe; opens even without LFO/sequencer.
-// Loaded last by 1_app.scd when enableVizGui. Макет: docs/architecture/app/ui/Timeline.dc.html.
+// Loaded last by 1_app.scd when enableVizGui. Layout: docs/architecture/app/ui/Timeline.dc.html.
 
 
 // ===== CONFIG — edit here ============================================
@@ -121,7 +121,7 @@
         ~uiCap.(~vizWin, Rect(28, 78, 600, 14),
             "blocks · " ++ if(~seqTimeline.notNil, "~seqTimeline (act)", "~cfg_seq.timeline (demo)"));
         seqView = UserView(~vizWin, Rect(28, 96, w - 56, seqH)).background_(~uiPal.paper);
-        // ~seqTimeline читается В drawFunc (view анимирован): акт виден сразу
+        // ~seqTimeline is read INSIDE drawFunc (the view animates): an act shows at once
         seqView.drawFunc_({ |uv| ~vizDrawTimeline.(uv) });
         seqView.frameRate_(10).animate_(true);
     };

@@ -31,9 +31,9 @@
 
 
 // ===== LOGIC — automation engine =====================================
-// Идемпотентный reload по СОБСТВЕННОМУ реестру ~lfoActive (Ndef.all — не ключи
-// прокси, контракт §6); выжившие строки остаются смапленными (без разрыва),
-// исчезнувшие: unmap target СНАЧАЛА, потом clear (иначе target на чужой шине)
+// Idempotent reload through the module's OWN registry ~lfoActive (Ndef.all is
+// not the proxy keys, §6); surviving lines stay mapped (no gap), vanished ones:
+// unmap the target FIRST, then clear (else the target sits on a foreign bus)
 ~lfoNewKeys = ~cfg_lfo.lines.collect { |line, i|
     ("lfo_" ++ i ++ "_" ++ line.target ++ "_" ++ line.param).asSymbol;
 };
@@ -64,7 +64,7 @@
     });
     Ndef(lfoKey).set(\rate, line.rate);
 
-    // .map, не .set: kr-прокси маппится через контрольную шину
+    // .map, not .set: a kr proxy is mapped through a control bus
     Ndef(line.target.asSymbol).map(line.param, Ndef(lfoKey));
 
     ~lfoKeys   = ~lfoKeys.add(lfoKey);

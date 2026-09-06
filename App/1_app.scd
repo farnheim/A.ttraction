@@ -12,11 +12,11 @@
     enableEffects:   true,    // 6_effects.scd
     enableMixer:     true,    // 2_mixer.scd
     enableMixerGui:  true,    // open mixer window after load
-    enableLfo:       false,   // 3_lfo.scd
-    enableModMatrix: true,    // 8_modmatrix.scd (cross-layer coupling; loads before mixer)
+    enableLfo:       false,   // 3_lfo.scd (MUTUALLY EXCLUSIVE with enableKoppelfeld)
+    enableKoppelfeld: true,   // 8_koppelfeld.scd (111 param nodes; loads before the mixer)
     enableControl:   false,   // 5_control.scd (MIDI)
     enableSequencer: true,    // 4_sequencer.scd
-    enableKonstruktion: true, // 9_konstruktion.scd (форма §E.6; ТРЕБУЕТ enableSequencer + enableModMatrix)
+    enableKonstruktion: true, // 9_konstruktion.scd (form §E.6; REQUIRES enableSequencer)
     enableVizGui:    false,    // 7_viz.scd (only useful with enableLfo/Sequencer)
     autostart:       false,    // start timeline automatically
     sortSynths:      true      // load synths/*.scd alphabetically
@@ -26,9 +26,15 @@
 // ===== LOGIC — boot, load, wire, start ===============================
 ~appDir = thisProcess.nowExecutingPath.dirname;
 
-// дефолтных 64 wire-буферов графу theta мало — слой падает МОЛЧА (тихий
-// "SynthDef not found"); действует только с БУТА. docs/architecture/app/README.md §5
-s.options.numWireBufs = 512;
+// the default 64 wire buffers are too few for the theta graph — the layer dies
+// SILENTLY (a quiet "SynthDef not found"); takes effect only FROM BOOT.
+// 384 = 2x the measured minimum (A-13, 2026-09-06: 176 fails loudly with
+// "exceeded number of interconnect buffers", 192 holds all five layers).
+// An ar control holds its wire buffer for the life of the graph, so a layer's
+// buffers add up instead of being reused. MUST match
+// .claude/Tools/render_layer.scd or the measurement render is silently quieter
+// than the live layer. docs/architecture/app/README.md §5
+s.options.numWireBufs = 384;
 
 // master cleanup (idempotent)
 ~appCleanup = { |verbose = true|
@@ -36,18 +42,21 @@ s.options.numWireBufs = 512;
     if(~ungCloseTuners.notNil) { ~ungCloseTuners.value };
     if(~vizClose.notNil)       { ~vizClose.value };
     if(~mixerWin.notNil)       { { ~mixerWin.close }.defer; ~mixerWin = nil };
+    // BEFORE Ndef.all.do(_.clear): a cleared proxy would leave the layer an
+    // `n_mapa` onto a dead bus, and the control would freeze on garbage
+    if(~kfClear.notNil) { ~kfClear.value };
     Tdef.all.do(_.clear);
     Pdef.all.do(_.clear);
     MIDIdef.all.do(_.free);
     Ndef.all.do(_.clear);
-    // клок секвенсора permanent (переживает Cmd-.) — гасить явно, иначе копятся
+    // the sequencer clock is permanent (survives Cmd-.) — kill it explicitly
     if(~seqClock.notNil) {
         ~seqClock.clear;
         ~seqClock.permanent_(false);
         ~seqClock.stop;
         ~seqClock = nil;
     };
-    // состояние акта Konstruktion; nil у ~seqDriveVols вернёт дефолт true
+    // Konstruktion act state; nil ~seqDriveVols falls back to the default true
     ~seqTimeline  = nil;
     ~seqDriveVols = nil;
     ~konActive    = false;
@@ -62,15 +71,15 @@ s.options.numWireBufs = 512;
 
 s.waitForBoot({
 
-    // 0a. сначала инфраструктура: слои регистрируют spec'и в ~ungSpecs, окно
-    // микшера (шаг 4) читает ~gridGenerate
+    // 0a. infrastructure first: layers register specs into ~ungSpecs, and the
+    // mixer window (step 4) reads ~gridGenerate
     (~appDir +/+ "0_lib.scd").load;
     (~appDir +/+ "0_grid.scd").load;
 
     // 0b. clean start
     ~appCleanup.value(false);
 
-    // 1. buses; посылов ДВА, не один — таблицы §K.1/§K.2 независимы по канону
+    // 1. buses; TWO sends, not one — §K.1/§K.2 tables are independent by canon
     ~busDry       = Bus.audio(s, 2);   // dry layer sum -> master
     ~busFxSendRev = Bus.audio(s, 2);   // layer sends -> \space_echo_rev (§K.1)
     ~busFxSendDly = Bus.audio(s, 2);   // layer sends -> \space_echo_dly (§K.2)
@@ -98,7 +107,7 @@ s.waitForBoot({
         "UNGRUND app — НЕ найдено ни одного синт-слоя для загрузки.".warn;
     };
 
-    // ~activeLayers — source of truth о загруженных слоях; ставится ДО микшера
+    // ~activeLayers — source of truth on loaded layers; set BEFORE the mixer
     ~activeLayers = ~synthFiles.collect { |p|
         PathName(p).fileNameWithoutExtension.asSymbol;
     };
@@ -117,16 +126,19 @@ s.waitForBoot({
         "UNGRUND app — эффекты ВЫКЛ (enableEffects=false).".postln;
     };
 
-    // 3b. modulation matrix — ДО микшера (окно строит 16 фейдеров по ~modKeys)
-    if(~cfg_app.enableModMatrix) {
-        (~appDir +/+ "8_modmatrix.scd").load;
+    // 3b. koppelfeld — AFTER the layers (needs ~ungSpecs), BEFORE the mixer (§10.1)
+    if(~cfg_app.enableKoppelfeld) {
+        (~appDir +/+ "8_koppelfeld.scd").load;
         s.sync;
     } {
-        // выключена: снять остатки прежнего включённого прогона, иначе окно
-        // покажет мёртвые фейдеры вместо заглушки
-        (~modActive ? []).do { |e| Ndef(e[\target]).unmap(e[\param]) };
-        ~modKeys = nil; ~modActive = nil;
-        "UNGRUND app — модуляционная матрица ВЫКЛ (enableModMatrix=false).".postln;
+        // off: tear down a previous enabled run through the module's OWN
+        // registry, else a layer starts with a dangling n_mapa
+        if(~kfClear.notNil) { ~kfClear.value };
+        // drop ALL module hooks: a surviving ~kfSelfTest from a previous run
+        // would throw at step 8b and abort the build before start
+        ~kfNodes = nil; ~kfRestSet = nil; ~kfRebind = nil; ~kfReport = nil;
+        ~kfSelfTest = nil; ~kfPeakHold = nil; ~kfClear = nil;
+        "UNGRUND app — koppelfeld ВЫКЛ (enableKoppelfeld=false).".postln;
     };
 
     // 4. mixer (routes layers + master)
@@ -140,19 +152,28 @@ s.waitForBoot({
         "UNGRUND app — микшер ВЫКЛ (enableMixer=false) — слои не маршрутизированы.".warn;
     };
 
-    // 4b. авто-пресет "default" — ПОСЛЕ микшера (его mixer-секция идёт через
-    // ~mixSet/~masterSet); загрузчик nil-safe по секциям
+    // 4b. auto-preset "default" — AFTER the mixer (its mixer section goes
+    // through ~mixSet/~masterSet); the loader is nil-safe per section
     if(~cfg_app.autoPreset) {
-        // .any с ==, не .includes: String-членство — identity-ловушка (контракт §6)
+        // .any with ==, not .includes: String membership is an identity trap (§6)
         if(~listPresets.value.any { |n| n == "default" }) {
             ~loadPreset.("default");
         };
     };
 
-    // 5. lfo (after mixer)
+    // 5. lfo (after mixer) — MUTUALLY EXCLUSIVE with koppelfeld: both call
+    // Ndef(target).map(param, …), and of two mappers on one control the last
+    // one wins, silently (spec §8.5)
     if(~cfg_app.enableLfo) {
-        (~appDir +/+ "3_lfo.scd").load;
-        s.sync;
+        if(~cfg_app.enableKoppelfeld) {
+            ("UNGRUND app — 3_lfo НЕ загружен: enableLfo и enableKoppelfeld "
+                ++ "взаимоисключающие (два маппера на один контрол). "
+                ++ "Свободные генераторы как источники изъяты — источник модуляции "
+                ++ "только значение параметра.").warn;
+        } {
+            (~appDir +/+ "3_lfo.scd").load;
+            s.sync;
+        };
     } {
         "UNGRUND app — LFO ВЫКЛ (enableLfo=false).".postln;
     };
@@ -173,15 +194,14 @@ s.waitForBoot({
         "UNGRUND app — секвенсор ВЫКЛ (enableSequencer=false).".postln;
     };
 
-    // 7b. konstruktion (форма §E.6): требует оба модуля-исполнителя
+    // 7b. konstruktion (form §E.6): needs the sequencer (reading 1 = timeline);
+    // reading 2 waits for the schaltung derivation (stage S6) and is not built
     if(~cfg_app.enableKonstruktion) {
-        if(~cfg_app.enableSequencer and: { ~cfg_app.enableModMatrix }) {
+        if(~cfg_app.enableSequencer) {
             (~appDir +/+ "9_konstruktion.scd").load;
             s.sync;
         } {
-            ("UNGRUND app — Konstruktion пропущен: нужны "
-                ++ if(~cfg_app.enableSequencer, "", "enableSequencer ")
-                ++ if(~cfg_app.enableModMatrix, "", "enableModMatrix")).warn;
+            "UNGRUND app — Konstruktion пропущен: нужен enableSequencer".warn;
         };
     } {
         "UNGRUND app — Konstruktion ВЫКЛ (enableKonstruktion=false).".postln;
@@ -195,6 +215,10 @@ s.waitForBoot({
     };
 
     "UNGRUND app — все слои загружены и смаршрутизированы.".postln;
+
+    // 8b. loud audibility check: too few wire buffers give a SILENT layer with
+    // no message, and comparing s.options is useless — it lies after boot
+    if(~kfSelfTest.notNil) { ~kfSelfTest.value };
 
     // 9. start timeline (only if sequencer enabled AND autostart)
     if(~cfg_app.enableSequencer and: { ~cfg_app.autostart } and: { ~seqStart.notNil }) {

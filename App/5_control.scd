@@ -42,7 +42,8 @@ MIDIdef.cc(\ung_cc, { |val, num, chan|
             \mixSendRev, { ~mixSet.(line.target, \sendRev, v) },
             \mixSendDly, { ~mixSet.(line.target, \sendDly, v) },
             \master,     { ~masterSet.(v) },
-            \layer,      { Ndef(line.target.asSymbol).set(line.param, v) },
+            // ~setParam, NOT Ndef.set: a direct n_set drops the koppelfeld node mapping
+            \layer,      { ~setParam.(line.target.asSymbol, line.param, v) },
             \lfoRate,    {
                 // ~lfoKeys exists only if 3_lfo is loaded — ignore silently
                 if(~lfoKeys.notNil) {

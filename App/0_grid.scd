@@ -1,38 +1,38 @@
-// App/0_grid.scd — UNGRUND · GRID: генератор сеток по канону
-// docs/architecture/structure-grid/README.md (правила 1–9). Чистая логика.
+// App/0_grid.scd — UNGRUND · GRID: grid generator per the canon in
+// docs/architecture/structure-grid/README.md (rules 1–9). Pure logic.
 // API: ~gridGenerate.(complexity, seed) -> ( text:, field:, nodes:, rows:,
-//      cols:, seed:, complexity:, counts:, graph: ) или nil при отказе;
-//      ~gridRender.(grid) -> строка поля.
-// Алфавит: structure-grid/char.md; несущие WHY реализации:
+//      cols:, seed:, complexity:, counts:, graph: ) or nil on refusal;
+//      ~gridRender.(grid) -> the field as a string.
+// Alphabet: structure-grid/char.md; load-bearing implementation WHYs:
 // docs/features/grid-modulation/reference.md, Implementation notes.
 
 (
 // ===== CONFIG — edit here ============================================
-// Между парой [a, b] интерполирует слайдер сложности 0..1; поле фиксировано
+// the complexity slider 0..1 interpolates between each pair [a, b]; field fixed
 // 16×16 (override 2026-07-18).
 ~cfg_grid = (
-    nodes:      [7, 20],        // число Ф при сложности 0 -> 1
-    // нижние границы НУЛЕВЫЕ (правило 9): c = 0 обязан дать один голый ствол
-    branchProb: [0.00, 0.90],   // вероятность ветвления Ф (правило 4)
-    mergeProb:  [0.00, 0.95],   // вероятность схождения двух ветвей в один Ф
-    maxOut:     3,              // максимум исходящих связей из узла
-    maxFront:   [1, 5],         // фронт шире 5 не разводится — молчаливый отсев сместил бы выборку
-    cols:       16,             // ширина поля  (канонный минимум, фикс.)
-    rows:       16,             // высота поля  (канонный минимум, фикс.)
-    // шаг рангов выводится из графа (rowGap = (rows-2) div (tiers-1), кламп) —
-    // фиксированный шаг отбраковывал стволовые графы (Implementation notes)
-    rowGapMin:  2,              // правило 3: между рангами хотя бы одна связь
-    rowGapMax:  8,              // потолок шага (длиннее связи не растягиваем)
-    colGap:     3,              // шаг узлов по колонкам   (>= 3: боковые выходы)
-    relax:      4,              // сглаживающих проходов раскладки (короче связи)
-    rasterTries: 24,            // попыток развести ОДИН граф; 16×16 требует запаса
-    graphTries: 120             // попыток вырастить новый граф до отказа
+    nodes:      [7, 20],        // glyph count at complexity 0 -> 1
+    // the lower bounds are ZERO (rule 9): c = 0 must give one bare trunk
+    branchProb: [0.00, 0.90],   // glyph branching probability (rule 4)
+    mergeProb:  [0.00, 0.95],   // probability two branches converge into one glyph
+    maxOut:     3,              // max outgoing couplings per node
+    maxFront:   [1, 5],         // a front wider than 5 will not route — silent culling would bias the draw
+    cols:       16,             // field width  (canonical minimum, fixed)
+    rows:       16,             // field height (canonical minimum, fixed)
+    // the tier step is derived from the graph (rowGap = (rows-2) div (tiers-1),
+    // clamped) — a fixed step rejected trunk graphs (Implementation notes)
+    rowGapMin:  2,              // rule 3: at least one coupling between tiers
+    rowGapMax:  8,              // step ceiling (couplings are not stretched further)
+    colGap:     3,              // node step across columns (>= 3: side exits)
+    relax:      4,              // layout smoothing passes (shorter couplings)
+    rasterTries: 24,            // attempts to route ONE graph; 16x16 needs headroom
+    graphTries: 120             // attempts to grow a new graph before refusing
 );
 
 
-// ===== LOGIC — граф, раскладка, растеризация =========================
-// алфавит канона (ред. 2026-07-18): переходные углы — знак возврата (пр. 7),
-// кресты — пересечения (пр. 8); ветвление/схождение только в Ф
+// ===== LOGIC — graph, layout, rasterization ==========================
+// the canon alphabet (rev. 2026-07-18): transition corners mark a back edge
+// (rule 7), crosses mark intersections (rule 8); branch/merge only at a glyph
 ~gridFillChars = ["░", "▒", "▓", "█", "▄"];
 ~gridLineChars = (
     weak: (
@@ -47,7 +47,7 @@
 
 ~gridLerp = { |pair, t| pair[0] + ((pair[1] - pair[0]) * t) };
 
-// (a..b) при a > b в SC идёт ВНИЗ и непуст — вырожденный сегмент рисовал бы лишнее
+// (a..b) with a > b counts DOWN in SC and is non-empty — a degenerate segment would draw
 ~gridSpan = { |a, b| if(a > b) { [] } { (a .. b) } };
 
 ~gridMedian = { |vals|
@@ -65,7 +65,7 @@
     }.join("\n");
 };
 
-// ----- граф по рангам (этап 1) + сила связи (этап 2) -----------------
+// ----- graph by tiers (stage 1) + coupling strength (stage 2) --------
 ~gridGrow = { |target, branchProb, mergeProb, maxFront|
     var nodes = List[];
     var edges = List[];
@@ -91,13 +91,14 @@
         var budget = target - nodes.size;
         var room = maxFront;
         var ods = Array.fill(frontier.size, 0);
-        // розыгрыш od случаен, слоты — фронтовым порядком: без крена влево
+        // od is drawn at random, slots go in front order: no leftward bias
         (0 .. frontier.size - 1).scramble.do { |ix|
             var n = frontier[ix];
-            // суммарная степень Ф <= 4: у ячейки ровно четыре соседа (правило 4)
+            // total glyph degree <= 4: a cell has exactly four neighbours (rule 4)
             var cap = ~cfg_grid.maxOut.min(4 - n.ins.size).min(budget).min(room);
-            // od = 0 при исчерпании — лист (пр. 5); корень не ветвится (пр. 2, 6);
-            // rrand(2, cap) при cap = 1 вернул бы 2 — ветвимся только при cap >= 2
+            // od = 0 on exhaustion is a leaf (rule 5); the root does not branch
+            // (rules 2, 6); rrand(2, cap) at cap = 1 would return 2 — branch only
+            // when cap >= 2
             var od = if(cap < 1) { 0 } {
                 if(n !== root and: { cap >= 2 } and: { branchProb.coin }) {
                     rrand(2, cap)
@@ -127,8 +128,8 @@
         tier = tier + 1;
     };
 
-    // правило 6: схождение приоритетнее ветвления; узлы идут в порядке рангов,
-    // поэтому сила входящей связи уже известна
+    // rule 6: merging takes priority over branching; nodes come in tier order, so
+    // the strength of the incoming coupling is already known
     nodes.do { |n|
         var strong = case
             { n.ins.size >= 2 } { true }
@@ -141,9 +142,9 @@
     ( nodes: nodes.asArray, edges: edges.asArray, tiers: tier + 1 )
 };
 
-// ----- раскладка (этап 3) --------------------------------------------
-// ряд ставится на СРЕДНЮЮ желаемую колонку (не в центр поля) и НЕ
-// пересортировывается: порядок рождения = плоское вложение графа
+// ----- layout (stage 3) ----------------------------------------------
+// a row is placed at the MEAN desired column (not the field centre) and is NOT
+// re-sorted: birth order is the planar embedding of the graph
 // (Implementation notes)
 ~gridPlaceTier = { |arr, desired, cols|
     var lo, hi, shift;
@@ -199,8 +200,8 @@
     byTier;
 };
 
-// ----- стороны Ф: каждая связь занимает ровно одного соседа; входящая
-// никогда не берёт \down, исходящая — \up (направление развития)
+// ----- glyph sides: each coupling takes exactly one neighbour; an incoming one
+// never takes \down, an outgoing one never takes \up (direction of growth)
 ~gridSides = { |graph|
     var ok = true;
     var pick = { |cands, used|
@@ -230,10 +231,11 @@
     ok;
 };
 
-// ----- растеризация (этап 4) + проверки (этап 5) ---------------------
-// неудачная разводка перебирается НА ТОМ ЖЕ графе (rasterTries) — отсев по
-// коллизии сместил бы выборку; возвраты best-effort по закону предка,
-// пересечения — вторым кругом полос в квоте правила 9 (поправка 2026-07-18)
+// ----- rasterization (stage 4) + checks (stage 5) --------------------
+// a failed routing is retried ON THE SAME graph (rasterTries) — culling on
+// collision would bias the draw; back edges are best-effort under the ancestor
+// law, intersections come on a second lane pass within the rule-9 quota
+// (amendment 2026-07-18)
 ~gridAttempt = { |graph, cols, rows, cx = 0.5|
     var field;
     var ok = true;
@@ -246,15 +248,15 @@
     var isV = { |s| (s == "│") or: { s == "║" } };
     var isH = { |s| (s == "─") or: { s == "═" } };
 
-    // шаг рангов под конкретный граф: стволовой сжимается, низкий растягивается
-    // и получает полосы — отсев по высоте не выбивает стволовые
+    // tier step fitted to the graph: a trunk compresses, a shallow one stretches
+    // and gets lanes — culling by height would not knock out trunks
     rowGap = if(graph[\tiers] > 1) {
         ((rows - 2) div: (graph[\tiers] - 1)).clip(~cfg_grid.rowGapMin, ~cfg_grid.rowGapMax)
     } { ~cfg_grid.rowGapMax };
 
     rowOf = { |n| 1 + (n.tier * rowGap) };
 
-    // недостижимо при канонном CONFIG — страхует ручную правку nodes/rows
+    // unreachable under the canonical CONFIG — insures a manual nodes/rows edit
     if(1 + ((graph[\tiers] - 1) * rowGap) > (rows - 1)) { ok = false };
 
     if(ok) { ~gridLayout.(graph, cols) };
@@ -264,7 +266,7 @@
         };
     };
 
-    // правило 3: расстояние Чебышёва между любыми двумя Ф >= 2
+    // rule 3: Chebyshev distance between any two glyphs >= 2
     if(ok) {
         graph[\nodes].do { |a, i|
             graph[\nodes].do { |b, j|
@@ -278,8 +280,8 @@
 
     if(ok) { ok = ~gridSides.(graph) };
 
-    // --- возвраты (правило 7): выбор ПОСЛЕ раскладки и сторон; предки —
-    // упорядоченными списками, не IdentitySet (детерминизм seed)
+    // --- back edges (rule 7): chosen AFTER layout and sides; ancestors are
+    // ordered lists, not an IdentitySet (seed determinism)
     rets = List[];
     if(ok) {
         graph[\nodes].do { |n|
@@ -314,7 +316,7 @@
                 ) {
                     rets.add((
                         src: s, dst: d,
-                        // возврат наследует силу ВХОДА src (правило 6)
+                        // a back edge inherits the INCOMING strength of src (rule 6)
                         strong: (s.ins.size >= 2)
                             or: { s.ins.size == 0 }
                             or: { s.ins[0].strong }
@@ -327,8 +329,8 @@
         };
     };
 
-    // оси возврата разносильны (правило 7); смешанный угол = знак смены
-    // направления чтения
+    // the two back-edge axes differ in strength (rule 7); a mixed corner marks a
+    // change of reading direction
     retCells = { |e, x|
         var src = e[\src], dst = e[\dst];
         var r1 = rowOf.(src), c1 = src.col;
@@ -347,7 +349,7 @@
         out;
     };
 
-    // колонка x задаёт стороны обоих концов; x == col исключён (Implementation notes)
+    // column x sets the sides of both ends; x == col is excluded (Implementation notes)
     retLanes = { |e|
         var src = e[\src], dst = e[\dst];
         var out = List[];
@@ -395,8 +397,9 @@
         out;
     };
 
-    // правило 8: пересечение — строго вертикаль сквозь горизонталь в квоте,
-    // крест по силам осей; allowCross=false — плоский закон (и весь c=0)
+    // rule 8: an intersection is strictly a vertical through a horizontal within
+    // quota, the cross follows the axis strengths; allowCross=false is the planar
+    // law (and the whole of c=0)
     place = { |list, allowCross = false|
         var need = List[];
         var fine = true;
@@ -437,7 +440,7 @@
         var fine = true;
         field = Array.fill(rows, { Array.fill(cols, " ") });
         crossCount = 0;
-        // routeLen валиден только из УСПЕШНОГО прохода — сброс обязателен
+        // routeLen is valid only from a SUCCESSFUL pass — the reset is mandatory
         graph[\edges].do { |e| e[\routeLen] = nil };
         rets.do { |e| e[\routeLen] = nil; e[\placed] = false };
         graph[\nodes].do { |n| n[\retSides] = List[] };
@@ -446,7 +449,7 @@
             if(fine) {
                 var lanes = ~gridSpan.(rowOf.(e.src) + 1, rowOf.(e.dst) - 1).scramble;
                 var done = false;
-                // без пересечения предпочтительно: второй круг — когда плоско нельзя
+                // planar is preferred: the second pass runs only when planar fails
                 [false, true].do { |allow|
                     lanes.do { |j|
                         var list;
@@ -460,7 +463,7 @@
                 if(done.not) { fine = false };
             };
         };
-        // возвраты best-effort ПОСЛЕ остова: неуложившийся отбрасывается
+        // back edges are best-effort AFTER the skeleton: one that will not fit is dropped
         if(fine) {
             rets.do { |e|
                 var lanes = retLanes.(e);
@@ -507,7 +510,7 @@
             retOutOf[e[\src]] = (retOutOf[e[\src]] ? 0) + 1;
             retInOf[e[\dst]]  = (retInOf[e[\dst]] ? 0) + 1;
         };
-        // счётчики ПО ГОТОВОМУ ПОЛЮ (правило 9); String-членство через == (контракт §6)
+        // counters read the FINISHED FIELD (rule 9); String membership via == (§6)
         field.do { |row| row.do { |s|
             if(retCorner.any { |x| x == s }) { transitions = transitions + 1 };
             if(crossSyms.any { |x| x == s }) { crosses = crosses + 1 };
@@ -524,12 +527,12 @@
                 nodes: graph[\nodes].collect { |n, i|
                     (
                         i: i, tier: n.tier, ch: n.ch,
-                        // степени двух родов: остов (indegS/outdegS) — Чтению 1,
-                        // полный граф — Чтению 2
+                        // two kinds of degree: the skeleton (indegS/outdegS) for
+                        // reading 1, the full graph for reading 2
                         indegS: n.ins.size, outdegS: n.outs.size,
                         indeg: n.ins.size + (retInOf[n] ? 0),
                         outdeg: n.outs.size + (retOutOf[n] ? 0),
-                        // сила входа ПО ОСТОВУ (правило 6)
+                        // incoming strength ALONG THE SKELETON (rule 6)
                         strongIn: (n.ins.size == 0)
                             or: { n.ins.size >= 2 }
                             or: { n.ins[0].strong }
@@ -556,8 +559,8 @@
     var rows = ~cfg_grid[\rows];
     var mf = ~gridLerp.(~cfg_grid[\maxFront], t).round.asInteger.max(1);
     var got = nil, n = 0;
-    // seed ДО цикла ретраев: один детерминированный поток => (seed, complexity)
-    // воспроизводит рисунок побитово (dsp-spec Konstruktion)
+    // seed BEFORE the retry loop: one deterministic stream => (seed, complexity)
+    // reproduces the drawing bit for bit (Konstruktion dsp-spec)
     seed = seed ?? { Date.seed };
     thisThread.randSeed = seed;
     while { got.isNil and: { n < ~cfg_grid.graphTries } } {

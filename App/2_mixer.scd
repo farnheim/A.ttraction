@@ -1,13 +1,13 @@
-// App/2_mixer.scd — UNGRUND · MIXER: vol на слой + два fx-посыла (§K.1/§K.2),
-// по агрегатору на шину, master (LeakDC + Limiter), solo/mute, рекордер, окно Desk.
-// Маршрутизирует только ~activeLayers. Сигнал-флоу: docs/architecture/app/README.md.
+// App/2_mixer.scd — UNGRUND · MIXER: per-layer vol + two fx sends (§K.1/§K.2),
+// one aggregator per bus, master (LeakDC + Limiter), solo/mute, recorder, Desk.
+// Routes ~activeLayers only. Signal flow: docs/architecture/app/README.md.
 
 
 // ===== CONFIG — edit here ============================================
 (
-// vol -> master; sendRev/sendDly -> таблицы §K.1/§K.2 (независимы по канону).
-// `? ()`: живое сведение — СОСТОЯНИЕ, переживает hot-reload; таблица лишь
-// сеет свежую сессию (авто-пресет затем перекрывает её)
+// vol -> master; sendRev/sendDly -> §K.1/§K.2 tables (independent by canon).
+// `? ()`: the live mix is STATE and survives a hot reload; the table only seeds
+// a fresh session (the auto-preset then overrides it)
 ~cfg_mixer = ~cfg_mixer ? (
     master:  0.9,
 
@@ -17,7 +17,7 @@
         delta:   ( vol: 0.80, sendRev: 0.45, sendDly: 0.00 ),   // §K.2: binde is not in the delay table
         epsilon: ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.1: self-diffuse — low send; §K.2: no delay
         zeta:    ( vol: 0.75, sendRev: 0.15, sendDly: 0.00 ),   // §K.2: kratzer is not in the delay table
-        theta:   ( vol: 0.80, sendRev: 0.16, sendDly: 0.00 )    // §K.2 ноль — ЗАПРЕТ, не вкус: эхо восполняло бы то, что истощает закон класса
+        theta:   ( vol: 0.80, sendRev: 0.16, sendDly: 0.00 )    // §K.2 zero is a BAN, not taste: echo would refill what the class law exhausts
     )
 );
 
@@ -38,8 +38,8 @@
     };
 };
 
-// роутер слоя: только dry -> ~busDry (посылы собирает агрегатор ниже — у шины
-// ровно ОДИН писатель); громкости у исполнителя (override 2026-07-18)
+// layer router: dry -> ~busDry only (the aggregator below collects the sends —
+// exactly ONE writer per bus); volumes belong to the performer (2026-07-18)
 ~mixerLayers.do { |layer|
     var routerKey = ("mix_" ++ layer).asSymbol;
     var lv = ~cfg_mixer.levels[layer];
@@ -52,9 +52,9 @@
     Ndef(routerKey).play(out: ~busDry.index, numChannels: 2);
 };
 
-// агрегаторы посылов: ПО ОДНОМУ НА ШИНУ (таблицы §K.1/§K.2 независимы), каждый
-// — единственный писатель своей шины (ReplaceOut: без накопления); имена
-// параметров send_<layer> одинаковы — различает их Ndef
+// send aggregators: ONE PER BUS (the §K.1/§K.2 tables are independent), each the
+// sole writer of its bus (ReplaceOut: no accumulation); the send_<layer> param
+// names coincide — the Ndef tells them apart
 ~mixerSendMix = {
     Mix(~mixerLayers.collect { |layer|
         var amt = NamedControl.kr(("send_" ++ layer).asSymbol, 0);
@@ -75,13 +75,13 @@ Ndef(\fxsendDly, { ReplaceOut.ar(~busFxSendDly.index, ~mixerSendMix.value) });
         );
     };
     Ndef(aggKey).fadeTime = 1;
-    // БЕЗ .play: тело уже пишет через ReplaceOut, монитор стал бы ВТОРЫМ писателем
+    // NO .play: the body already writes via ReplaceOut, a monitor would be a SECOND writer
 };
 
 // master: (dry + fx return), LeakDC, Limiter
 Ndef(\master, { |amp = 0.9|
     var dry, fx, sig;
-    // InFeedback, не In: читает шины независимо от порядка узлов
+    // InFeedback, not In: reads the buses whatever the node order
     dry = InFeedback.ar(~busDry.index, 2);
     fx  = InFeedback.ar(~busFxReturn.index, 2);
     sig = dry + fx;
@@ -104,8 +104,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
     var agg = ~mixerSendAgg[which];
     if(~cfg_mixer.levels[layer].isNil) { ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy };
     ~cfg_mixer.levels[layer][which] = value;
-    // у muted/solo-скрытого слоя двигается только хранимый уровень — unmute
-    // вернёт значение, которое сейчас показывает слайдер
+    // for a muted / solo-hidden layer only the stored level moves — unmute
+    // restores the value the slider shows right now
     if(~mixLayerAudible.(layer)) {
         if(agg.notNil) {
             Ndef(agg).set(("send_" ++ layer).asSymbol, value);
@@ -120,9 +120,9 @@ Ndef(\master).play(out: 0, numChannels: 2);
     if(~mixerGuiSync.notNil) { ~mixerGuiSync.(\master, \amp, value) };
 };
 
-// mute + solo сходятся в ОДНОЙ apply-функции; уровни читаются из ~cfg_mixer
-// (нулями не перетираются) — снятие mute/solo возвращает исходный микс
-~mixMuted = ~mixMuted ? ();   // layer -> true; переживает reopen/reload
+// mute and solo meet in ONE apply function; levels are read from ~cfg_mixer
+// (never overwritten with zeros) — clearing mute/solo restores the original mix
+~mixMuted = ~mixMuted ? ();   // layer -> true; survives reopen/reload
 ~mixLayerAudible = { |layer|
     (~mixMuted[layer] != true) and: { ~mixSoloCur.isNil or: { ~mixSoloCur == layer } }
 };
@@ -155,12 +155,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
     if(~mixerRefreshMute.notNil) { ~mixerRefreshMute.value };
 };
 
-// восстановить mute/solo на свежесобранных роутерах/агрегаторах
+// restore mute/solo on freshly built routers/aggregators
 ~mixApplyLevels.value;
 
-// recorder пишет шину 0 с ХВОСТА root-группы (после Ndef(\master)) — в файл
-// попадает ровно то, что слышно
-~mixRecOn   = ~mixRecOn ? false;   // переживает reload
+// the recorder writes bus 0 from the TAIL of the root group (after
+// Ndef(\master)) — the file gets exactly what is heard
+~mixRecOn   = ~mixRecOn ? false;   // survives reload
 ~mixRecPath = ~mixRecPath;
 
 ~mixRecToggle = {
@@ -188,7 +188,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 };
 
 
-// ===== GUI — окно Desk (монохром; макет docs/architecture/app/ui/Main.dc.html) =====
+// ===== GUI — Desk window (monochrome; layout docs/architecture/app/ui/Main.dc.html) =====
 // widget registries (idempotent on file reload)
 ~mixerEz      = ();    // layer -> ( \vol:, \sendRev:, \sendDly: ruler ); \master -> ruler
 ~mixerFx      = ();    // space-echo strip: ( dlyMode:, revMode: PopUpMenu; bass:, treble: ruler; dlyGlyph:, revGlyph: UserView )
@@ -204,18 +204,18 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
 
 // structure-grid panel slots (0_grid.scd may be absent — panel is nil-safe)
-~mixerGridTxt    = nil;   // TextView (поле)
-~mixerGridStatus = nil;   // StaticText (число Ф / размер поля / отказ)
-~mixerGridEz     = nil;   // ruler (сложность)
+~mixerGridTxt    = nil;   // TextView (the field)
+~mixerGridStatus = nil;   // StaticText (glyph count / field size / refusal)
+~mixerGridEz     = nil;   // ruler (complexity)
 ~gridComplexity  = ~gridComplexity ? 0.5;   // survives reopen / missing 0_grid
 
 // Konstruktion slots (9_konstruktion.scd may be absent — nil-safe like 0_grid)
-~mixerKonTtier   = nil;   // NumberBox (T_tier, партитурный — читается только актом)
+~mixerKonTtier   = nil;   // NumberBox (score T_tier — read by the act only)
 ~mixerKonBtns    = ();    // \start / \stop / \score Buttons
-~gridLastText    = ~gridLastText;   // поле — партитура: переживает переоткрытие окна
+~gridLastText    = ~gridLastText;   // the field is score: survives a window reopen
 
-// enable кнопок пьесы от ~konActive; гейтится только старт/стоп — «score»
-// всегда активна и сама отчитывается статусом «нет акта»; random — наоборот
+// piece buttons enable off ~konActive; only start/stop are gated — "score" is
+// always live and reports "no act" itself; random is the other way round
 ~mixerKonSync = {
     {
         var on = (~konActive == true);
@@ -271,8 +271,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerKonBtns    = ();
 };
 
-// --- глифы --------------------------------------------------------------
-// space echo: три головки ленты (маски режима из 6_effects) + пружина при ревере
+// --- glyphs -------------------------------------------------------------
+// space echo: three tape heads (mode masks from 6_effects) + a spring on reverb
 ~uiDrawEcho = { |u, mode|
     var h1 = [1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0], h2 = [0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0];
     var h3 = [0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0], rv = [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
@@ -310,8 +310,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
     Pen.fillStroke;
 };
 
-// координаты подобраны вручную под асимметрию рисунка; новый звуковой класс
-// НЕ появится в графе, пока не получит место в обеих таблицах
+// coordinates hand-fitted to the asymmetry of the drawing; a new sound class
+// will NOT appear in the graph until it has a place in both tables
 ~mixerGraphPos = ( theta: 270@62, delta: 462@66, alpha: 100@212, zeta: 462@214, epsilon: 270@302 );
 ~mixerGraphStacks = (
     theta:   ( kind: \row, x: 312, y: 104, step: 44 ),
@@ -323,13 +323,14 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerDrawGraph = { |u|
     var keys = ~modKeys ? [], per = (), font = ~uiMono.(9), gfont = ~uiMono.(28), nfont = ~uiMono.(10);
     var kon = ~konCurrent;
-    // источник линии — слой ВЕДУЩЕЙ связи (~modKeys[src]), не её собственная цель
+    // a line's source is the layer of its LEADING coupling (~modKeys[src]), not its own target
     var srcLayer = { |e| (keys[e[\src] ? -1] !? { |k| k[\target] }) ? e[\target] };
     var posOf = { |layer| if(~mixerLayers.includes(layer)) { ~mixerGraphPos[layer] } };
     var srcPos = { |e| posOf.(srcLayer.(e)) };
     var short = { |i| var s = (~modShort ? [])[i].asString; s.copyToEnd((s.indexOf($.) ? -1) + 1) };
-    // связь рисуется, только если ОБА её конца — загруженные слои с местом на
-    // поле: иначе линия сходилась бы в пустоту (у незагруженного слоя нет знака)
+    // a coupling is drawn only if BOTH ends are loaded layers with a place on
+    // the field: else the line would converge into nothing (an unloaded layer
+    // has no glyph)
     keys.do { |e|
         if(posOf.(e[\target]).notNil and: { srcPos.(e).notNil }) {
             per[e[\target]] = (per[e[\target]] ? []).add(e);
@@ -446,7 +447,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~uiCap.(win, Rect(896, 32, 56, 14), "master");
     ~mixerEz[\master] = ~uiRulerRow.(win, 954, 30, 0, 150, "",
         ControlSpec(0, 1, \lin, 0, ~cfg_mixer.master), ~cfg_mixer.master, { |v| ~masterSet.(v) }, fmt2);
-    // состояние кнопки в ~mixRecOn: корректно после close/reopen во время записи
+    // button state lives in ~mixRecOn: correct after a close/reopen while recording
     recBtn = ~uiBtn.(win, Rect(1180, 28, 70, 26), ["● rec", "■ rec"],
         { ~mixRecToggle.value }, ~mixRecOn);
     ~mixerRecBtn = recBtn;
@@ -461,7 +462,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     graph.drawFunc_({ |u| ~mixerDrawGraph.(u) });
     ~mixerGraph = graph;
 
-    // --- space echo strip: mode per instance, tone shared; GUI едет ПОВЕРХ ~cfg_effects ---
+    // --- space echo strip: mode per instance, tone shared; GUI rides ON TOP of ~cfg_effects ---
     mkGlyph = { |x, y, modeFn|
         var uv = UserView(win, Rect(x, y, 76, 24)).background_(~uiPal.paper);
         uv.drawFunc_({ |u| ~uiDrawEcho.(u, modeFn.value) });
@@ -472,7 +473,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         ~uiCap.(win, Rect(600, 96, 380, 14), "space echo");
         ~uiText.(win, Rect(600, 118, 40, 20), "echo", 10.5);
         dlyGl = mkGlyph.(642, 116, { ~cfg_effects.dly_mode });
-        // каждая ручка пишет и ~cfg_effects: его читают ~savePreset и пересборка окна
+        // every knob also writes ~cfg_effects: ~savePreset and a window rebuild read it
         dlyPop = ~uiPopup.(win, Rect(726, 116, 190, 24), fxModeItems,
             (~cfg_effects.dly_mode - 1).clip(0, 11), { |idx|
                 Ndef(\space_echo_dly).set(\mode, idx + 1);
@@ -487,7 +488,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
                 ~cfg_effects.rev_mode = idx + 1;
                 revGl.refresh;
             });
-        // тон ставит ОБА экземпляра; инициализация от rev-значений
+        // tone sets BOTH instances; initialized from the rev values
         bassEz = ~uiRulerRow.(win, 600, 182, 42, 190, "bass",
             ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_bass), ~cfg_effects.rev_bass, { |v|
                 Ndef(\space_echo_rev).set(\bass, v);
@@ -579,46 +580,46 @@ Ndef(\master).play(out: 0, numChannels: 2);
             r = ~uiRulerRow.(win, mx + 240, my, 0, 120, "", ControlSpec(0, 1, \lin, 0, e[\depth]),
                 e[\depth], { |v| ~modDepthSet.(i, v) }, fmt3);
             r[\label] = lbl; r[\glyph] = gl;
-            // связь на незагруженном слое (subset ~cfg_app.layers) — линейка видна, но мертва
+            // coupling on an unloaded layer (subset ~cfg_app.layers) — ruler visible but dead
             if(e[\enabled].not) { ~uiRulerEnable.(r, false) };
             ~mixerModEz[i] = r;
         };
     } {
         ~uiText.(win, Rect(28, modY + 24, 900, 18),
-            "mod matrix off — set ~cfg_app.enableModMatrix = true and re-run 1_app.scd", 11, ~uiPal.ink2);
+            "mod matrix off — вытеснена koppelfeld; патч-стрип приходит на S6/S7", 11, ~uiPal.ink2);
     };
 
-    // --- structure grid (right column); nil-safe без 0_grid ---
+    // --- structure grid (right column); nil-safe without 0_grid ---
     ~uiCap.(win, Rect(rx, 76, rw, 14), "structure grid 16×16");
-    // растр создаётся ДО TextView: порядок создания = порядок наложения
+    // the raster is created BEFORE the TextView: creation order = stacking order
     UserView(win, Rect(rx, 92, rw, 332)).background_(~uiPal.paper2)
         .drawFunc_({ |u| ~uiDrawDither.(u, Rect(74, 8, 230, 316)) });
-    // TextView подогнан под 16×16 Menlo 17; QTextView не отключает перенос —
-    // ширина ОБЯЗАНА вмещать 16 символов + скроллбар, иначе рисунок рассыпается
+    // the TextView is fitted to 16x16 Menlo 17; QTextView cannot disable wrapping
+    // — the width MUST hold 16 chars plus the scrollbar or the drawing falls apart
     gridTv = TextView(win, Rect(rx + 84, 100, 210, 316))
         .font_(Font("Menlo", 17)).editable_(false)
         .background_(~uiPal.paper).stringColor_(~uiPal.ink);
-    // Qt красит плоский текст палитрой (baseText), не stringColor_ — после
-    // каждого string_ цвет добивается по диапазону
+    // Qt colours flat text through the palette (baseText), not stringColor_ — the
+    // colour is reapplied over the range after every string_
     gridTv.palette_(gridTv.palette.baseText_(~uiPal.ink));
-    // поле — партитура акта: переживает переоткрытие окна
+    // the field is the act's score: survives a window reopen
     if(~gridLastText.notNil) {
         gridTv.string_(~gridLastText);
         gridTv.setStringColor(~uiPal.ink, 0, ~gridLastText.size);
     };
     ~mixerGridTxt = gridTv;
 
-    // линейка только пишет значение — структуру строит кнопка
+    // the ruler only stores the value — the button builds the structure
     ~mixerGridEz = ~uiRulerRow.(win, rx, 436, 84, 200, "complexity",
         ControlSpec(0, 1, \lin, 0, ~gridComplexity ? 0.5), ~gridComplexity ? 0.5,
         { |v| ~gridComplexity = v }, fmt2);
 
-    // статус: длинный статус акта и путь партитуры, перенос сам
+    // status: long act status and score path, wraps on its own
     gridStatus = ~uiText.(win, Rect(rx, 540, rw, 56), "", 9.5, ~uiPal.ink2);
     ~mixerGridStatus = gridStatus;
 
     gridBtn = ~uiBtn.(win, Rect(rx, 468, 90, 26), "generate", {
-            // с Konstruktion кнопка = АКТ; без него — прежний чистый рисунок
+            // with Konstruktion the button is the ACT; without it, the plain drawing
             if(~konGenerate.notNil) {
                 ~konGenerate.(~gridComplexity ? 0.5, nil, ~konTtier);
             } {
@@ -634,8 +635,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
             };
         }, true);
 
-    // Konstruktion: T_tier (читается только актом), start/stop, score;
-    // всё nil-safe без 9_konstruktion.scd
+    // Konstruktion: T_tier (read by the act only), start/stop, score;
+    // all nil-safe without 9_konstruktion.scd
     konRange = (~cfg_kon !? { ~cfg_kon[\tTierRange] }) ? [15, 60];
     ~uiText.(win, Rect(rx + 100, 471, 12, 20), "T", 10.5, ~uiPal.ink2);
     konTtierBox = NumberBox(win, Rect(rx + 114, 468, 48, 26))
@@ -673,7 +674,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~uiCap.(win, Rect(rx, 614, rw, 14), "tiers");
     tiers = UserView(win, Rect(rx, 632, rw, 130)).background_(~uiPal.paper);
     tiers.drawFunc_({ |u| ~mixerDrawTiers.(u) });
-    // низкий frameRate: playhead-подсветка блока без 60 fps на всё окно
+    // low frameRate: block playhead highlight without 60 fps over the whole window
     tiers.frameRate_(2).animate_(true);
     ~mixerTiers = tiers;
 
@@ -683,7 +684,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         r !? { ~uiRulerSet.(r, v) };
     };
 
-    // depth-синк <- ~modDepthSet (линейка не зовёт action — без фидбек-петли)
+    // depth sync <- ~modDepthSet (the ruler does not call action — no feedback loop)
     ~modmatrixGuiSync = { |i, v|
         ~mixerModEz[i] !? { |r|
             ~uiRulerSet.(r, v);
@@ -691,7 +692,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         };
     };
 
-    // relabel <- ~konGenerate: подписи src→dst меняются без пересборки окна
+    // relabel <- ~konGenerate: src->dst captions change without a window rebuild
     ~modmatrixGuiRelabel = { |i, label|
         {
             ~mixerModEz[i] !? { |r| r[\label].string_(label); r[\glyph].refresh };
