@@ -135,11 +135,16 @@ s.waitForBoot({
         // registry, else a layer starts with a dangling n_mapa
         if(~kfClear.notNil) { ~kfClear.value };
         // drop ALL module hooks: a surviving ~kfSelfTest from a previous run
-        // would throw at step 8b and abort the build before start
+        // would throw at step 8b and abort the build before start, a surviving
+        // ~kfGraphFacts would make 9_konstruktion believe the module is loaded,
+        // and a surviving ~kfRandomize would derive against ~kfNodes = nil
         ~kfNodes = nil; ~kfRestSet = nil; ~kfRebind = nil; ~kfReport = nil;
         ~kfSelfTest = nil; ~kfPeakHold = nil; ~kfClear = nil;
         ~kfMeterOn = nil; ~kfLogStart = nil; ~kfLogStop = nil; ~kfLive = [];
         ~kfMeterOnP = nil; ~kfMeterFree = nil; ~kfLogCols = [];
+        ~kfGraphFacts = nil; ~kfRandomize = nil; ~kfApply = nil; ~kfCut = nil;
+        ~kfArm = nil; ~kfDisarm = nil; ~kfPoke = nil;
+        ~kfCables = []; ~kfSchaltung = nil;
         "UNGRUND app — koppelfeld ВЫКЛ (enableKoppelfeld=false).".postln;
     };
 

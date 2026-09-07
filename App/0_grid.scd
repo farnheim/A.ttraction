@@ -34,6 +34,22 @@
 // the canon alphabet (rev. 2026-07-18): transition corners mark a back edge
 // (rule 7), crosses mark intersections (rule 8); branch/merge only at a glyph
 ~gridFillChars = ["░", "▒", "▓", "█", "▄"];
+// the glyph IS the layer identity of a node: both readings of the act are
+// spelled in it (levels in reading 1, census in reading 2), and the two
+// readers live in modules that switch on and off independently — a copy of
+// this table in either of them would drift the moment a class leaves §C
+~gridLayerOf = Dictionary.newFrom([
+    "█", \alpha, "▄", \delta, "▓", \epsilon, "░", \zeta, "▒", \theta
+]);
+// the ORDER of the five classes is an INDEX BASIS, not a list: the census 5×5
+// of 8_koppelfeld and the line derivation of 9_konstruktion number the layers
+// with it, and a private copy in either of them would silently transpose the
+// table the day a class leaves §C. Both modules load after 0_grid
+~gridClassOrder = [\alpha, \delta, \epsilon, \zeta, \theta];
+// the GUI's layer glyph is the same alphabet read backwards — derived, never
+// typed a second time (0_lib loads before 0_grid, so it lives here)
+~uiPhi = ();
+~gridLayerOf.keysValuesDo { |ch, l| ~uiPhi[l] = ch };
 ~gridLineChars = (
     weak: (
         vert: "│", horiz: "─",
@@ -558,15 +574,22 @@
     var cols = ~cfg_grid[\cols];
     var rows = ~cfg_grid[\rows];
     var mf = ~gridLerp.(~cfg_grid[\maxFront], t).round.asInteger.max(1);
-    var got = nil, n = 0;
+    var got = nil, n = 0, wasRand;
     // seed BEFORE the retry loop: one deterministic stream => (seed, complexity)
     // reproduces the drawing bit for bit (Konstruktion dsp-spec)
     seed = seed ?? { Date.seed };
+    // …and the language stream is BORROWED, not taken: ~kfRandomize calls the
+    // generator up to `patchSeedTries` times per patch, and a thread left
+    // reseeded would make every later ~rndGroup / preset scramble a function of
+    // the last grid seed
+    wasRand = thisThread.randData;
     thisThread.randSeed = seed;
-    while { got.isNil and: { n < ~cfg_grid.graphTries } } {
-        n = n + 1;
-        got = ~gridAttempt.(~gridGrow.(target, bp, mp, mf), cols, rows, t);
-    };
+    protect {
+        while { got.isNil and: { n < ~cfg_grid.graphTries } } {
+            n = n + 1;
+            got = ~gridAttempt.(~gridGrow.(target, bp, mp, mf), cols, rows, t);
+        };
+    } { thisThread.randData = wasRand };
     got !? { got[\text] = ~gridRender.(got); got[\seed] = seed; got[\complexity] = t; got };
 };
 

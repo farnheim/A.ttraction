@@ -1,10 +1,11 @@
 // App/9_konstruktion.scd — UNGRUND · KONSTRUKTION (form §E.6): one grid
 // generation act is read twice — macroform (4_sequencer timeline) and
 // modulation topology. Pure sclang, no server.
-// BRANCH experiment/patchbay: the reading-2 executor (8_modmatrix, 16 lines) is
-// deleted; its replacement — the `schaltung` derivation in koppelfeld — arrives
-// at stage S6. While ~cfg_modmtx is absent reading 2 yields an empty line list;
-// reading 1 (timeline, levels, finish) works as before.
+// BRANCH experiment/patchbay: reading 2 is no longer 16 fixed matrix lines but
+// the `schaltung` of reference §6 — the SAME eight steps the patcher walks,
+// entered through ~kfDeriveScheme so the law has one implementation. Without
+// 8_koppelfeld reading 2 is skipped with its reason; reading 1 (timeline,
+// levels, finish) stands on the drawing alone and works as before.
 // Laws: docs/features/grid-modulation/reference.md; spec: dsp-spec.md there.
 // API: ~konGenerate.(complexity, seed, tTier) · ~konDerive.(grid, tTier) ·
 //      ~konSaveScore.
@@ -15,77 +16,36 @@
     tTier:        30,              // default score T_tier, s
     tTierRange:   [15, 60],        // T_tier field bounds in the mixer panel
     weakLevel:    0.5,             // weak coupling: x0.5 = -6 dB (decision 3)
-    rateScale:    12,              // rate-law multiplier (user override: pulse, not drift)
-    rateClip:     [0.05, 2.0],     // Hz, derivation step 3 (widened for rateScale)
-    fmBase:       0.3, fmSpan: 0.9,        // fm = fmBase + fmSpan·strongShare
-    depthGain:    0.22, depthFloor: 0.06,  // depth = clip(depthGain·cAB, floor, max)
-    depthMax:     0.5,             // shared ceiling, theta included (user override §C.8)
-    baseRange:    [0.15, 0.85],    // normalized range of destination base values
     scoreDir:     "docs/architecture/structure-grid"  // relative to the project root
 );
 
 
 // ===== LOGIC — derivation, act, score ================================
-~konLayerOrder = [\alpha, \delta, \epsilon, \zeta, \theta];
-
-// String keys, not Char (the glyphs are multibyte); Dictionary compares by value
-~konLayerOf = Dictionary.newFrom([
-    "█", \alpha, "▄", \delta, "▓", \epsilon, "░", \zeta, "▒", \theta
-]);
-
-~konLineFamily = [\P, \F, \S, \F, \P, \F, \S, \F, \S, \P, \S, \P, \P, \F, \P, \P];
-~konFamilyLine = (
-    P: ( alpha: 0, delta: 4, epsilon: 9, zeta: 11, theta: 14 ),
-    S: ( alpha: 2, delta: 6, epsilon: 8, zeta: 10 ),
-    F: ( alpha: 1, delta: 5, epsilon: 7, theta: 13 )
-);
+// the index basis of both readings lives with the alphabet in 0_grid — the
+// census columns and this list must be the SAME numbering (§17 D82)
+~konLayerOrder = ~gridClassOrder;
 
 // pure function of the graph: only the published features of the 0_grid export
-// — there is no third reading (reference, amendment II)
+// — there is no third reading (reference, amendment II). Both laws it reads live
+// in 8_koppelfeld: the census / drawn loops (~kfGraphFacts) and the eight steps
+// of the derivation (~kfDeriveScheme). The act substitutes its own drawing and
+// its own T_tier for the patcher's seed, and nothing else.
 ~konDerive = { |grid, tTier|
-    var g = grid[\graph];
-    var nodes = g[\nodes], edges = g[\edges];
-    var tiers = g[\tiers], rowGap = g[\rowGap];
-    var tauCell = tTier / rowGap;
-    var layerIdx = ();
-    var layerOfNode, census, loopPair, levels, timeline, lines;
+    var nodes = grid[\graph][\nodes];
+    var tiers = grid[\graph][\tiers];
+    var tT = tTier ? ~cfg_kon.tTier;
+    // tau_cell is the score's own quantity (T_tier per drawn row), not part of the
+    // census law: reading 1 keeps it with module 8 off
+    var tauCell = tT / max(1, grid[\graph][\rowGap]);
+    var census, loopPair, edgeTab, schaltung;
+    var levels, timeline;
 
-    ~konLayerOrder.do { |l, k| layerIdx[l] = k };
-    layerOfNode = { |n| ~konLayerOf[n[\ch]] };
-
-    // census over the FULL graph, BY EDGE DIRECTION (amendment II)
-    census = Array.fill(5, { Array.fill(5, 0) });
-    edges.do { |e|
-        var a = layerIdx[layerOfNode.(nodes[e[\src]])];
-        var b = layerIdx[layerOfNode.(nodes[e[\dst]])];
-        census[a][b] = census[a][b] + 1;
-    };
-
-    // a drawn loop A<->B: both directions non-zero AND at least one edge of the
-    // pair is a back edge (amendment II)
-    loopPair = Array.fill(5, { Array.fill(5, false) });
-    (0..4).do { |a|
-        (0..4).do { |b|
-            if((a < b)
-                and: { census[a][b] > 0 } and: { census[b][a] > 0 }
-                and: { edges.any { |e|
-                    var ea = layerIdx[layerOfNode.(nodes[e[\src]])];
-                    var eb = layerIdx[layerOfNode.(nodes[e[\dst]])];
-                    (e[\ret] == true) and: {
-                        ((ea == a) and: { eb == b }) or: { (ea == b) and: { eb == a } }
-                    };
-                } }
-            ) {
-                loopPair[a][b] = true;
-                loopPair[b][a] = true;
-            };
-        };
-    };
-
-    // reading 1 — macroform: a layer's level at a tier = max over its nodes
+    // reading 1 — macroform: a layer's level at a tier = max over its nodes.
+    // It stands on the drawing alone (glyph, tier, strongIn) and therefore
+    // survives with module 8 off; only reading 2 needs the census law living there
     levels = Array.fill(tiers, { () });
     nodes.do { |n|
-        var l = layerOfNode.(n);
+        var l = ~gridLayerOf[n[\ch]];
         var lv = if(n[\strongIn]) { 1.0 } { ~cfg_kon.weakLevel };
         levels[n[\tier]][l] = (levels[n[\tier]][l] ? 0).max(lv);
     };
@@ -98,97 +58,44 @@
             if(cur.notNil and: { prev != cur }) { vols.add([l, cur]) };
             if(cur.isNil and: { prev.notNil }) { gone.add(l) };
         };
-        timeline.add(( t: r * tTier, vols: vols.asArray, gone: gone.asArray ));
+        timeline.add(( t: r * tT, vols: vols.asArray, gone: gone.asArray ));
     };
     timeline.add((
-        t: tiers * tTier,
+        t: tiers * tT,
         gone: ~konLayerOrder.select { |l| levels[tiers - 1][l].notNil },
         finish: true
     ));
 
-    // reading 2 — 16 lines: the reference's 7 steps (rate x rateScale is a user override)
-    lines = (~cfg_modmtx !? { |c| c.lines } ? []).collect { |cfgLine, i|
-        var b = cfgLine[\target].asSymbol;
-        var param = cfgLine[\param].asSymbol;
-        var family = ~konLineFamily[i];
-        var bIdx = layerIdx[b];
-        var j = 0;
-        var cands, sorted, aIdx, aLayer, src, ab, ln, isLoop;
-        var meanRoute, rate, strongShare, fm, cAB, depth, shape;
-        var colSum, baseLo, baseHi;
-        ~cfg_modmtx.lines.do { |lx, k|
-            if((k < i) and: { lx[\target].asSymbol == b }) { j = j + 1 };
-        };
-        // step 1: the diagonal is excluded from source selection
-        cands = (0..4).select { |a| (a != bIdx) and: { census[a][bIdx] > 0 } };
-        ln = if(cands.isEmpty) {
-            // step 7: empty census — an autonomous line (fm = 0, src has no effect)
-            ( target: b, param: param, shape: cfgLine[\shape], rate: cfgLine[\rate],
-              src: cfgLine[\src], fm: 0, depth: 0, loopAB: 0,
-              srcLayer: nil, family: family, nEdges: 0,
-              meanRoute: nil, strongShare: nil, cAB: nil, derived: false )
-        } {
-            // sort is not stable in SC — the tie-break is spelled out
-            sorted = cands.sort { |x, y|
-                (census[x][bIdx] > census[y][bIdx]) or: {
-                    (census[x][bIdx] == census[y][bIdx]) and: { x < y }
-                }
-            };
-            aIdx = sorted[j mod: sorted.size];
-            aLayer = ~konLayerOrder[aIdx];
-            src = ~konFamilyLine[family][aLayer] ? ~konFamilyLine[\P][aLayer];
-            ab = edges.select { |e|
-                (layerOfNode.(nodes[e[\src]]) == aLayer)
-                    and: { layerOfNode.(nodes[e[\dst]]) == b }
-            };
-            meanRoute = ab.collect { |e| e[\routeLen] }.mean;
-            rate = (~cfg_kon.rateScale / (meanRoute * tauCell))
-                .clip(~cfg_kon.rateClip[0], ~cfg_kon.rateClip[1]);
-            strongShare = ab.count { |e| e[\strong] } / ab.size;
-            fm = ~cfg_kon.fmBase + (~cfg_kon.fmSpan * strongShare);
-            // cAB degrees over the FULL graph (back edges included): division defined
-            cAB = ab.collect { |e| nodes[e[\dst]][\indeg] }.mean
-                / ab.collect { |e| nodes[e[\src]][\outdeg] }.mean;
-            isLoop = loopPair[aIdx][bIdx];
-            // step 5b: a loop boosts both facing lines x1.5; clip AFTER the boost
-            depth = (~cfg_kon.depthGain * cAB * if(isLoop) { 1.5 } { 1 })
-                .clip(~cfg_kon.depthFloor, ~cfg_kon.depthMax);
-            // step 6: a loop is periodic by construction => \sine
-            shape = if(isLoop
-                or: { (ab.count { |e| nodes[e[\dst]][\indeg] >= 2 } * 2) > ab.size })
-                { \sine } { \noise };
-            ( target: b, param: param, shape: shape, rate: rate, src: src,
-              fm: fm, depth: depth, loopAB: if(isLoop) { 1 } { 0 },
-              srcLayer: aLayer, family: family, nEdges: ab.size,
-              meanRoute: meanRoute, strongShare: strongShare, cAB: cAB,
-              derived: true )
-        };
-        // destination base value (override: an act is a new timbral identity even
-        // at depth 0) — deterministic golden-ratio scramble
-        colSum = (0..4).sum { |a| census[a][bIdx] };
-        baseLo = ~cfg_kon.baseRange[0];
-        baseHi = ~cfg_kon.baseRange[1];
-        ln[\baseN] = baseLo + ((baseHi - baseLo) * (
-            ((grid[\seed] ? 0) * 0.6180339887)
-            + ((i + 1) * 2.6180339887)
-            + (colSum * 0.7548776662)
-            + (census[bIdx].sum * 0.5698402910)
-            + (tiers * 0.3624480570)
-            + ((ln[\meanRoute] ? 0) * 0.2205488529)
-        ).frac);
-        ln
+    // the derivation runs HERE and not above: reading 1 is already finished, so
+    // a refusal or an exception inside module 8 costs reading 2 and not the act
+    schaltung = if(~kfGraphFacts.isNil or: { ~kfDeriveScheme.isNil }) {
+        // one law, one place: without the module there is no second copy of the
+        // census or of the eight steps to fall back on, and an empty one would
+        // be a lie about the drawing. Reading 2 is skipped WITH ITS REASON
+        ("9_konstruktion — Чтение 2 пропущено: 8_koppelfeld выключен, закон "
+            "деривации (census, петли, восемь шагов §6) живёт там. "
+            "Чтение 1 (таймлайн) действует.").postln;
+        nil
+    } {
+        // the act's own T_tier, not ~cfg_kf.patchTtier: tau_cell is the time
+        // base of THIS piece, and the band law of step 4 reads it
+        var facts = ~kfGraphFacts.(grid, tT);
+        census = facts[\census];
+        loopPair = facts[\loopPair];
+        edgeTab = facts[\edgeTab];
+        // reference §6: reading 2 IS the derivation of the patcher, given the
+        // drawing of the piece. Depth is the length of a path in the drawing,
+        // polarity is the kind of an edge, and the axis of complexity is the
+        // axis of the mode — none of it is assigned from above
+        ~kfDeriveScheme.(facts, "акт Konstruktion (Чтение 2)");
     };
 
-    ( seed: grid[\seed], complexity: grid[\complexity], tTier: tTier,
-      tiers: tiers, rowGap: rowGap, tauCell: tauCell,
-      census: census, loops: loopPair,
-      edgeTab: edges.collect { |e|
-          ( src: layerOfNode.(nodes[e[\src]]), dst: layerOfNode.(nodes[e[\dst]]),
-            srcI: e[\src], dstI: e[\dst],
-            ret: e[\ret] == true, strong: e[\strong] == true,
-            routeLen: e[\routeLen] )
-      },
-      timeline: timeline.asArray, lines: lines )
+
+    ( seed: grid[\seed], complexity: grid[\complexity], tTier: tT,
+      tiers: tiers, rowGap: grid[\graph][\rowGap],
+      tauCell: tauCell,
+      census: census, loops: loopPair, edgeTab: edgeTab,
+      timeline: timeline.asArray, schaltung: schaltung )
 };
 
 // the act: one piece, three artefacts at once; it does NOT start the piece
@@ -206,6 +113,8 @@
         nil
     } {
         kon = ~konDerive.(grid, tTier ? ~cfg_kon.tTier);
+    };
+    if(kon.notNil) {
         kon[\text] = grid[\text];
         kon[\counts] = grid[\counts];
         // determinism is relative to ~cfg_grid — the score stores a CONFIG snapshot
@@ -213,27 +122,21 @@
         ~seqTimeline = kon[\timeline];
         // volumes belong to the performer (override 2026-07-18): the sequencer skips vols
         ~seqDriveVols = false;
-        // base centres of the 16 destinations from the graph — BEFORE the matrix
-        // rebuild, so modmtx_map_i captures the new centreN values
-        if(~setParam.notNil) {
-            kon[\lines].do { |ln|
-                var pspec = ~ungSpecOf.(ln[\target]) !? { |s|
-                    s.params.detect { |p| p[\key] == ln[\param] }
-                };
-                pspec !? {
-                    ~setParam.(ln[\target], ln[\param], pspec[\spec].map(ln[\baseN]));
-                };
+        // reference §6: the act owns topology, polarities, bands, curves, windows
+        // and the resting values — and it owns them THROUGH the scheme. The rests
+        // of its targets ride inside `schaltung`, and ~kfInstall writes each one
+        // with ~setParam (accepted value, so ~ungVals / tuner / preset carry what
+        // sounds); nodes the act does not address keep the preset. What is left
+        // to the hand are the gains and the layer volumes
+        kon[\schaltung] !? { |sch|
+            if(~kfApply.isNil) {
+                ("9_konstruktion — схема выведена, но применить нечем: ~kfApply "
+                    "не загружен (8_koppelfeld выключен)").warn;
+            } {
+                // arming, not a cut: forty cables at once is a step on forty
+                // parameters, and arrival is composed (reference §8)
+                ~kfApply.(sch, (~cfg_kf !? { |c| c[\armTime] }) ? 4);
             };
-            if(~ungSyncAll.notNil) { ~konLayerOrder.do { |l| ~ungSyncAll.(l) } };
-        };
-        if(~modBuild.notNil) {
-            ~modBuild.(kon[\lines].collect { |ln|
-                ( target: ln[\target], param: ln[\param], shape: ln[\shape],
-                  rate: ln[\rate], src: ln[\src], fm: ln[\fm], depth: ln[\depth] )
-            });
-        } {
-            "9_konstruktion — Чтение 2 пропущено: исполнителя топологии нет "
-                "(деривация schaltung — этап S6 ветки patchbay). Чтение 1 (таймлайн) действует.".postln;
         };
         ~konCurrent = kon;
         ~konActive = true;
@@ -251,10 +154,6 @@
             };
             ~mixerGridStatus !? { |st| st.string_(status) };
         }.defer;
-        (~modKeys ? []).do { |e, i|
-            if(~modmatrixGuiSync.notNil) { ~modmatrixGuiSync.(i, e[\depth]) };
-            if(~modmatrixGuiRelabel.notNil) { ~modmatrixGuiRelabel.(i, e[\label]) };
-        };
         if(~mixerKonSync.notNil) { ~mixerKonSync.value };
         ("9_konstruktion — акт: " ++ status).postln;
         kon
@@ -338,10 +237,14 @@
         sb.add("");
         sb.add("## Census 5×5 (K[src][dst], по направлению рёбер; диагональ читает только макроформа)");
         sb.add("");
-        sb.add("| src\\\\dst | " ++ ~konLayerOrder.join(" | ") ++ " |");
-        sb.add("|" ++ "---|".dup(6).join);
-        ~konLayerOrder.do { |a, ai|
-            sb.add("| " ++ a ++ " | " ++ kon[\census][ai].join(" | ") ++ " |");
+        if(kon[\census].isNil) {
+            sb.add("_Чтение 2 не выполнено (8_koppelfeld выключен): census не выведен._");
+        } {
+            sb.add("| src\\\\dst | " ++ ~konLayerOrder.join(" | ") ++ " |");
+            sb.add("|" ++ "---|".dup(6).join);
+            ~konLayerOrder.do { |a, ai|
+                sb.add("| " ++ a ++ " | " ++ kon[\census][ai].join(" | ") ++ " |");
+            };
         };
         kon[\loops] !? { |lp|
             var pairs = List[];
@@ -355,27 +258,53 @@
                 ++ if(pairs.isEmpty) { "нет" } { pairs.join(" · ") });
         };
         sb.add("");
-        sb.add("## 16 линий модуляции");
+        sb.add("## Схема (Чтение 2 — восемь шагов §6 референса)");
         sb.add("");
-        if(kon[\lines].isEmpty) {
-            sb.add("_Чтение 2 не выполнено: исполнителя топологии нет "
-                "(деривация schaltung — этап S6)._");
+        if(kon[\schaltung].isNil) {
+            sb.add("_Чтение 2 не выполнено: 8_koppelfeld выключен, закон деривации "
+                "живёт там._");
+        } {
+            var sch = kon[\schaltung], rep = sch[\report] ? ();
+            var cables = (sch[\cables] ? []).select { |cb| cb[\enabled] != false };
+            sb.add("- кабелей: " ++ cables.size ++ " · целей: " ++ (rep[\targets] ? "—")
+                ++ " · межслойных: " ++ fmt.((rep[\interlayer] ? 0) * 100, 1) ++ " %"
+                ++ " · глубины: " ++ ((rep[\depths] ? []).asString));
+            sb.add("- режим: " ++ (sch[\mode] ? "—") ++ " · Λmax: " ++ fmt.(rep[\lamMax], 3)
+                ++ " · петель: " ++ (rep[\loops] ? 0)
+                ++ " · проходов ремонта: " ++ (rep[\repairs] ? 0));
+            (rep[\notes] ? []).do { |n| sb.add("- NOTE " ++ n) };
             sb.add("");
-        };
-        sb.add("| i | цель | Ф | srcLayer | src | shape | rate, Гц | fm, окт "
-            ++ "| depth | петля | baseN | meanRoute | strongShare | cAB | derived |");
-        sb.add("|" ++ "---|".dup(15).join);
-        kon[\lines].do { |ln, i|
-            sb.add("| " ++ i ++ " | " ++ ln[\target] ++ "." ++ ln[\param]
-                ++ " | " ++ ln[\family]
-                ++ " | " ++ (ln[\srcLayer] ? "—") ++ " | " ++ ln[\src]
-                ++ " | " ++ ln[\shape] ++ " | " ++ fmt.(ln[\rate])
-                ++ " | " ++ fmt.(ln[\fm], 3) ++ " | " ++ fmt.(ln[\depth], 3)
-                ++ " | " ++ (ln[\loopAB] ? 0)
-                ++ " | " ++ fmt.(ln[\baseN], 3)
-                ++ " | " ++ fmt.(ln[\meanRoute], 2)
-                ++ " | " ++ fmt.(ln[\strongShare], 3) ++ " | " ++ fmt.(ln[\cAB], 3)
-                ++ " | " ++ ln[\derived] ++ " |");
+            sb.add("| # | источник | цель | пол. | gain | f_c, Гц | полоса | кривая | окно |");
+            sb.add("|" ++ "---|".dup(9).join);
+            cables.do { |cb, i|
+                sb.add("| " ++ i
+                    ++ " | " ++ cb[\src][0] ++ "." ++ cb[\src][1]
+                    ++ " | " ++ cb[\dst][0] ++ "." ++ cb[\dst][1]
+                    ++ " | " ++ if(cb[\pol] < 0) { "−1" } { "+1" }
+                    ++ " | " ++ fmt.(cb[\gain], 3)
+                    ++ " | " ++ fmt.(cb[\fc], 4)
+                    ++ " | " ++ cb[\band]
+                    ++ " | " ++ cb[\curve]
+                    ++ " | " ++ fmt.((cb[\win] ? [])[0], 3) ++ "…"
+                    ++ fmt.((cb[\win] ? [])[1], 3) ++ " |");
+            };
+            sb.add("");
+            sb.add("### Циклы (Λ = Π gain; период T ≈ 2·Στ)");
+            sb.add("");
+            if((sch[\loops] ? []).isEmpty) {
+                sb.add("_петель нет: рисунок не дал возвратов — схема в `ruhe`_");
+            } {
+                sb.add("| узлы | звеньев | Λ | инверсий | Στ, с | T, с |");
+                sb.add("|" ++ "---|".dup(6).join);
+                sch[\loops].do { |lp|
+                    sb.add("| " ++ (lp[\nodes] ? []).join(" → ")
+                        ++ " | " ++ (lp[\len] ? "—")
+                        ++ " | " ++ fmt.(lp[\lam], 3)
+                        ++ " | " ++ (lp[\inv] ? "—")
+                        ++ " | " ++ fmt.(lp[\tau], 3)
+                        ++ " | " ++ fmt.(lp[\period], 3) ++ " |");
+                };
+            };
         };
         // the button may never stay silent: success = a path, a write failure = an error
         writeErr = nil;

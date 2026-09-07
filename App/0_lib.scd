@@ -220,7 +220,6 @@
 );
 ~uiMono  = { |size = 11, bold = false| Font("Menlo", size, bold) };
 ~uiSerif = { |size = 26| Font("Georgia", size) };
-~uiPhi = ( alpha: "█", delta: "▄", epsilon: "▓", zeta: "░", theta: "▒" );
 ~uiPremise = (
     alpha: "§C.1 · Grund", delta: "§C.4 · binde", epsilon: "§C.5 · schliere",
     zeta: "§C.6 · surface", theta: "§C.8 · splitter"

@@ -356,7 +356,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
                 dx = tx - src.x; dy = ty - src.y; d = dx.hypot(dy).max(1);
                 sx = src.x + (dx / d * 20); sy = src.y + (dy / d * 20);
                 ex = tx - (dx / d * 5);   ey = ty - (dy / d * 5);
-                loop = kon.notNil and: { (kon[\lines][e[\index]] !? { |ln| ln[\loopAB] }) == 1 };
+                loop = ((kon !? { |k| k[\lines] } !? { |ls| ls[e[\index]] } !? { |ln| ln[\loopAB] }) ? 0) == 1;
                 Pen.use {
                     Pen.strokeColor = if(e[\enabled]) { ~uiPal.ink } { ~uiPal.rule };
                     Pen.width = ~uiLineWidth;

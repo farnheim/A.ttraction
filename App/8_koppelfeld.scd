@@ -10,7 +10,8 @@
 // Stage S3: curve `step` for the 20 pitch nodes (class P) — ~kfLattice (94 Hz,
 // 3-limit), position table per node, hysteresis, dwell, cut ≤ 30 ms.
 // Buses: 111 node audio (1 ch) + 1 control for arm; §3.7 — 5x headroom.
-// Loads AFTER the layers (needs ~ungSpecs) and BEFORE the mixer.
+// Loads AFTER 0_grid (alphabet: ~gridClassOrder / ~gridLayerOf) and the layers
+// (~ungSpecs), and BEFORE the mixer.
 // Spec: plans/active/patchbay-koppelfeld.md (§3–§5, §10, §16).
 
 
@@ -47,8 +48,35 @@
     pCut:          0.03,   // §3.6 cut, s: dF/dt = 0 between steps
     pPosMax:       5,      // §3.6 positions a scheme window may admit
     pPosMin:       2,      // fewer than two: the cable can never step
-    latB:          4       // 94 · 2^a · 3^b, |b| ≤ this — 3-limit, x5 unreachable
-                           // by construction; `a` is bounded by the Hz range only
+    latB:          4,          // 94 · 2^a · 3^b, |b| ≤ this — 3-limit, x5 unreachable
+                               // by construction; `a` is bounded by the Hz range only
+
+    // --- §6/§7 the patcher: ~kfRandomize.(seed, c) ---
+    kappa:         4,      // §6 step 1: cables per census edge (score constant)
+    patchTtier:    30,     // s: T_tier the derivation reads the drawing with (τ_cell = T_tier/rowGap)
+    patchRate:     450,    // §6 step 4: f_c = patchRate / (routeLen^γ · τ_cell), Hz·s
+    patchGamma:    2.2,    // …and its exponent: routeLen spans x30, the ladder x30000
+    patchNarrow:   2,      // f_c lives inside [lo·n, hi/n] of its band — the ×2.5 ladder BY CONSTRUCTION
+    patchIntraMax: 0.35,   // §6 step 2: share of intra-layer cables (reference: ≤ 40 %)
+    patchGainLo:   0.35,   // §6 step 6: depthGain at c = 0 …
+    patchGainHi:   1.10,   // … and at c = 1
+    patchLamLo:    0.60,   // §4.4 Λ target of a drawn loop at c = 0 (ruhe) …
+    patchLamHi:    2.60,   // … and at c = 1 (wanderung); ≤ lamMax by construction
+    patchLoopMax:  3,      // drawn loops taken into one scheme
+    patchPeriodScales: [1, 1.12, 1.26, 0.89, 1.41, 0.79, 1.59, 0.71, 0.63],
+                           // deterministic scan that pulls loop periods apart (V8)
+    patchWinLo:    0.10,   // window floor …
+    patchWinSpan:  0.20,   // … its scramble span …
+    patchWinWidth: 0.55,   // … and its width; the top stays ≤ 0.85
+    patchWinMin:   0.25,   // narrower than this and the node is not a destination at all
+    patchRestLo:   0.15,   // §6: the rest of a destination, scrambled inside …
+    patchRestHi:   0.85,   // … this range and then pulled into the window
+    patchLDb:      3,      // dB: §5.1 an L window is ±3 dB around the §K.4 level
+    patchPosWin:   3,      // positions of the lattice a P window admits (V7 wants 2–5)
+    patchPosGap:   0.25,   // …and how far past the outer ones it opens, in shares of the smallest gap
+    patchEpsGap:   0.001,  // §C.5: the gap a derived epsilon window keeps from its partner's edge (V12)
+    patchSeedTries: 8,     // deterministic seed walk when ~gridGenerate refuses
+    patchRepairMax: 6      // repair passes before the patcher refuses whole
 );
 
 
@@ -69,6 +97,10 @@
     M: ( gain: 2.0,  bands: [\rauheit, \puls, \gang, \block], curve: [\clip, \fold] )
 );
 ~kfBand = ( rauheit: [8, 120], puls: [0.5, 8], gang: [0.05, 0.5], block: [0.004, 0.05] );
+// a drawn loop runs only through classes whose curve may FOLD: the fold corner
+// is what keeps a cycle inside its window, so the two lists are one list
+~kfLoopClasses = ~kfClass.keys.asArray
+    .select { |c| ((~kfClass[c][\curve]) ? []).includes(\fold) };
 // §13 q5: fold only in gang/block — a Fold corner in B1 (8–120 Hz) throws
 // sidebands at 16–240 Hz that no §C card has material for
 ~kfFoldBands = [\gang, \block];
@@ -904,7 +936,7 @@
     var layIn = (), layOut = (), census = ();
     var restOf, winOf, reach, name;
 
-    name = { |nid| nid.asString };
+    name = ~kfIdTag;
 
     // the scheme's rest overrides the live node state
     ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
@@ -1120,12 +1152,12 @@
     adj = lam[\adj];
     lam[\tooLong].do { |c|
         errs = errs.add("V8 цикл длины " ++ c[\len] ++ " > " ++ cfg.depthMax ++ ": "
-            ++ c[\nodes].collect(_.asString).join(" > "));
+            ++ c[\nodes].collect { |n| name.(n) }.join(" > "));
     };
     lam[\loops].do { |l|
         if(l[\lam] > cfg.lamMax) {
             errs = errs.add("V8 Λ " ++ l[\lam].round(0.001) ++ " > " ++ cfg.lamMax ++ ": "
-                ++ l[\nodes].collect(_.asString).join(" > "));
+                ++ l[\nodes].collect { |n| name.(n) }.join(" > "));
         };
     };
     if(lam[\loops].count { |l| l[\lam] >= 1 } > cfg.loopExcMax) {
@@ -1398,6 +1430,1112 @@
     v[\notes].do { |n| ("    NOTE " ++ n).postln };
     v[\errors].do { |e| ("    ОШИБКА " ++ e).postln };
     v
+};
+
+// ----- §6 derivation from a grid act + §7 the patcher -------------------
+// The census / drawn-loop law of reading 2 lives HERE: ~konDerive calls
+// ~kfGraphFacts instead of carrying its own copy (S6 moves the rest of
+// reading 2 over as well). The glyph -> layer table belongs to 0_grid, whose
+// alphabet it is, and which loads before both readers.
+~kfLayerOrder = ~gridClassOrder;
+
+~kfGraphFacts = { |grid, tTier|
+    var g = grid[\graph];
+    var tt = tTier ? ~cfg_kf.patchTtier;
+    var nodes = g[\nodes], edges = g[\edges];
+    var tiers = g[\tiers], rowGap = g[\rowGap];
+    var layerIdx = (), nodeLayer, census, loopPair, loopSelf, cab;
+    ~kfLayerOrder.do { |l, k| layerIdx[l] = k };
+    nodeLayer = nodes.collect { |n| ~gridLayerOf[n[\ch]] };
+    census = Array.fill(5, { Array.fill(5, 0) });
+    edges.do { |e|
+        var a = layerIdx[nodeLayer[e[\src]]], b = layerIdx[nodeLayer[e[\dst]]];
+        census[a][b] = census[a][b] + 1;
+    };
+    // a drawn loop A<->B: both directions non-zero AND at least one edge of the
+    // pair is a back edge (Konstruktion amendment II)
+    loopPair = Array.fill(5, { Array.fill(5, false) });
+    (0..4).do { |a| (0..4).do { |b|
+        if((a < b) and: { census[a][b] > 0 } and: { census[b][a] > 0 }
+            and: { edges.any { |e|
+                var ea = layerIdx[nodeLayer[e[\src]]];
+                var eb = layerIdx[nodeLayer[e[\dst]]];
+                (e[\ret] == true) and: {
+                    ((ea == a) and: { eb == b }) or: { (ea == b) and: { eb == a } };
+                };
+            } })
+        { loopPair[a][b] = true; loopPair[b][a] = true };
+    } };
+    // an intra-layer drawn loop: reference 2.5 admits intra-layer modulation as
+    // such (what §F bars is the intra-layer PATH between forbidden classes, and
+    // that is checked on reachability), and a back edge inside one layer is as
+    // drawn a feedback as one between two. ~konDerive never reads the diagonal,
+    // so `loopPair` keeps the letter of amendment II and this rides beside it.
+    loopSelf = Array.fill(5, false);
+    (0..4).do { |a|
+        loopSelf[a] = (census[a][a] >= 2) and: { edges.any { |e|
+            (e[\ret] == true) and: { layerIdx[nodeLayer[e[\src]]] == a }
+                and: { layerIdx[nodeLayer[e[\dst]]] == a };
+        }};
+    };
+    // c_AB = mean(indeg of the destinations) / mean(outdeg of the sources) over
+    // the edges of ONE layer pair, degrees taken over the FULL graph
+    cab = Array.fill(5, { Array.fill(5, 1.0) });
+    (0..4).do { |a| (0..4).do { |b|
+        var ab = edges.select { |e|
+            (layerIdx[nodeLayer[e[\src]]] == a) and: { layerIdx[nodeLayer[e[\dst]]] == b };
+        };
+        if(ab.notEmpty) {
+            var din = ab.collect { |e| nodes[e[\dst]][\indeg] ? 1 }.mean;
+            var dout = ab.collect { |e| nodes[e[\src]][\outdeg] ? 1 }.mean;
+            cab[a][b] = (din / max(1e-9, dout)).clip(0.25, 4);
+        };
+    } };
+    (
+        seed: grid[\seed], complexity: grid[\complexity], tTier: tt,
+        tiers: tiers, rowGap: rowGap, tauCell: tt / max(1, rowGap),
+        layerIdx: layerIdx, nodeLayer: nodeLayer, nodes: nodes,
+        census: census, loopPair: loopPair, loopSelf: loopSelf, cAB: cab,
+        edgeTab: edges.collect { |e|
+            ( src: nodeLayer[e[\src]], dst: nodeLayer[e[\dst]],
+              srcI: e[\src], dstI: e[\dst],
+              ret: e[\ret] == true, strong: e[\strong] == true,
+              routeLen: e[\routeLen] ? 1 )
+        }
+    )
+};
+
+// ----- the bounded chance of §7: one deterministic stream ---------------
+// `baseN` of ~konDerive spelled as a function: a golden-ratio scramble over
+// (seed, edge index, graph features). No `rand` and no `scramble` anywhere in
+// the derivation — A-3 (the same (seed, c) bit for bit) is the point of a seed.
+// one irrational per POSITION of the argument list; a call may pass no more
+// numbers than the table holds, or `i % size` would fold two positions onto one
+// irrational and correlate them. Every call site passes four
+~kfPhi = [0.6180339887, 2.6180339887, 0.7548776662, 0.5698402910];
+~kfScramble = { |nums| nums.sum { |v, i| (v ? 0) * ~kfPhi[i % ~kfPhi.size] }.abs.frac };
+// the scramble is ONE stream, so a second draw at the same point of the
+// derivation must be salted apart. The values are arbitrary and only have to
+// DIFFER — structure, not tuning
+~kfSalt = ( slotJ: 7, nodeU: 1000, winRest: 3, loopKey: 3,
+            srcKey: 0.37, dstKey: 0.19 );
+
+// a node id inside an error message is a TAG, not prose: ~kfPatchRepair has to
+// find the cable an error names, and `alpha.n1` is a substring of `alpha.n10`
+// (measured: three such pairs among the 111 nodes). The delimiters make the
+// match exact, and every error that names a node renders it through here
+~kfIdTag = { |nid| "«" ++ nid.asString ++ "»" };
+
+~kfBandOrder = [\rauheit, \puls, \gang, \block];
+~kfBandIdx = { |b| (~kfBandOrder.indexOf(b) ? 3) + 1 };
+
+// A cable's f_c lives in the MIDDLE of its band, never at the edge: the ladder
+// (V6) needs τ to grow ×2.5 from rung to rung while the raw bands touch (B1 at
+// 8 Hz and B2 at 8 Hz are one and the same τ). Narrowed by `patchNarrow` on
+// both sides the worst adjacent ratio is ×4, so the ladder holds BY
+// CONSTRUCTION and step 8 has nothing left to cut.
+~kfBandNarrow = { |b|
+    var r = ~kfBand[b] ? [0.004, 0.05], n = ~cfg_kf.patchNarrow;
+    [r[0] * n, r[1] / n]
+};
+~kfBandOfFc = { |fc|
+    // in the gap between two narrowed ranges the SLOWER band wins: a τ short of
+    // the next rung would break the ×2.5 step
+    case
+    { fc >= ~kfBandNarrow.(\rauheit)[0] } { \rauheit }
+    { fc >= ~kfBandNarrow.(\puls)[0] }    { \puls }
+    { fc >= ~kfBandNarrow.(\gang)[0] }    { \gang }
+    { \block }
+};
+
+~kfPatchKeys = { |layer|
+    var sp = ~ungSpecs[layer.asSymbol];
+    if(sp.isNil) { [] } {
+        sp.params.collect { |p| p[\key] }.select { |k| ~kfRow.(layer, k).notNil };
+    };
+};
+
+~kfPatchNodeNum = { |layer, key|
+    (((~kfLayerOrder.indexOf(layer.asSymbol) ? 0) * 100)
+        + ((~kfPatchKeys.(layer).indexOf(key.asSymbol) ? 0) + 1))
+};
+
+// ----- §6 step 1: cable budget ------------------------------------------
+~kfStep1Budget = { |facts, cfg|
+    (cfg.kappa * facts[\census].sum { |row| row.sum })
+        .round.asInteger.clip(cfg.cableMin, cfg.cableMax)
+};
+
+// ----- §6 step 2: layer pair --------------------------------------------
+// every census edge yields κ cables in the direction it is drawn; the diagonal
+// (intra-layer) is admitted only up to `patchIntraMax` of the table, and the
+// interlayer slots are cycled to keep |cables| = budget exactly
+~kfStep2Pairs = { |facts, budget, cfg|
+    var slots = [], inter, intra, take, out, byKey;
+    // ROUND ROBIN over `j`: with κ·ΣK over the ceiling the cut would otherwise
+    // take the first edges whole and leave whole layers of the drawing unwired
+    // (V10 "layer without an input"). One cable per drawn edge comes first.
+    byKey = { |a, b|
+        (a[\j] < b[\j]) or: { (a[\j] == b[\j]) and: {
+            (a[\key] < b[\key]) or: { (a[\key] == b[\key]) and: { a[\ei] < b[\ei] } } } };
+    };
+    facts[\edgeTab].do { |e, ei|
+        cfg.kappa.do { |j|
+            slots = slots.add((
+                src: e[\src], dst: e[\dst], ret: e[\ret], strong: e[\strong],
+                routeLen: e[\routeLen] ? 1, ei: ei, j: j,
+                key: ~kfScramble.([facts[\seed], ei + 1, (j + 1) * ~kfSalt[\slotJ],
+                    facts[\tiers]])
+            ));
+        };
+    };
+    slots = slots.sort(byKey);
+    inter = slots.select { |x| x[\src] != x[\dst] };
+    intra = slots.select { |x| x[\src] == x[\dst] };
+    take = (budget * cfg.patchIntraMax).floor.asInteger;
+    out = (inter ++ intra.copyRange(0, take - 1)).sort(byKey);
+    if(out.size > budget) { out = out.copyRange(0, budget - 1) };
+    while { (out.size < budget) and: { inter.notEmpty } } {
+        out = out.add(inter[out.size mod: inter.size]);
+    };
+    out
+};
+
+// ----- §6 step 3: class and concrete node -------------------------------
+// The KIND of the drawn edge picks the family of classes (rule 6 strength: a
+// strong coupling addresses the identity classes S/P/W/E, a weak one the
+// balance classes M/D/G/L); the node inside the family is the scramble. As a
+// SOURCE a node that already has an incoming cable ranks first — that is where
+// drawn depth comes from. `st` is read, never written.
+~kfStep3Node = { |facts, layer, role, strong, st, u, filter|
+    var keys = ~kfPatchKeys.(layer.asSymbol);
+    var idn = (~kfLayerOrder.indexOf(layer.asSymbol) ? 0) + 1;
+    var fam = if(strong) { [\S, \P, \W, \E] } { [\M, \D, \G, \L] };
+    keys.select { |k| filter.(k) }.collect { |k|
+        var cls = ~kfRow.(layer, k)[0];
+        var id = ~kfIdOf.(layer, k);
+        var chain = if((role == \src) and: { (st[\inE][id] ? []).notEmpty }) { 0 } { 2 };
+        [ k, chain + if(fam.includes(cls)) { 0 } { 1 }
+            + ~kfScramble.([facts[\seed], (u * ~kfSalt[\nodeU]) + 1, idn,
+                (keys.indexOf(k) ? 0) + 1]) ]
+    }.sort { |a, b|
+        (a[1] < b[1]) or: { (a[1] == b[1]) and: { a[0].asString < b[0].asString } };
+    }.collect { |r| r[0] }
+};
+
+// ----- §6 step 4: the band ----------------------------------------------
+// f_c = patchRate / (routeLen^γ · τ_cell) — the long drawn route gives the slow
+// cable — then clipped to f_max of the destination (§5) and to the fastest band
+// its class admits. The exponent is the price of the drawing: routeLen spans
+// ×30 while the ladder spans ×30000, so the raw ratio cannot reach four bands.
+~kfStep4Band = { |facts, routeLen, cfg|
+    cfg.patchRate / ((max(1, routeLen) ** cfg.patchGamma) * max(1e-9, facts[\tauCell]))
+};
+
+~kfPatchFcFor = { |layer, key, win, wantF, wins|
+    var row = ~kfRow.(layer, key);
+    if(row.isNil) { nil } {
+        var bands = (~kfClass[row[0]] ? ())[\bands] ? [\block];
+        var fastest = ~kfBandOrder.detect { |b| bands.includes(b) } ? \block;
+        var w2 = wins.copy;
+        var fmax, ceil, floor, fc;
+        w2[~kfIdOf.(layer, key)] = win;
+        fmax = ~kfFmaxOf.(layer, key, w2) ? 1e9;
+        ceil = min(min(~kfBandNarrow.(fastest)[1], fmax), ~kfFcCeil.value);
+        floor = ~kfBandNarrow.(\block)[0];
+        if(ceil < floor) { nil } {
+            fc = wantF.clip(floor, ceil);
+            ( band: ~kfBandOfFc.(fc), fc: fc, floor: floor, ceil: ceil )
+        };
+    };
+};
+
+// ----- §6 step 5: polarity is the KIND of the edge ----------------------
+// a forward edge is +1, a drawn back edge is −1 — the inversion that turns the
+// c axis into the mode axis (one inversion in a two-node cycle is odd)
+~kfStep5Pol = { |ret| if(ret == true) { -1 } { 1 } };
+
+// ----- §6 step 6: gain --------------------------------------------------
+// gain = clip(depthGain(c) · c_AB, gainMin, gain_max(class)). For a loop the
+// reference's (1 + 0.5·loop) is replaced by the Λ TARGET of the c axis: the two
+// gains of a cycle multiply to Λ, and Λ IS the mode, so the axis must own it.
+~kfStep6Gain = { |gmax, w, isLoop, c, lamT, cfg|
+    var base = cfg.patchGainLo + ((cfg.patchGainHi - cfg.patchGainLo) * c);
+    var g = if(isLoop) { lamT.sqrt * w } { base * w };
+    g.clip(cfg.gainMin, max(cfg.gainMin, gmax))
+};
+
+// ----- §6 step 7: curve -------------------------------------------------
+// convergence node (indeg ≥ 2) => clip; a drawn loop => fold, but only classes
+// M/S/W and only in gang/block (§13 q5); P is always step; the rest clip
+~kfStep7Curve = { |cls, indeg, isLoop, band|
+    case
+    { cls == \P } { \step }
+    { indeg >= 2 } { \clip }
+    { isLoop and: { ~kfLoopClasses.includes(cls) } and: { ~kfFoldBands.includes(band) } } { \fold }
+    { \clip }
+};
+
+// ----- §6 step 8: ladder normalization ----------------------------------
+// Along every maximal directed path τ must not fall (V6) and the path may not
+// need a fifth rung (V5). The band structure of step 4 makes both true by
+// construction, so this step is the PROOF and not the repair: it walks the
+// simple paths and returns the indices of the cables to cut. A non-empty return
+// means step 4 or the ceilings of §5 were edited.
+~kfStep8Ladder = { |cables, cfg|
+    var adj = (), cut = [], walk, tau;
+    tau = { |c| 1 / (2pi * max(1e-9, c[\fc])) };
+    cables.do { |c, i|
+        var sid = ~kfIdOf.(c[\src][0], c[\src][1]);
+        adj[sid] = (adj[sid] ? []).add(( to: ~kfIdOf.(c[\dst][0], c[\dst][1]), i: i, c: c ));
+    };
+    walk = { |node, seen, prev, n|
+        (adj[node] ? []).do { |e|
+            if(seen.includes(e[\to]).not) {
+                case
+                { (n + 1) > cfg.depthMax } { cut = cut.add(e[\i]) }
+                { prev.notNil and: { tau.(e[\c]) < (tau.(prev[\c]) * cfg.ladderRatio) } } {
+                    cut = cut.add(e[\i]);
+                }
+                { walk.(e[\to], seen ++ [e[\to]], e, n + 1) };
+            };
+        };
+    };
+    adj.keys.asArray.sort { |a, b| a.asString < b.asString }.do { |v| walk.(v, [v], nil, 0) };
+    cut.as(Set).asArray.sort
+};
+
+// ----- windows and rests (§6, after step 8) -----------------------------
+// The act owns windows, curves, bands and the RESTS OF ITS DESTINATIONS — of
+// them only: a node the act does not address keeps its preset (reference §6).
+// Every destination carries a rest without exception: V7 wants the rest inside
+// the window with the margin, and a scheme with no `rest:` section is rejected
+// the moment a live value sits outside the new window.
+~kfPatchWinP = { |layer, key, u, cfg|
+    var pos = ~kfNodePos.(layer, key);
+    // two positions is the ARITHMETIC floor, whatever `pPosMin` says: with one
+    // there is no gap by which to open the window, and a cable into a node with
+    // a single position can never step at all
+    if(pos.isNil or: { pos.size < max(2, cfg.pPosMin) }) { nil } {
+        var k = min(cfg.patchPosWin, pos.size);
+        var span = max(1, pos.size - k + 1);
+        var i0 = (u * span).floor.asInteger.clip(0, span - 1);
+        var sel = pos.copyRange(i0, i0 + k - 1);
+        var gaps = (0 .. pos.size - 2).collect { |i| pos[i + 1] - pos[i] };
+        var eps = gaps.minItem * cfg.patchPosGap;
+        // the rest of a step node is a POSITION of its table, never the middle
+        // of the window: ~kfRestApply snaps it there anyway, and the preset has
+        // to hold what will sound
+        [[(sel.first - eps).clip(0, 1), (sel.last + eps).clip(0, 1)], sel[sel.size div: 2]]
+    };
+};
+
+~kfPatchWin = { |layer, key, u, ur, st, ctx, cfg|
+    var row = ~kfRow.(layer, key);
+    var cs = ~kfSpecOfNode.(layer, key);
+    if(row.isNil or: { cs.isNil }) { nil } {
+        var cls = row[0], ex = row[2] ? ();
+        var lo, hi, other, wmin;
+        if(cls == \P) { ~kfPatchWinP.(layer, key, u, cfg) } {
+            lo = cfg.patchWinLo + (cfg.patchWinSpan * u);
+            hi = lo + cfg.patchWinWidth;
+            if(cls == \L) {
+                // §5.1: an L window is ±3 dB around the §K.4 level and no wider —
+                // the sends read the layer BEFORE the router, so a broad amp
+                // window would gate the tail of an effect
+                var v0 = max(1e-6, cs.map(ctx[\rest][~kfIdOf.(layer, key)] ? 0.5));
+                lo = cs.unmap(max(cs.minval, v0 / cfg.patchLDb.dbamp));
+                hi = cs.unmap(min(cs.maxval, v0 * cfg.patchLDb.dbamp));
+            };
+            ex[\wmin] !? { |v| lo = max(lo, v) };
+            ex[\wmax] !? { |v| hi = min(hi, v) };
+            // the §C.5 canon of the epsilon pairs, in the node's own space (V12):
+            // freqLo may never reach over freqHi in ANY state of the window, and
+            // the mode stratum may never sink 6 dB under the flow it carries.
+            // The other side of the pair is read where the validator reads it —
+            // its window if the act addresses it, its resting value otherwise
+            other = { |k, edge|
+                var w = st[\wins][~kfIdOf.(\epsilon, k)];
+                if(w.notNil) { w[edge] } { ctx[\rest][~kfIdOf.(\epsilon, k)] ? 0.5 };
+            };
+            if(layer.asSymbol == \epsilon) {
+                var csm = ~kfSpecOfNode.(\epsilon, \mLevel);
+                var csf = ~kfSpecOfNode.(\epsilon, \flowLevel);
+                case
+                { key.asSymbol == \freqLo } { hi = min(hi, other.(\freqHi, 0) - cfg.patchEpsGap) }
+                { key.asSymbol == \freqHi } { lo = max(lo, other.(\freqLo, 1) + cfg.patchEpsGap) }
+                { (key.asSymbol == \mLevel) and: { csf.notNil } } {
+                    lo = max(lo, cs.unmap(csf.map(other.(\flowLevel, 1)) * 0.5) + cfg.patchEpsGap);
+                }
+                { (key.asSymbol == \flowLevel) and: { csm.notNil } } {
+                    hi = min(hi, cs.unmap(csm.map(other.(\mLevel, 0)) * 2) - cfg.patchEpsGap);
+                }
+                { };
+            };
+            lo = lo.clip(0, 1); hi = hi.clip(0, 1);
+            // an L window is ±3 dB BY CANON (§5.1) and that is narrower than
+            // `patchWinMin` for every level node — rejecting it by width would
+            // bar the whole class from ever being a destination. What still
+            // guards the rest is V7's own floor of 2·restMargin
+            wmin = if(cls == \L) { 2 * cfg.restMargin } { cfg.patchWinMin };
+            if((hi - lo) < wmin) { nil } {
+                [[lo, hi], (cfg.patchRestLo + ((cfg.patchRestHi - cfg.patchRestLo) * ur))
+                    .clip(lo + cfg.restMargin, hi - cfg.restMargin)]
+            };
+        };
+    };
+};
+
+// ----- §F on REACHABILITY, not on the direct edge (reference 2.5) -------
+~kfPatchFOk = { |a, b|
+    var pa = a.asString.split($.), pb = b.asString.split($.);
+    var ra = ~kfRow.(pa[0].asSymbol, pa[1].asSymbol);
+    var rb = ~kfRow.(pb[0].asSymbol, pb[1].asSymbol);
+    if(ra.isNil or: { rb.isNil }) { true } {
+        ((ra[0] == \E) and: { rb[0] == \G }).not and: {
+            ((pa[0] == pb[0]) and: {
+                ((ra[0] == \P) and: { rb[0] == \D })
+                    or: { (ra[0] == \D) and: { rb[0] == \P } };
+            }).not;
+        };
+    };
+};
+
+~kfPatchIncomm = { |t1, t2, cfg|
+    var r = max(t1, t2) / max(1e-9, min(t1, t2));
+    (1..cfg.incommMax).every { |p| (1..cfg.incommMax).every { |q|
+        var f = p / q;
+        (p.gcd(q) != 1) or: { f < 1 } or: { (r - f).abs > (f * cfg.incommTol) };
+    }};
+};
+
+// V11: two stepping fundamentals on commensurable clocks read as a chord
+// progression, and the ratio is judged IN THE OCTAVE (both P clocks live in B4)
+~kfPatchIncommOct = { |f1, f2, cfg|
+    var oct = (max(f1, f2) / max(1e-9, min(f1, f2))).log2;
+    var tol = (1 + cfg.incommTol).log2;
+    (1..cfg.incommMax).every { |p| (1..cfg.incommMax).every { |q|
+        var f = p / q, d;
+        if((p.gcd(q) != 1) or: { f < 1 }) { true } {
+            d = (oct - f.log2).mod(1.0);
+            min(d, 1 - d) > tol
+        };
+    }};
+};
+
+// ----- the assembler: the eight steps into one `schaltung` --------------
+// Pure: it reads the tables (~kfNodeTable, ~ungSpecs, ~cfg_kf) and the facts of
+// ONE grid act, and touches no live state — `ctx` carries the resting values
+// the derivation reasons against, and ~kfRandomize fills it from the SPEC
+// DEFAULTS, not from the field (§17 D78). Nothing here builds an Ndef.
+~kfSchemeFromGraph = { |facts, ctx|
+    var cfg = ~cfg_kf;
+    var c = (facts[\complexity] ? 0.5).clip(0, 1);
+    var budget = ~kfStep1Budget.(facts, cfg);
+    var slots = ~kfStep2Pairs.(facts, budget, cfg);
+    var lamT = cfg.patchLamLo + ((cfg.patchLamHi - cfg.patchLamLo) * c);
+    var wander = lamT > cfg.modeWanderung;
+    var arrival = [\ioi0, \decel, \ioiMax, \popScale, \gapScale, \density];
+    var st = ( wins: (), rests: (), bands: (), inE: (), outE: (),
+               cables: [], pNodes: [], pLayers: [], notes: [] );
+    var anc, desc, fOk, ladderOk, winOf, bandFor, addCable, dstList, srcList, place;
+    var loopPairs = [], legs = [], restSec = ();
+    var lidx = facts[\layerIdx], cens = facts[\census];
+
+    desc = { |id|
+        var seen = [id], front = [id];
+        while { front.notEmpty } {
+            var nxt = [];
+            front.do { |v| (st[\outE][v] ? []).do { |e|
+                if(seen.includes(e[\to]).not) { seen = seen.add(e[\to]); nxt = nxt.add(e[\to]) };
+            }};
+            front = nxt;
+        };
+        seen
+    };
+    anc = { |id|
+        var seen = [id], front = [id];
+        while { front.notEmpty } {
+            var nxt = [];
+            front.do { |v| (st[\inE][v] ? []).do { |e|
+                if(seen.includes(e[\from]).not) { seen = seen.add(e[\from]); nxt = nxt.add(e[\from]) };
+            }};
+            front = nxt;
+        };
+        seen
+    };
+    fOk = { |sid, did|
+        var a = anc.(sid), b = desc.(did);
+        a.every { |x| b.every { |y| ~kfPatchFOk.(x, y) } };
+    };
+    // The reciprocal edge of a two-node cycle is EXCLUDED here: a simple path
+    // never walks u -> v -> u, so the validator never checks that pair — and no
+    // cycle could satisfy the ladder if it did, since walking a cycle from each
+    // of its nodes would ask one rung to be both the fastest and the slowest.
+    // That is also why every cycle of this patcher is a PAIR.
+    ladderOk = { |sid, did, bi|
+        ((st[\outE][did] ? []).every { |e| (e[\to] == sid) or: { bi < e[\bi] } })
+            and: { (st[\inE][sid] ? []).every { |e| (e[\from] == did) or: { e[\bi] < bi } } };
+    };
+    winOf = { |layer, key|
+        var did = ~kfIdOf.(layer, key);
+        if(st[\wins][did].notNil) { [st[\wins][did], st[\rests][did]] } {
+            var num = ~kfPatchNodeNum.(layer, key);
+            var li = lidx[layer.asSymbol] ? 0;
+            ~kfPatchWin.(layer, key,
+                ~kfScramble.([facts[\seed], num, (0..4).sum { |a| cens[a][li] }, facts[\tiers]]),
+                ~kfScramble.([facts[\seed], num * ~kfSalt[\winRest], cens[li].sum,
+                    facts[\tauCell]]),
+                st, ctx, cfg)
+        };
+    };
+    // a second cable into one node inherits the node's band: the ladder rank of
+    // a node has to be ONE number, and V7 wants one window and one curve there
+    bandFor = { |layer, key, win, wantF|
+        var bf = ~kfPatchFcFor.(layer, key, win, wantF, st[\wins]);
+        if(bf.isNil) { nil } {
+            var band = st[\bands][~kfIdOf.(layer, key)] ? bf[\band];
+            var rng = ~kfBandNarrow.(band);
+            var lo = max(rng[0], bf[\floor]), hi = min(rng[1], bf[\ceil]);
+            if(lo > hi) { nil } { [band, bf[\fc].clip(lo, hi)] };
+        };
+    };
+    addCable = { |sl, sk, dl, dk, band, fc, pol, gain, win, rest|
+        var sid = ~kfIdOf.(sl, sk), did = ~kfIdOf.(dl, dk), bi = ~kfBandIdx.(band);
+        var cab = ( src: [sl.asSymbol, sk.asSymbol], dst: [dl.asSymbol, dk.asSymbol],
+                    pol: pol, gain: gain, fc: fc, band: band, curve: \clip, win: win );
+        st[\cables] = st[\cables].add(cab);
+        st[\outE][sid] = (st[\outE][sid] ? []).add(( to: did, bi: bi, c: cab ));
+        st[\inE][did]  = (st[\inE][did] ? []).add(( from: sid, bi: bi, c: cab ));
+        st[\wins][did] = win; st[\rests][did] = rest; st[\bands][did] = band;
+        if((~kfRow.(dl, dk)[0] == \P) and: { st[\pNodes].includes(did).not }) {
+            st[\pNodes] = st[\pNodes].add(did);
+            st[\pLayers] = st[\pLayers].add(dl.asSymbol);
+        };
+        cab
+    };
+    dstList = { |layer, strong, u, loopLeg|
+        ~kfStep3Node.(facts, layer, \dst, strong, st, u, { |k|
+            var cls = ~kfRow.(layer, k)[0], did = ~kfIdOf.(layer, k);
+            ((st[\inE][did] ? []).size < cfg.fanIn)
+                and: { (cls != \P) or: {
+                    st[\pNodes].includes(did) or: {
+                        (st[\pNodes].size < 2) and: { st[\pLayers].includes(layer.asSymbol).not };
+                    };
+                }}
+                and: { loopLeg.not or: { ~kfLoopClasses.includes(cls) } };
+        });
+    };
+    srcList = { |layer, strong, u, excludeId|
+        ~kfStep3Node.(facts, layer, \src, strong, st, u, { |k|
+            var sid = ~kfIdOf.(layer, k);
+            (sid != excludeId) and: { (st[\outE][sid] ? []).size < cfg.fanOut }
+                and: { wander.not or: { (layer.asSymbol != \theta) or: { arrival.includes(k).not } } };
+        });
+    };
+    // one slot -> one cable, or nil when the drawing asks for a pair the canon
+    // does not admit; the budget then falls short and the report says by how much
+    place = { |sl|
+        var wantF = ~kfStep4Band.(facts, sl[\routeLen], cfg);
+        var pol = ~kfStep5Pol.(sl[\ret]);
+        var dstL = sl[\dst].asSymbol, srcL = sl[\src].asSymbol;
+        var wantB = ~kfBandOfFc.(wantF.clip(~kfBandNarrow.(\block)[0], ~kfBandNarrow.(\rauheit)[1]));
+        var cand = dstList.(dstL, sl[\strong], sl[\key], false);
+        var out = nil;
+        // the drawn ratio first: a destination that can actually TAKE the band
+        // the route length asks for is tried before one that would clip it to a
+        // slower rung. Without this pass the fast bands stay empty (G7) even
+        // where the drawing is short and the layer ceiling high
+        cand = cand.select { |dk|
+            var wr = winOf.(dstL, dk);
+            var bf = wr !? { bandFor.(dstL, dk, wr[0], wantF) };
+            bf.notNil and: { bf[0] == wantB };
+        } ++ cand;
+        cand.do { |dk|
+            if(out.isNil) {
+                var did = ~kfIdOf.(dstL, dk);
+                var wr = winOf.(dstL, dk);
+                var bf = wr !? { bandFor.(dstL, dk, wr[0], wantF) };
+                if(bf.notNil) {
+                    var bi = ~kfBandIdx.(bf[0]);
+                    srcList.(srcL, sl[\strong], sl[\key] + ~kfSalt[\srcKey], did).do { |sk|
+                        if(out.isNil) {
+                            var sid = ~kfIdOf.(srcL, sk);
+                            var dup = st[\cables].any { |cb|
+                                (~kfIdOf.(cb[\src][0], cb[\src][1]) == sid)
+                                    and: { ~kfIdOf.(cb[\dst][0], cb[\dst][1]) == did };
+                            };
+                            // a cycle is CLOSED ONLY BY A DRAWN BACK EDGE (the
+                            // loop phase above): a pair that closes by accident
+                            // carries two forward polarities, so its Λ counts
+                            // toward the ceiling and its inversions are even —
+                            // a mode the vocabulary has no name for (§13)
+                            var closes = (st[\inE][sid] ? []).any { |e| e[\from] == did };
+                            if(dup.not and: { closes.not } and: { ladderOk.(sid, did, bi) }
+                                and: { fOk.(sid, did) }) {
+                                out = addCable.(srcL, sk, dstL, dk, bf[0], bf[1], pol,
+                                    ~kfStep6Gain.(~kfGainMax.(dstL, dk),
+                                        facts[\cAB][lidx[srcL]][lidx[dstL]], false, c, lamT, cfg),
+                                    wr[0], wr[1]);
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        out
+    };
+
+    // ----- the drawn loops come first: they are the spine of the piece ---
+    // §6 step 5 — a drawn back edge is the inversion, and a layer pair drawn in
+    // both directions with a back edge among them is the cycle. epsilon is
+    // barred (§C.5: no motion that reads as periodic) and there are at most
+    // `patchLoopMax` of them (V8 admits three excited ones).
+    (0..4).do { |a| (0..4).do { |b|
+        if((a < b) and: { facts[\loopPair][a][b] }
+            and: { ~kfLayerOrder[a] != \epsilon } and: { ~kfLayerOrder[b] != \epsilon }) {
+            loopPairs = loopPairs.add([a, b,
+                ~kfScramble.([facts[\seed], (a * 5) + b + 1, cens[a][b], cens[b][a]])]);
+        };
+    } };
+    (0..4).do { |a|
+        if((facts[\loopSelf] ? [])[a] == true and: { ~kfLayerOrder[a] != \epsilon }) {
+            loopPairs = loopPairs.add([a, a,
+                ~kfScramble.([facts[\seed], (a * 5) + a + 1, cens[a][a], facts[\tiers]])]);
+        };
+    };
+    loopPairs = loopPairs.sort { |x, y|
+        (x[2] < y[2]) or: { (x[2] == y[2]) and: { ((x[0] * 5) + x[1]) < ((y[0] * 5) + y[1]) } };
+    }.copyRange(0, min(cfg.patchLoopMax, cfg.loopExcMax) - 1);
+
+    loopPairs.do { |lp|
+        var la = ~kfLayerOrder[lp[0]], lb = ~kfLayerOrder[lp[1]];
+        var retE = facts[\edgeTab].detect { |e| e[\ret] and: {
+            ((e[\src] == la) and: { e[\dst] == lb }) or: { (e[\src] == lb) and: { e[\dst] == la } };
+        }};
+        var placed = false;
+        if(retE.notNil) {
+            var xL = retE[\src], yL = retE[\dst];
+            var fwdE = facts[\edgeTab].detect { |e|
+                e[\ret].not and: { e[\src] == yL } and: { e[\dst] == xL };
+            };
+            var wantR = ~kfStep4Band.(facts, retE[\routeLen], cfg);
+            var wantF = ~kfStep4Band.(facts, (fwdE !? { |e| e[\routeLen] }) ? 1, cfg);
+            var w1 = facts[\cAB][lidx[xL]][lidx[yL]], w2 = facts[\cAB][lidx[yL]][lidx[xL]];
+            var norm = max(1e-9, (w1 * w2).sqrt);
+            var uKey = ~kfScramble.([facts[\seed], (lp[0] * 5) + lp[1] + ~kfSalt[\loopKey],
+                facts[\tiers], 1]);
+            dstList.(yL, retE[\strong], uKey, true).do { |vk|
+                if(placed.not) {
+                    dstList.(xL, retE[\strong], uKey + ~kfSalt[\dstKey], true).do { |uk|
+                        if(placed.not) {
+                            var uid = ~kfIdOf.(xL, uk), vid = ~kfIdOf.(yL, vk);
+                            var wu = winOf.(xL, uk), wv = winOf.(yL, vk);
+                            var bv = if(wv.notNil and: { uid != vid })
+                                { bandFor.(yL, vk, wv[0], wantR) };
+                            var bu = if(wu.notNil and: { uid != vid })
+                                { bandFor.(xL, uk, wu[0], wantF) };
+                            if(bv.notNil and: { bu.notNil }
+                                and: { ladderOk.(uid, vid, ~kfBandIdx.(bv[0])) }
+                                and: { ladderOk.(vid, uid, ~kfBandIdx.(bu[0])) }
+                                and: { fOk.(uid, vid) } and: { fOk.(vid, uid) }) {
+                                var c1 = addCable.(xL, uk, yL, vk, bv[0], bv[1], -1,
+                                    ~kfStep6Gain.(~kfGainMax.(yL, vk), w1 / norm, true, c, lamT, cfg),
+                                    wv[0], wv[1]);
+                                var c2 = addCable.(yL, vk, xL, uk, bu[0], bu[1], 1,
+                                    ~kfStep6Gain.(~kfGainMax.(xL, uk), w2 / norm, true, c, lamT, cfg),
+                                    wu[0], wu[1]);
+                                legs = legs.add([c1, c2]);
+                                placed = true;
+                            };
+                        };
+                    };
+                };
+            };
+            if(placed.not) {
+                st[\notes] = st[\notes].add("петля " ++ la ++ " <-> " ++ lb
+                    ++ " нарисована, но узлов, допускающих её полосу, не нашлось");
+            };
+        };
+    };
+
+    // loop periods pairwise incommensurable (V8): the f_c pair of a loop is
+    // scaled INSIDE its own band until T = 2·Στ clears every p/q, p,q ≤ 4
+    block {
+        // the pairs already kept are the reference: reading `legs` while it is
+        // being shortened would let a dropped pair compare against ITSELF
+        // (ratio 1/1, never incommensurable) and take the next return with it
+        var kept = [];
+        legs.do { |pair|
+            var done = false;
+            var tOf = { |sc| 2 * pair.sum { |cb| 1 / (2pi * (cb[\fc] / sc)) } };
+            var prev = kept.collect { |pp| 2 * pp.sum { |cb| 1 / (2pi * cb[\fc]) } };
+            cfg.patchPeriodScales.do { |sc|
+                if(done.not) {
+                    // four of the scales are < 1, so f_c GROWS: the ceiling of
+                    // §5 (f_max of the destination) and the block limit have to
+                    // travel with the band, else V9 catches what this fixed
+                    var inRange = pair.every { |cb|
+                        var rng = ~kfBandNarrow.(cb[\band]);
+                        var fmax = ~kfFmaxOf.(cb[\dst][0], cb[\dst][1], st[\wins]) ? 1e9;
+                        var hi = min(min(rng[1], fmax), ~kfFcCeil.value);
+                        ((cb[\fc] / sc) >= rng[0]) and: { (cb[\fc] / sc) <= hi };
+                    };
+                    if(inRange and: { prev.every { |t| ~kfPatchIncomm.(t, tOf.(sc), cfg) } }) {
+                        pair.do { |cb| cb[\fc] = cb[\fc] / sc };
+                        done = true;
+                    };
+                };
+            };
+            if(done) { kept = kept.add(pair) } {
+                var victim = pair[0];
+                var sid = ~kfIdOf.(victim[\src][0], victim[\src][1]);
+                var did = ~kfIdOf.(victim[\dst][0], victim[\dst][1]);
+                st[\notes] = st[\notes].add("период петли "
+                    ++ victim[\dst].collect(_.asString).join(".")
+                    ++ " не разведён с предыдущими — возвратный кабель снят");
+                st[\cables] = st[\cables].reject { |cb| cb === victim };
+                st[\outE][sid] = (st[\outE][sid] ? []).reject { |e| e[\c] === victim };
+                st[\inE][did] = (st[\inE][did] ? []).reject { |e| e[\c] === victim };
+            };
+        };
+        legs = kept;
+    };
+
+    // ----- the rest of the budget ----------------------------------------
+    slots.do { |sl| if(st[\cables].size < budget) { place.(sl) } };
+
+    // ----- §6 step 7: the curve, over the FINAL indegrees -----------------
+    st[\wins].keys.asArray.do { |did|
+        var parts = did.asString.split($.);
+        var row = ~kfRow.(parts[0].asSymbol, parts[1].asSymbol);
+        var ins = st[\inE][did] ? [];
+        var isLoop = ins.any { |e| (st[\outE][did] ? []).any { |o| o[\to] == e[\from] } };
+        var curve = ~kfStep7Curve.(row[0], ins.size, isLoop, st[\bands][did] ? \block);
+        ins.do { |e| e[\c][\curve] = curve };
+    };
+
+    // ----- two P destinations: their clocks must not be commensurable -----
+    if(st[\pNodes].size == 2) {
+        var first = (st[\inE][st[\pNodes][0]] ? []).collect { |e| e[\c] };
+        var second = (st[\inE][st[\pNodes][1]] ? []).collect { |e| e[\c] };
+        var rng = ~kfBandNarrow.(\block);
+        var f0 = first[0] !? { |cb| cb[\fc] };
+        var done = first.isEmpty or: { second.isEmpty }
+            or: { ~kfPatchIncommOct.(f0, second[0][\fc], cfg) };
+        cfg.patchPeriodScales.do { |sc|
+            if(done.not) {
+                var f1 = (f0 * sc).clip(rng[0], rng[1]);
+                if(~kfPatchIncommOct.(f0, f1, cfg)) {
+                    second.do { |cb| cb[\fc] = f1 };
+                    done = true;
+                };
+            };
+        };
+        if(done.not) {
+            st[\notes] = st[\notes].add("полосы двух P-целей не разведены — вторая снята");
+            st[\cables] = st[\cables].reject { |cb| second.includes(cb) };
+        };
+    };
+
+    // ----- §6 step 8: the ladder, as a proof ------------------------------
+    block {
+        var cut = ~kfStep8Ladder.(st[\cables], cfg);
+        if(cut.notEmpty) {
+            st[\notes] = st[\notes].add("шаг 8: срезано хвостов пути — " ++ cut.size);
+            st[\cables] = st[\cables].reject { |cb, i| cut.includes(i) };
+        };
+    };
+
+    // ----- a rest for EVERY destination, and for destinations only --------
+    st[\cables].do { |cb|
+        var dl = cb[\dst][0], dk = cb[\dst][1];
+        if(restSec[dl].isNil) { restSec[dl] = () };
+        restSec[dl][dk] = st[\rests][~kfIdOf.(dl, dk)];
+    };
+
+    (
+        seed: facts[\seed], complexity: c, armTime: cfg.armTime,
+        rest: restSec, cables: st[\cables],
+        report: ( budget: budget, placed: st[\cables].size,
+                  deficit: budget - st[\cables].size, lamTarget: lamT,
+                  drawnLoops: legs.size, notes: st[\notes] )
+    )
+};
+
+// ----- deterministic repair (§7): ordered, bounded, and never partial ----
+// The eight steps hold V1–V13 by construction; this is the net under them, and
+// every fix is a NUMBER pulled to the ceiling the canon states, never a rule
+// bent. What cannot be pulled is CUT — and if errors survive `patchRepairMax`
+// passes the patcher refuses whole (precedent ~konGenerate), leaving the live
+// scheme untouched.
+~kfPatchRepair = { |sch, v, ctx, cfg|
+    var cables = (sch[\cables] ? []).select { |x| x[\enabled] != false }.collect { |x| x.copy };
+    var wins = (), rests = (), drop = [], lam, restSec = ();
+    var idOf = { |lk| ~kfIdOf.(lk[0], lk[1]) };
+
+    // 1. per cable: gain, band, f_c and curve to the ceiling of the class
+    cables.do { |cb, i|
+        var dl = cb[\dst][0], dk = cb[\dst][1];
+        var row = ~kfRow.(dl, dk);
+        if(row.isNil or: { ~kfSpecOfNode.(dl, dk).isNil }
+            or: { ~kfSpecOfNode.(cb[\src][0], cb[\src][1]).isNil }) {
+            drop = drop.add(i);
+        } {
+            var cls = row[0];
+            var cl = ~kfClass[cls] ? ();
+            var gmax = ~kfGainMax.(dl, dk);
+            var rng, ceil;
+            cb[\pol] = if((cb[\pol] ? 1) < 0) { -1 } { 1 };
+            cb[\gain] = (cb[\gain] ? 0).clip(cfg.gainMin, max(cfg.gainMin, gmax));
+            if(gmax < cfg.gainMin) { drop = drop.add(i) };
+            if((cl[\bands] ? [\block]).includes(cb[\band] ? \block).not) { cb[\band] = \block };
+            if(cls == \P) { cb[\curve] = \step } {
+                if((cl[\curve] ? [\clip]).includes(cb[\curve] ? \clip).not) { cb[\curve] = \clip };
+                if((cb[\curve] == \fold) and: { ~kfFoldBands.includes(cb[\band]).not }) {
+                    cb[\curve] = \clip;
+                };
+            };
+            wins[idOf.(cb[\dst])] = cb[\win] ? [0, 1];
+        };
+    };
+    // windows are needed whole before f_c: the sampling law reads the window of
+    // the rate node, so a clamp done per cable would use a half-built table
+    cables.do { |cb, i|
+        var dl = cb[\dst][0], dk = cb[\dst][1];
+        if(drop.includes(i).not) {
+            var rng = ~kfBandNarrow.(cb[\band] ? \block);
+            var fmax = ~kfFmaxOf.(dl, dk, wins) ? 1e9;
+            var ceil = min(min(rng[1], fmax), ~kfFcCeil.value);
+            if(ceil < rng[0]) { drop = drop.add(i) } { cb[\fc] = (cb[\fc] ? rng[0]).clip(rng[0], ceil) };
+        };
+    };
+
+    // 2. per destination: the window inside the canon, the rest inside the
+    // window (P: on a position of its table), one window and one curve per node
+    wins.keysDo { |did|
+        var parts = did.asString.split($.);
+        var l = parts[0].asSymbol, k = parts[1].asSymbol;
+        var row = ~kfRow.(l, k);
+        var mine = cables.select { |cb, i| (idOf.(cb[\dst]) == did) and: { drop.includes(i).not } };
+        if(row.notNil and: { mine.notEmpty }) {
+            var ex = row[2] ? ();
+            var w = (mine[0][\win] ? [0, 1]).copy;
+            var r = ((sch[\rest] ? ())[l] ? ())[k];
+            var pos;
+            w[0] = w[0].clip(0, 1); w[1] = w[1].clip(0, 1);
+            ex[\wmin] !? { |x| w[0] = max(w[0], x) };
+            ex[\wmax] !? { |x| w[1] = min(w[1], x) };
+            if(row[0] == \P) {
+                pos = ~kfWinPos.(l, k, w);
+                if(pos.size > cfg.pPosMax) {
+                    pos = ~kfNodePos.(l, k).select { |x| (x >= w[0]) and: { x <= w[1] } }
+                        .copyRange(0, cfg.pPosMax - 1);
+                    w = [pos.first, pos.last];
+                };
+                if(pos.size < cfg.pPosMin) {
+                    var re = ~kfPatchWinP.(l, k, 0.5, cfg);
+                    if(re.isNil) {
+                        cables.do { |cb, i| if(idOf.(cb[\dst]) == did) { drop = drop.add(i) } };
+                    } { w = re[0]; r = re[1] };
+                    pos = ~kfWinPos.(l, k, w);
+                };
+                if(pos.notEmpty) { r = pos.minItem { |x| (x - (r ? 0.5)).abs } };
+            } {
+                if((w[1] - w[0]) < (2 * cfg.restMargin)) {
+                    cables.do { |cb, i| if(idOf.(cb[\dst]) == did) { drop = drop.add(i) } };
+                } {
+                    r = (r ? ((w[0] + w[1]) * 0.5)).clip(w[0] + cfg.restMargin, w[1] - cfg.restMargin);
+                };
+            };
+            mine.do { |cb| cb[\win] = w; cb[\curve] = mine[0][\curve] };
+            rests[did] = r;
+        };
+    };
+
+    cables = cables.reject { |cb, i| drop.includes(i) };
+    drop = [];
+
+    // 3. fan-in / fan-out: the surplus cable is the LAST drawn one
+    block {
+        var fin = (), fout = ();
+        cables.do { |cb, i|
+            var s = idOf.(cb[\src]), d = idOf.(cb[\dst]);
+            fin[d] = (fin[d] ? 0) + 1; fout[s] = (fout[s] ? 0) + 1;
+            if(fin[d] > cfg.fanIn or: { fout[s] > cfg.fanOut }) { drop = drop.add(i) };
+        };
+        cables = cables.reject { |cb, i| drop.includes(i) };
+        drop = [];
+    };
+
+    // 4. the ladder (§6 step 8) and the loops (V8)
+    block {
+        var cut = ~kfStep8Ladder.(cables, cfg);
+        cables = cables.reject { |cb, i| cut.includes(i) };
+    };
+    lam = ~kfLambda.(( cables: cables ));
+    lam[\loops].do { |lp, li|
+        if(lp[\lam] > cfg.lamMax) {
+            var sc = ((cfg.lamMax * 0.99) / max(1e-9, lp[\lam])) ** (1 / max(1, lp[\len]));
+            cables.do { |cb|
+                var s = idOf.(cb[\src]), d = idOf.(cb[\dst]);
+                if(lp[\nodes].includes(s) and: { lp[\nodes].includes(d) }) {
+                    cb[\gain] = (cb[\gain] * sc).clip(cfg.gainMin, ~kfGainMax.(cb[\dst][0], cb[\dst][1]));
+                };
+            };
+        };
+    };
+    // an excited loop over the ceiling, a loop through epsilon and a pair of
+    // commensurable periods are all cut the same way: the RETURN cable goes,
+    // and the pair stops being a cycle at all
+    block {
+        var kill = [], exc = 0;
+        lam[\loops].do { |lp, li|
+            var bad = lp[\nodes].any { |nid| nid.asString.split($.)[0] == "epsilon" };
+            if(lp[\lam] >= 1) { exc = exc + 1; if(exc > cfg.loopExcMax) { bad = true } };
+            lam[\loops].copyRange(0, li - 1).do { |pp|
+                if(~kfPatchIncomm.(pp[\period], lp[\period], cfg).not) { bad = true };
+            };
+            if(bad) { kill = kill.add(lp[\nodes]) };
+        };
+        kill.do { |ns|
+            var victim = cables.detect { |cb|
+                (ns.includes(idOf.(cb[\src]))) and: { ns.includes(idOf.(cb[\dst])) }
+                    and: { (cb[\pol] ? 1) < 0 };
+            } ?? {
+                cables.detect { |cb|
+                    (ns.includes(idOf.(cb[\src]))) and: { ns.includes(idOf.(cb[\dst])) };
+                };
+            };
+            victim !? { cables = cables.reject { |cb| cb === victim } };
+        };
+    };
+
+    // 5. whatever the four passes above did not name is cut by its own error
+    // message: the first surviving error names its cable, and that cable goes
+    if(v.notNil and: { v[\errors].notEmpty } and: { cables.notEmpty }) {
+        var msg = v[\errors].first;
+        var tagged = { |lk| msg.contains(~kfIdTag.(idOf.(lk))) };
+        var victim = cables.select { |cb| tagged.(cb[\src]) and: { tagged.(cb[\dst]) } }.last
+            ?? { cables.select { |cb| tagged.(cb[\dst]) }.last };
+        victim !? { cables = cables.reject { |cb| cb === victim } };
+    };
+
+    cables.do { |cb|
+        var dl = cb[\dst][0], dk = cb[\dst][1];
+        if(restSec[dl].isNil) { restSec[dl] = () };
+        restSec[dl][dk] = rests[idOf.(cb[\dst])]
+            ?? { ((sch[\rest] ? ())[dl] ? ())[dk] ? 0.5 };
+    };
+    sch.copy.putAll(( cables: cables, rest: restSec ))
+};
+
+// ----- §7 guarantees G1–G10 --------------------------------------------
+// G4 (census connectivity), G5 (an excited loop) and G6 (depths 1–4) are NOT
+// reachable at low `c` and saying otherwise would be a lie about the drawing:
+// the back-edge quota of 0_grid is floor(c·N/4), so below `patchGuardC` there
+// are no returns at all — no inversion, no cycle, no long route, and §6 step 5
+// states outright that c = 0 is `ruhe`. Below the threshold they are reported
+// as NOTES; above it they are guarantees.
+~kfGuarantees = { |sch, v, facts, cfg|
+    var c = (facts !? { |f| f[\complexity] }) ? 1;
+    var cables = (sch[\cables] ? []).select { |x| x[\enabled] != false };
+    var e = v[\errors] ? [];
+    var has = { |code| e.any { |x| x.beginsWith(code) } };
+    var g = (), bands, cens = (), strong = true, order;
+    var drawnLoop, drawnBands, drawnBandSet;
+    var note = { |ok, txt| if(ok) { nil } { txt } };
+    order = ((~activeLayers ? ~kfLayerOrder).asArray).select { |l| ~ungSpecs[l].notNil };
+    if(order.isEmpty) { order = ~kfLayerOrder };
+    cables.do { |cb|
+        var a = cb[\src][0].asSymbol, b = cb[\dst][0].asSymbol;
+        cens[(a.asString ++ ">" ++ b.asString).asSymbol] = true;
+    };
+    order.do { |a|
+        var seen = [a], front = [a];
+        while { front.notEmpty } {
+            var nxt = [];
+            front.do { |x| order.do { |y|
+                if(seen.includes(y).not
+                    and: { cens[(x.asString ++ ">" ++ y.asString).asSymbol] == true }) {
+                    seen = seen.add(y); nxt = nxt.add(y);
+                };
+            }};
+            front = nxt;
+        };
+        if(seen.size < order.size) { strong = false };
+    };
+    drawnBandSet = if(facts.isNil) { [] } {
+        facts[\edgeTab].collect { |x|
+            ~kfBandOfFc.(~kfStep4Band.(facts, x[\routeLen], cfg)
+                .clip(~kfBandNarrow.(\block)[0], ~kfBandNarrow.(\rauheit)[1]));
+        }.as(Set).asArray;
+    };
+    // "the bands the composition of targets ADMITS" is a statement about the
+    // drawn EDGE and its destination layer together, not about the scheme's
+    // targets as a bag: one node carries exactly one rung, so a single zeta
+    // target would otherwise "admit" all four bands at once and make
+    // stratification unsatisfiable by arithmetic. A band is admitted when some
+    // drawn route asks for it INTO a layer that holds a node whose class and §5
+    // ceiling can take it — that is the opportunity the derivation may not skip.
+    bands = ~kfBandOrder.select { |b|
+        facts.notNil and: { facts[\edgeTab].any { |x|
+            (~kfBandOfFc.(~kfStep4Band.(facts, x[\routeLen], cfg)
+                .clip(~kfBandNarrow.(\block)[0], ~kfBandNarrow.(\rauheit)[1])) == b)
+            and: { ~kfPatchKeys.(x[\dst]).any { |k|
+                var row = ~kfRow.(x[\dst], k);
+                row.notNil and: { ((~kfClass[row[0]] ? ())[\bands] ? []).includes(b) }
+                    and: { (~kfFmaxOf.(x[\dst], k, ()) ? 0) >= ~kfBandNarrow.(b)[0] };
+            }};
+        }};
+    };
+    // epsilon is barred from every cycle (§C.5), so a pair drawn through it is
+    // not a loop candidate at all — counting it here would demand a loop the
+    // canon forbids
+    drawnLoop = facts.notNil and: {
+        ((0..4).any { |a| (0..4).any { |b|
+            (a < b) and: { facts[\loopPair][a][b] }
+                and: { ~kfLayerOrder[a] != \epsilon } and: { ~kfLayerOrder[b] != \epsilon };
+        } })
+            or: { (facts[\loopSelf] ? []).any { |x, i| (x == true)
+                and: { ~kfLayerOrder[i] != \epsilon } } };
+    };
+    drawnBands = drawnBandSet.size;
+    g[\G1] = has.("V1").not and: { has.("V3").not } and: { has.("V4").not };
+    g[\G2] = has.("V9").not and: { has.("V7").not } and: { has.("V12").not } and: { has.("V13").not };
+    g[\G3] = has.("V6").not and: { ~kfStep8Ladder.(cables, cfg).isEmpty };
+    g[\G4] = (v[\interlayer] >= cfg.interlayerMin)
+        and: { order.every { |l|
+            cables.any { |cb| cb[\src][0].asSymbol == l } and: {
+                cables.any { |cb| cb[\dst][0].asSymbol == l } };
+        }} and: { strong };
+    g[\G5] = (v[\loops].count { |l| l[\lam] >= 1 } >= 1)
+        and: { v[\loops].size <= cfg.loopExcMax } and: { has.("Λ несоизмеримость").not };
+    g[\G6] = (1..cfg.depthMax).every { |d| v[\depths].includes(d) };
+    g[\G7] = bands.every { |b| cables.any { |cb| (cb[\band] ? \block) == b } };
+    g[\G8] = (cables.size >= cfg.cableMin) and: { cables.size <= cfg.cableMax }
+        and: { has.("V2").not };
+    g[\G9] = cables.every { |cb| (cb[\gain] ? 0) >= cfg.gainMin };
+    g[\G10] = has.("V11").not;
+    g[\drawnLoop] = drawnLoop;
+    g[\drawnBands] = drawnBands;
+    g[\notes] = [
+        note.(g[\G1], "G1 §F-инварианты нарушены (V1/V3/V4)"),
+        note.(g[\G2], "G2 канон узла нарушен (V7/V9/V12/V13)"),
+        note.(g[\G3], "G3 лестница τ не держится (V6/шаг 8)"),
+        note.(g[\G4], "G4 связность census/межслойная доля не держится"),
+        note.(g[\G5], "G5 возбуждённой петли нет"),
+        note.(g[\G6], "G6 присутствуют не все глубины 1–4 (" ++ v[\depths] ++ ")"),
+        note.(g[\G7], "G7 полоса без единого кабеля: "
+            ++ bands.reject { |b| cables.any { |cb| (cb[\band] ? \block) == b } }),
+        note.(g[\G8], "G8 кабелей " ++ cables.size ++ " вне 8–64"),
+        note.(g[\G9], "G9 есть кабель с усилением < " ++ cfg.gainMin),
+        note.(g[\G10], "G10 несоизмеримость P-целей не держится (V11)")
+    ].reject(_.isNil);
+    if(drawnLoop.not) {
+        g[\notes] = g[\notes].collect { |x|
+            if(x.beginsWith("G4") or: { x.beginsWith("G5") }) {
+                x ++ " — в рисунке (c " ++ c ++ ") нет ни одной замкнутой пары, "
+                    ++ "гарантия неприменима"
+            } { x };
+        };
+    };
+    if(drawnBands < cfg.depthMax) {
+        g[\notes] = g[\notes].collect { |x|
+            if(x.beginsWith("G6")) {
+                x ++ " — рисунок даёт " ++ drawnBands ++ " полос(ы) из " ++ cfg.depthMax
+                    ++ ", четвёртой ступени в нём нет"
+            } { x };
+        };
+    };
+    g
+};
+
+// the resting context of ANY derivation is the SPEC, never the live field: a
+// scheme must be a function of its drawing alone, and reading ~kfNodes here
+// would make the same act derive differently under a different preset. The
+// canon guards of §5 that need the rest of a node the derivation does not
+// address are therefore measured against its DEFAULT; ~kfValidate reads the
+// live value and may object — see §17 D78
+~kfSpecRest = {
+    var ctx = ( rest: () );
+    ~ungSpecs.keysValuesDo { |l, sp| sp.params.do { |p|
+        ctx[\rest][~kfIdOf.(l, p[\key])] = p[\spec].unmap(p[\spec].default);
+    }};
+    ctx
+};
+
+// reference §6: the eight steps, the ordered repair and the verdict over ONE
+// drawing. BOTH readers of a grid act enter here — ~kfRandomize with the
+// drawing of its own seed, ~konDerive with the drawing of the piece — so the
+// law of derivation has exactly one implementation, as the census law does
+// (§17 D85). Refusal is loud and whole: nil, and the live scheme untouched
+~kfDeriveScheme = { |facts, tag|
+    var cfg = ~cfg_kf;
+    var ctx = ~kfSpecRest.value;
+    var sch = ~kfSchemeFromGraph.(facts, ctx);
+    var v = ~kfValidate.(sch), passes = 0, gr;
+    while { v[\valid].not and: { passes < cfg.patchRepairMax } } {
+        sch = ~kfPatchRepair.(sch, v, ctx, cfg);
+        v = ~kfValidate.(sch);
+        passes = passes + 1;
+    };
+    if(v[\valid].not) {
+        ("8_koppelfeld — " ++ (tag ? "деривация") ++ ": схема НЕ выведена, после "
+            ++ passes ++ " проходов ремонта осталось нарушений: "
+            ++ v[\errors].size).error;
+        v[\errors].do { |x| ("    ОШИБКА " ++ x).postln };
+        nil
+    } {
+        gr = ~kfGuarantees.(sch, v, facts, cfg);
+        sch[\mode] = v[\mode];
+        sch[\loops] = v[\loops];
+        sch[\report] = (sch[\report] ? ()).putAll((
+            complexity: facts[\complexity],
+            cables: v[\cables], targets: v[\targets],
+            interlayer: v[\interlayer], depths: v[\depths],
+            maxDepth: v[\maxDepth], lamMax: v[\lamMax], mode: v[\mode],
+            loops: v[\loops].size, repairs: passes, valid: true,
+            guarantees: gr,
+            notes: ((sch[\report] ? ())[\notes] ? []) ++ gr[\notes] ++ v[\notes]
+        ));
+        sch
+    };
+};
+
+// ----- §7 the patcher: a patch in one click is a seed -------------------
+~kfRandomize = { |seed, c = 0.5|
+    var cfg = ~cfg_kf;
+    if(~konActive == true) {
+        ("8_koppelfeld — ~kfRandomize отключён при активном акте Konstruktion: "
+            ++ "случайная схема разрушила бы выведенную пьесу (~konActive)").error;
+        nil
+    } {
+        var grid, used, sch, passes = 0;
+        seed = (seed ? Date.seed).asInteger;
+        c = c.clip(0, 1);
+        // ~gridGenerate refuses after ~cfg_grid.graphTries graphs; the walk over
+        // the neighbouring seeds is deterministic and the seed that DREW is
+        // written into the report — a silent substitution would break A-3
+        while { grid.isNil and: { passes < cfg.patchSeedTries } } {
+            used = seed + passes;
+            grid = ~gridGenerate.(c, used);
+            passes = passes + 1;
+        };
+        if(grid.isNil) {
+            ("8_koppelfeld — ~kfRandomize: сетка не нарисовалась за "
+                ++ cfg.patchSeedTries ++ " seed'ов от " ++ seed ++ " (c = " ++ c
+                ++ ") — схема НЕ выведена").error;
+            nil
+        } {
+            sch = ~kfDeriveScheme.(~kfGraphFacts.(grid, cfg.patchTtier),
+                "~kfRandomize: seed " ++ seed ++ " · c " ++ c);
+            // the seed that DREW is written into the report — a silent
+            // substitution would break A-3
+            sch !? { sch[\report].putAll(( seed: seed, gridSeed: used )) };
+            sch
+        };
+    };
 };
 
 // ----- applying a scheme (§10.2): a cut, not a crossfade ---------------
