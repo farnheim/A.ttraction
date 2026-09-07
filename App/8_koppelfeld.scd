@@ -6,8 +6,9 @@
 // All 111 params are proxied, not only destinations: `n_set` silently drops
 // `n_mapa`, so partial proxying would tear the scheme on any ~setParam.
 // Stage S2: cables, band/τ, window, clip/fold, arm/disarm, ~kfApply/~kfCut,
-// registries, ~kfLambda, validator V1–V13, ~kfPoke. Curve `step` (class P) is
-// stage S3; until then V9 rejects every cable into a P node (class ceiling 0).
+// registries, ~kfLambda, validator V1–V13, ~kfPoke.
+// Stage S3: curve `step` for the 20 pitch nodes (class P) — ~kfLattice (94 Hz,
+// 3-limit), position table per node, hysteresis, dwell, cut ≤ 30 ms.
 // Buses: 111 node audio (1 ch) + 1 control for arm; §3.7 — 5x headroom.
 // Loads AFTER the layers (needs ~ungSpecs) and BEFORE the mixer.
 // Spec: plans/active/patchbay-koppelfeld.md (§3–§5, §10, §16).
@@ -38,7 +39,16 @@
     modeWanderung: 1.6,    // §4.4 umlauf → wanderung threshold
     incommTol:     0.03,   // §4.4 forbidden neighbourhood around p/q
     incommMax:     4,      // §4.4 p, q ≤ this
-    interlayerMin: 0.6     // §4.3 V10 interlayer cable share
+    interlayerMin: 0.6,    // §4.3 V10 interlayer cable share
+
+    pHyst:         0.2,    // §3.6 step hysteresis, share of the position gap
+    pHystMax:      0.5,    // …and its ceiling: half a gap is a dead band edge to edge
+    pDwell:        20,     // §3.6 dwell, s: a step reads as a block, not a move
+    pCut:          0.03,   // §3.6 cut, s: dF/dt = 0 between steps
+    pPosMax:       5,      // §3.6 positions a scheme window may admit
+    pPosMin:       2,      // fewer than two: the cable can never step
+    latB:          4       // 94 · 2^a · 3^b, |b| ≤ this — 3-limit, x5 unreachable
+                           // by construction; `a` is bounded by the Hz range only
 );
 
 
@@ -47,7 +57,10 @@
 // ----- §4.2 ceilings BY DESTINATION CLASS ------------------------------
 ~kfClass = (
     L: ( gain: 0.30, bands: [\block],                         curve: [\clip] ),
-    P: ( gain: 0,    bands: [\block],                         curve: [\step] ),
+    // reference 5.1 leaves the P gain as "— (step mode)": the ceiling that
+    // matters is the position table, not the slope. 1.0 lets a full-scale
+    // source deviation cross the whole window and no more
+    P: ( gain: 1.0,  bands: [\block],                         curve: [\step] ),
     S: ( gain: 1.6,  bands: [\rauheit, \puls, \gang, \block], curve: [\clip, \fold] ),
     D: ( gain: 1.2,  bands: [\rauheit, \puls, \gang, \block], curve: [\clip] ),
     W: ( gain: 1.4,  bands: [\puls, \gang, \block],           curve: [\clip, \fold] ),
@@ -227,6 +240,77 @@
     };
 };
 
+// ----- §3.6: the 94 Hz lattice and the position table of a P node -------
+// 94 · 2^a · 3^b only: the major third (x5) is excluded BY CONSTRUCTION, which
+// is what closes metric C-6 — there is no state of the field in which a pitch
+// node can land on 470 / 940 / 1880 / 4700 Hz
+~kfLattice = { |loHz, hiHz|
+    var out = [];
+    var lo = max(loHz, 1e-6);
+    (~cfg_kf.latB.neg .. ~cfg_kf.latB).do { |b|
+        var f0 = 94 * (3 ** b);
+        // the octave exponent is bounded BY THE Hz RANGE, never by a constant:
+        // a fixed |a| ceiling drops the outer 3^±4 columns of the top and bottom
+        // octaves, and ~kfWinPos would then return a different number of
+        // positions for the SAME interval in a different register — V7 would
+        // accept or reject one window depending on its octave
+        var aLo = (lo / f0).log2.floor.asInteger - 1;
+        var aHi = (hiHz / f0).log2.ceil.asInteger + 1;
+        if(aHi >= aLo) {
+            (aLo .. aHi).do { |a|
+                var f = 94 * (2 ** a) * (3 ** b);
+                if(f >= loHz and: { f <= hiHz }) { out = out.add(f) };
+            };
+        };
+    };
+    out = out.sort;
+    // unique factorization makes duplicates impossible; the filter states the
+    // invariant instead of trusting it
+    out.select { |f, i| (i == 0) or: { (f - out[i - 1]).abs > (f * 1e-9) } };
+};
+
+// The FULL table of a P node, in NORMALIZED coordinates, sorted:
+//  · a stepped spec publishes its own grid (theta.fragOct — §C.8 whole octave);
+//  · alpha carries its own score table (reference 10.1, open question 1): the
+//    spring tones are the DEFAULTS of its own P rows, so the score stays the
+//    single source of truth instead of a second copy here;
+//  · everything else is the lattice inside the spec range. P specs are in MIDI
+//    notes, so the lattice is built in Hz and converted before unmap.
+~kfNodePos = { |layer, key|
+    var p = ~kfParamOf.(layer, key);
+    var row = ~kfRow.(layer, key);
+    if(p.isNil or: { row.isNil } or: { row[0] != \P }) { nil } {
+        var cs = p[\spec], vals;
+        case
+        { cs.step > 0 } {
+            vals = (cs.minval, cs.minval + cs.step .. cs.maxval);
+        }
+        { layer.asSymbol == \alpha } {
+            vals = ~ungSpecs[\alpha].params
+                .select { |q| (~kfRow.(\alpha, q[\key]) !? { |r| r[0] }) == \P }
+                .collect { |q| q[\spec].default }.sort;
+        }
+        { p[\disp] == \note } {
+            vals = ~kfLattice.(cs.minval.midicps, cs.maxval.midicps).collect(_.cpsmidi);
+        }
+        {
+            ("8_koppelfeld — P-узел " ++ layer ++ "." ++ key
+                ++ ": спек не ступенчатый и не в нотах, таблица решётки не выводится").error;
+            vals = nil;
+        };
+        vals !? {
+            vals.collect { |v| cs.unmap(v) }
+                .select { |x| (x >= 0) and: { x <= 1 } }.sort
+        };
+    };
+};
+
+// positions the SCHEME window admits (reference 5.1: ≤ 5 of them)
+~kfWinPos = { |layer, key, win|
+    var w = win ? [0, 1];
+    (~kfNodePos.(layer, key) ? []).select { |x| (x >= w[0]) and: { x <= w[1] } };
+};
+
 // ----- registries ------------------------------------------------------
 ~kfNodes     = ~kfNodes     ? ();   // \layer -> ( \param -> ( node: spec: rest: win: curve: cables: bus: ) )
 ~kfCables    = ~kfCables    ? [];   // applied cable table (§4.1 events)
@@ -234,6 +318,9 @@
 ~kfSchaltung = ~kfSchaltung;        // the applied scheme
 ~kfVerdict   = ~kfVerdict;          // validator verdict of the last ~kfApply
 ~kfArmed     = ~kfArmed ? false;
+// ~kfRestApply rebuilds a step body so the bus follows the new rest at once;
+// the builders below write rest and build the body themselves, and set this
+~kfRestQuiet = ~kfRestQuiet ? false;
 
 // ----- arm: ONE kr proxy for the whole field (§10.2) -------------------
 ~kfArmBus = {
@@ -312,11 +399,21 @@
 // body clips anyway, but ~ungVals, the tuner and ~savePreset would store the
 // unclipped value and the preset would stop reproducing what sounds. A node
 // without cables has no window, so no margin applies to it
-~kfRestBounds = { |n|
+~kfRestBounds = { |n, layer, key|
     if(n[\cables].isEmpty) { [0, 1] } {
-        var lo = n[\win][0] + ~cfg_kf.restMargin;
-        var hi = n[\win][1] - ~cfg_kf.restMargin;
-        if(lo > hi) { var m = (n[\win][0] + n[\win][1]) * 0.5; [m, m] } { [lo, hi] };
+        // a step node is bounded by its POSITIONS, not by the window margin: the
+        // margin keeps a clipping node off its dead edge, while a step node at
+        // its lowest position is still free to step up. Five positions of the
+        // 94 Hz lattice span ≈ 0.15 of a pitch spec — narrower than 2·restMargin,
+        // so the margin rule would make every legal P window unreachable
+        var ps = if(n[\curve] == \step and: { layer.notNil }) {
+            ~kfWinPos.(layer, key, n[\win])
+        } { [] };
+        if(ps.notEmpty) { [ps.first, ps.last] } {
+            var lo = n[\win][0] + ~cfg_kf.restMargin;
+            var hi = n[\win][1] - ~cfg_kf.restMargin;
+            if(lo > hi) { var m = (n[\win][0] + n[\win][1]) * 0.5; [m, m] } { [lo, hi] };
+        };
     };
 };
 
@@ -326,12 +423,30 @@
 ~kfRestApply = { |layer, key, rn|
     var n = (~kfNodes[layer.asSymbol] ? ())[key.asSymbol];
     if(n.isNil) { nil } {
-        var b = ~kfRestBounds.(n);
+        var b = ~kfRestBounds.(n, layer.asSymbol, key.asSymbol);
         n[\rest] = rn.clip(b[0], b[1]);
+        // a P destination is quantized in the graph, so its rest is snapped here
+        // too: otherwise ~ungVals, the tuner and the preset would carry an aim
+        // that no reachable state of the node ever sounds. Only positions that
+        // satisfy the V7 margin are eligible, or the next validate would reject
+        // the very rest this function just installed
+        if(n[\curve] == \step) {
+            var ps = ~kfWinPos.(layer, key, n[\win]);
+            if(ps.notEmpty) { n[\rest] = ps.minItem { |x| (x - n[\rest]).abs } };
+        };
         Ndef(n[\node]).set(\rest, n[\rest]);
         ((~kfFanOut[layer.asSymbol] ? ())[key.asSymbol] ? []).do { |e|
             var dn = (~kfNodes[e[\dst][0]] ? ())[e[\dst][1]];
             dn !? { Ndef(dn[\node]).set(("r" ++ e[\slot]).asSymbol, n[\rest]) };
+        };
+        // a step body BAKES the index of its start position from the rest it sees
+        // at build time, and its dwell sweep restarts with it (D32): a bare
+        // \rest write would leave the bus on the old position for up to dwell
+        // seconds while ~ungVals, the tuner and a preset taken now show the new
+        // one. The builders write rest and rebuild the body themselves — they
+        // raise ~kfRestQuiet instead of paying for the build twice
+        if((n[\curve] == \step) and: { n[\bus].notNil } and: { ~kfRestQuiet.not }) {
+            ~kfNodeBody.(layer.asSymbol, key.asSymbol);
         };
         n[\rest]
     };
@@ -359,10 +474,20 @@
     };
     var win = if(mine.isEmpty) { [0, 1] } { (mine[0][\win] ? [0, 1]) };
     var curve = if(mine.isEmpty) { \clip } { (mine[0][\curve] ? \clip) };
+    var isP = (~kfRow.(layer, key) !? { |r| r[0] }) == \P;
     // V9: a convergence node must clip — a fold over the sum of three cables
     // reflects the already-summed signal and loses each contribution
     if(mine.size >= 2) { curve = \clip };
-    ( cables: mine, win: win, curve: curve )
+    // …but a P node is quantized whatever its fan-in: the forced clip above
+    // would put a pitch node back on a continuum, and reference 3.1 forbids
+    // addressing class P as a continuous value in ANY reachable state
+    if(isP and: { mine.notEmpty }) { curve = \step };
+    (
+        cables: mine, win: win, curve: curve,
+        hyst:  if(mine.isEmpty) { ~cfg_kf.pHyst  } { mine[0][\hyst]  ? ~cfg_kf.pHyst  },
+        dwell: if(mine.isEmpty) { ~cfg_kf.pDwell } { mine[0][\dwell] ? ~cfg_kf.pDwell },
+        cut:   if(mine.isEmpty) { ~cfg_kf.pCut   } { mine[0][\cut]   ? ~cfg_kf.pCut   }
+    )
 };
 
 ~kfFanOutBuild = {
@@ -403,6 +528,8 @@
         var rest = n[\rest];
         var wlo  = n[\win][0], whi = n[\win][1];
         var fold = (n[\curve] == \fold);
+        var step = (n[\curve] == \step);
+        var pos, bnds, gaps, idx0;
         var armBus = ~kfArmBus.value;
         var wired = [];
         // windows of ALL nodes — the dynamic f_max is read off the rate node
@@ -432,6 +559,32 @@
                 ));
             };
         };
+        // §3.6 step machine, prepared on the language side: the window admits a
+        // handful of positions, so the boundaries between them and the gap of
+        // each boundary are CONSTANTS in the graph — no Buffer, no index lookup
+        if(step) {
+            pos = ~kfWinPos.(layer, key, n[\win]);
+            if(pos.size < ~cfg_kf.pPosMin) {
+                ("8_koppelfeld — P-узел " ++ layer ++ "." ++ key ++ ": окно " ++ n[\win]
+                    ++ " содержит " ++ pos.size ++ " позиций таблицы (нужно ≥ "
+                    ++ ~cfg_kf.pPosMin ++ "), ступень недостижима — узел остаётся clip").error;
+                step = false;
+                // the registry must state what the body IS: ~kfRestBounds and
+                // ~kfRestApply branch on \curve, and a \step registry over a
+                // clipping body snaps the rest onto lattice positions the body
+                // never visits. Reachable past the validator: a layer hot-swap
+                // under a live scheme, or a direct ~kfInstall. The rest goes
+                // back through ~setParam for the same reason as in ~kfBuildLayer:
+                // the store must carry what the clipping body will sound
+                n[\curve] = \clip;
+                ~setParam.(layer.asSymbol, key.asSymbol, cs.map(rest));
+                rest = n[\rest];
+            } {
+                bnds = (0 .. pos.size - 2).collect { |i| (pos[i] + pos[i + 1]) * 0.5 };
+                gaps = (0 .. pos.size - 2).collect { |i| pos[i + 1] - pos[i] };
+                idx0 = bnds.count { |b| rest > b };
+            };
+        };
         // EXACTLY ONE channel: a two-channel node would go through n_mapan and
         // cover the NEIGHBOURING layer control — silent corruption (§3.3)
         Ndef(n[\node], {
@@ -459,9 +612,38 @@
             if(wired.notEmpty and: { armBus.notNil }) {
                 u = u + (acc * In.kr(armBus, 1));
             };
-            x = if(fold) {
+            x = case
+            { step } {
+                // hysteresis as a WIDENED boundary, not as an index distance:
+                // going up asks u to overshoot the boundary by hyst·gap, going
+                // down to undershoot it by the same — the pair `up ≤ dn` makes a
+                // chatter across one boundary impossible by arithmetic
+                var prev = LocalIn.ar(1, idx0);
+                var hyst = \hyst.ar(n[\hyst]).clip(~cfg_kf.pHyst, ~cfg_kf.pHystMax);
+                var up = 0, dn = 0, wantUp, wantDn, tgt, free, idx, stepV;
+                bnds.do { |b, i|
+                    up = up + (u > (b + (hyst * gaps[i])));
+                    dn = dn + (u > (b - (hyst * gaps[i])));
+                };
+                wantUp = up > prev;
+                wantDn = dn < prev;
+                tgt = (wantUp * up) + (wantDn * dn)
+                    + ((1 - wantUp) * (1 - wantDn) * prev);
+                // dwell measured on the FED-BACK index: one block late, which is
+                // nothing against 20 s, and it needs no second state variable
+                free = Sweep.ar(Changed.ar(prev), 1) > \dwell.ar(n[\dwell]).max(~cfg_kf.pDwell);
+                idx = prev + (free * (tgt - prev));
+                LocalOut.ar(idx);
+                stepV = pos[0];
+                gaps.do { |g, i| stepV = stepV + ((idx > (i + 0.5)) * g) };
+                // the cut, and nothing but the cut: between steps the value is a
+                // constant, so dF/dt = 0 holds by construction (C-6)
+                Lag.ar(stepV, \cut.ar(n[\cut]).clip(0, ~cfg_kf.pCut))
+            }
+            { fold } {
                 Fold.ar(u, \wlo.ar(wlo), \whi.ar(whi))
-            } {
+            }
+            {
                 Clip.ar(u, \wlo.ar(wlo), \whi.ar(whi))
             };
             cs.map(x)
@@ -502,21 +684,45 @@
             };
             reg[key] = (
                 node: ~kfNodeKey.(layer, key), spec: p[\spec], rest: ~kfRestOf.(layer, p),
-                win: [0, 1], curve: \clip, cables: [], bus: nil
+                win: [0, 1], curve: \clip, cables: [], bus: nil,
+                hyst: ~cfg_kf.pHyst, dwell: ~cfg_kf.pDwell, cut: ~cfg_kf.pCut
             );
         };
         ~kfNodes[layer] = reg;
         reg.keysValuesDo { |key, n|
             var w = ~kfWireOf.(layer, key);
             n[\win] = w[\win]; n[\curve] = w[\curve]; n[\cables] = w[\cables];
+            n[\hyst] = w[\hyst]; n[\dwell] = w[\dwell]; n[\cut] = w[\cut];
         };
+        // before the bodies, and the fan-out before that: a hot-swapped layer
+        // carries the rest it had in ~ungVals, which under a live scheme can sit
+        // outside the node window. Same disease D-11/D25 closed for ~setParam and
+        // ~kfInstall — route through ~setParam so ~ungVals, tuner and preset hold
+        // what the graph accepts instead of what the layer asked for
+        ~kfFanOutBuild.value;
+        ~kfRestQuiet = true;
+        {
+            reg.keysValuesDo { |key, n|
+                if(n[\cables].notEmpty) { ~setParam.(layer, key, n[\spec].map(n[\rest])) };
+            };
+        }.protect { ~kfRestQuiet = false };
         // two passes: a body build needs the source bus, so pass one gives every
         // node of the layer a body and a bus (cables whose source has no bus yet
         // are skipped silently), pass two rebuilds the destinations over ready
         // buses. At load time there are no cables, so pass two is empty
         reg.keysValuesDo { |key, n| ~kfNodeBody.(layer, key, false) };
         reg.keysValuesDo { |key, n| if(n[\cables].notEmpty) { ~kfNodeBody.(layer, key) } };
-        ~kfFanOutBuild.value;
+        // \rN of an OUTSIDE destination survives the rebuild in its nodeMap and
+        // outlives the fresh default of the new body: re-send every rest that
+        // feeds a cable, through the single writer
+        ~kfRestQuiet = true;
+        {
+            reg.keysValuesDo { |key, n|
+                if(((~kfFanOut[layer.asSymbol] ? ())[key] ? []).notEmpty) {
+                    ~kfRestApply.(layer, key, n[\rest]);
+                };
+            };
+        }.protect { ~kfRestQuiet = false };
         // one bundle per layer: 111 separate `map` calls at start is a visible stall
         s.bind {
             reg.keysValuesDo { |key, n| Ndef(layer).map(key, Ndef(n[\node])) };
@@ -659,6 +865,7 @@
     var cables = raw.select { |c| c[\enabled] != false };
     var errs = [], notes = [];
     var wins = (), curves = (), rests = (), indeg = (), outdeg = ();
+    var steps = (), stepDef = ( hyst: ~cfg_kf.pHyst, dwell: ~cfg_kf.pDwell, cut: ~cfg_kf.pCut );
     var lam, adj, depths = [], maxDepth = 0, interlayer = 0;
     var layIn = (), layOut = (), census = ();
     var restOf, winOf, reach, name;
@@ -696,6 +903,7 @@
         if(wins[did].isNil) {
             wins[did] = c[\win] ? [0, 1];
             curves[did] = c[\curve] ? \clip;
+            steps[did] = stepDef.collect { |v, f| c[f] ? v };
         } {
             if(wins[did] != (c[\win] ? [0, 1])) {
                 errs = errs.add("V7 два кабеля в " ++ name.(did) ++ " объявляют РАЗНОЕ окно "
@@ -703,6 +911,16 @@
             };
             if(curves[did] != (c[\curve] ? \clip)) {
                 errs = errs.add("V7 два кабеля в " ++ name.(did) ++ " объявляют РАЗНУЮ кривую");
+            };
+            // hyst/dwell/cut are NODE fields, and ~kfWireOf reads them off the
+            // first cable only: a second cable declaring its own would run
+            // unheard, and V9 checks each cable's floor as if both applied
+            stepDef.keysDo { |f|
+                var mine = c[f] ? stepDef[f];
+                if(steps[did][f] != mine) {
+                    errs = errs.add("V7 два кабеля в " ++ name.(did) ++ " объявляют РАЗНЫЙ "
+                        ++ f ++ ": " ++ steps[did][f] ++ " и " ++ mine);
+                };
             };
         };
         if(sl != dl) {
@@ -765,8 +983,25 @@
             if((cl[\curve] ? []).includes(curve).not) {
                 errs = errs.add("V9 кривая " ++ curve ++ " не допущена классом " ++ cls ++ ": " ++ tag);
             };
+            // §3.6: the step parameters are node-level, but a cable may compose
+            // them; canon floors are checked here and clamped again in the graph
             if(curve == \step) {
-                errs = errs.add("V9 кривая step — этап S3, на S2 не реализована: " ++ tag);
+                if((c[\hyst] ? cfg.pHyst) < cfg.pHyst) {
+                    errs = errs.add("V9 гистерезис " ++ c[\hyst] ++ " < " ++ cfg.pHyst
+                        ++ " — дребезг на границе зоны: " ++ tag);
+                };
+                if((c[\hyst] ? cfg.pHyst) > cfg.pHystMax) {
+                    errs = errs.add("V9 гистерезис " ++ c[\hyst] ++ " > " ++ cfg.pHystMax
+                        ++ " — граф зажимает там же, схема заявила бы неотработанное: " ++ tag);
+                };
+                if((c[\dwell] ? cfg.pDwell) < cfg.pDwell) {
+                    errs = errs.add("V9 простой " ++ c[\dwell] ++ " с < " ++ cfg.pDwell
+                        ++ " с — ступень читается как движение, а не как блок: " ++ tag);
+                };
+                if((c[\cut] ? cfg.pCut) > cfg.pCut) {
+                    errs = errs.add("V9 рез " ++ c[\cut] ++ " с > " ++ cfg.pCut
+                        ++ " с — глайд высоты: " ++ tag);
+                };
             };
             if(curve == \fold and: { ~kfFoldBands.includes(c[\band] ? \block).not }) {
                 errs = errs.add("V9 fold вне полос " ++ ~kfFoldBands ++ ": " ++ tag);
@@ -793,18 +1028,45 @@
         var l = parts[0].asSymbol, k = parts[1].asSymbol;
         var r = restOf.(l, k);
         var ex = (~kfRow.(l, k) !? { |row| row[2] }) ? ();
+        var isP = (~kfRow.(l, k) !? { |row| row[0] }) == \P;
+        var pos = if(isP) { ~kfWinPos.(l, k, w) } { [] };
         if(w[0] < 0 or: { w[1] > 1 }) { errs = errs.add("V7 окно вне [0,1]: " ++ name.(did) ++ " " ++ w) };
         if(w[0] >= w[1]) {
             errs = errs.add("V7 wlo ≥ whi: " ++ name.(did) ++ " " ++ w);
         } {
+            case
+            // §3.6 / reference 5.1: the window of a P destination is a SUBSET of
+            // the node table, at most five positions. Its rest is measured in
+            // POSITIONS, not in width: five points of the 94 Hz lattice span
+            // ≈ 0.15 of a pitch spec, so the 2·restMargin width rule would make
+            // every legal P window illegal, and a step node parked on its lowest
+            // position is still free to step up — unlike a clipping one
+            { isP } {
+                if(pos.size > cfg.pPosMax) {
+                    errs = errs.add("V7 окно P-узла " ++ name.(did) ++ " " ++ w ++ " допускает "
+                        ++ pos.size ++ " позиций таблицы > " ++ cfg.pPosMax);
+                };
+                if(pos.size < cfg.pPosMin) {
+                    errs = errs.add("V7 окно P-узла " ++ name.(did) ++ " " ++ w ++ " допускает "
+                        ++ pos.size ++ " позиций таблицы < " ++ cfg.pPosMin
+                        ++ " — ступень недостижима");
+                } {
+                    if(r < pos.first or: { r > pos.last }) {
+                        errs = errs.add("V7 покой " ++ r.round(0.001)
+                            ++ " вне позиций таблицы окна [" ++ pos.first.round(0.001) ++ ", "
+                            ++ pos.last.round(0.001) ++ "]: " ++ name.(did));
+                    };
+                };
+            }
             // a window narrower than 2·restMargin admits NO legal rest at all;
             // without this the failure surfaced as a confusing complaint about the
             // rest, and ~kfRestBounds collapsed the rest onto the midpoint
-            if((w[1] - w[0]) < (2 * cfg.restMargin)) {
+            { (w[1] - w[0]) < (2 * cfg.restMargin) } {
                 errs = errs.add("V7 ширина окна " ++ (w[1] - w[0]).round(0.001) ++ " < 2·"
                     ++ cfg.restMargin ++ ": ни одно значение покоя не лежит в окне "
                     ++ w ++ " с зазором: " ++ name.(did));
-            } {
+            }
+            {
                 if(r < (w[0] + cfg.restMargin) or: { r > (w[1] - cfg.restMargin) }) {
                     errs = errs.add("V7 покой " ++ r.round(0.001) ++ " ближе " ++ cfg.restMargin
                         ++ " к границе окна " ++ w ++ ": " ++ name.(did));
@@ -980,6 +1242,10 @@
         var arrival = [\ioi0, \decel, \ioiMax, \popScale, \gapScale, \density];
         var pTargets = cables.select { |c| (~kfRow.(c[\dst][0], c[\dst][1]) !? { |r| r[0] }) == \P };
         var pPerLayer = ();
+        // reference 3.1 p.5 counts stepping NODES, not cables: two cables into one
+        // pitch node are still one walking fundamental, and the count must not
+        // call that a chord progression
+        var pNodes = ();
         if(lam[\mode] == \wanderung) {
             cables.do { |c|
                 if(c[\src][0].asSymbol == \theta and: { arrival.includes(c[\src][1].asSymbol) }) {
@@ -988,12 +1254,47 @@
                 };
             };
         };
-        pTargets.do { |c| var l = c[\dst][0].asSymbol; pPerLayer[l] = (pPerLayer[l] ? 0) + 1 };
+        pTargets.do { |c|
+            var l = c[\dst][0].asSymbol;
+            var did = ~kfIdOf.(c[\dst][0], c[\dst][1]);
+            if(pNodes[did].isNil) {
+                pNodes[did] = c;
+                pPerLayer[l] = (pPerLayer[l] ? 0) + 1;
+            };
+        };
         pPerLayer.keysValuesDo { |l, n|
             if(n > 1) { errs = errs.add("V11 P-целей в слое " ++ l ++ ": " ++ n ++ " > 1") };
         };
-        if(pTargets.size > 2) { errs = errs.add("V11 P-целей всего " ++ pTargets.size ++ " > 2") };
+        if(pNodes.size > 2) { errs = errs.add("V11 P-целей всего " ++ pNodes.size ++ " > 2") };
         if((pPerLayer[\delta] ? 0) > 1) { errs = errs.add("V11 P-целей delta > 1") };
+        // "…and their bands must be incommensurable" (reference 3.1 p.5): two
+        // fundamentals stepping on commensurable clocks read as a progression,
+        // which composition.md excludes outright
+        if(pNodes.size == 2) {
+            var fcs = pNodes.values.collect { |c| c[\fc] }.sort;
+            var r = fcs[1] / max(1e-9, fcs[0]);
+            // both P clocks live in ONE band (B4 0.004–0.05), so their ratio runs
+            // to 12.5, while a p/q grid with p,q ≤ 4 stops at 4: a 1:8 capture —
+            // the plainest progression there is — passed it untouched. The ratio
+            // is folded INTO THE OCTAVE and the grid with it (log distance mod 1),
+            // which catches 8, 6 and 12 as the 1, 3/2 and 3/2 they are, and keeps
+            // the forbidden set as sparse as before instead of rejecting everything
+            var oct = r.log2, tol = (1 + cfg.incommTol).log2;
+            var near = nil, best = 1;
+            (1..cfg.incommMax).do { |p| (1..cfg.incommMax).do { |q|
+                var f = p / q;
+                if(p.gcd(q) == 1 and: { f >= 1 }) {
+                    var d = (oct - f.log2).mod(1.0);
+                    d = min(d, 1 - d);
+                    if(d <= tol and: { d < best }) { best = d; near = [p, q] };
+                };
+            }};
+            near !? {
+                errs = errs.add("V11 полосы двух P-целей соизмеримы: отношение "
+                    ++ r.round(0.001) ++ " в октавном приведении ближе "
+                    ++ (cfg.incommTol * 100) ++ " % к " ++ near[0] ++ "/" ++ near[1]);
+            };
+        };
         brk.value;
     };
 
@@ -1077,23 +1378,34 @@
     ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
         var w = ~kfWireOf.(l, k);
         n[\win] = w[\win]; n[\curve] = w[\curve]; n[\cables] = w[\cables];
+        n[\hyst] = w[\hyst]; n[\dwell] = w[\dwell]; n[\cut] = w[\cut];
     }};
     ~kfFanOutBuild.value;
+    // both rest passes run QUIET: each is followed by the very body build that
+    // ~kfRestApply would otherwise trigger per node
+    ~kfRestQuiet = true;
     // destination rests are brought into the NEW window through ~setParam:
     // ~ungVals, tuner and preset must carry what sounds, not what was asked
-    ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
-        if(n[\cables].notEmpty) { ~setParam.(l, k, n[\spec].map(n[\rest])) };
-    }};
+    {
+        ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
+            if(n[\cables].notEmpty) { ~setParam.(l, k, n[\spec].map(n[\rest])) };
+        }};
+        // the scheme's rest goes in BEFORE the bodies (and after ~kfFanOut,
+        // which ~kfRest needs): a P body bakes the index of its start position
+        // from the rest it sees at build time, and a rest arriving afterwards
+        // would leave the machine sounding one position while ~ungVals stores
+        // another until the dwell expires. \rN written now survives the rebuild
+        // in the nodeMap (D26)
+        (sch[\rest] ? ()).keysValuesDo { |l, e| e.keysValuesDo { |k, v|
+            var cs = ~kfSpecOfNode.(l, k);
+            cs !? { ~setParam.(l, k, cs.map(v.clip(0, 1))) };
+        }};
+    }.protect { ~kfRestQuiet = false };
     was.do { |lk| ~kfNodeBody.(lk[0], lk[1]) };
     ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
         if(n[\cables].notEmpty and: { was.any { |lk| (lk[0] == l) and: { lk[1] == k } }.not }) {
             ~kfNodeBody.(l, k);
         };
-    }};
-    // rest AFTER wiring: ~kfRest needs a finished ~kfFanOut
-    (sch[\rest] ? ()).keysValuesDo { |l, e| e.keysValuesDo { |k, v|
-        var cs = ~kfSpecOfNode.(l, k);
-        cs !? { ~setParam.(l, k, cs.map(v.clip(0, 1))) };
     }};
     ~kfSchaltung = sch;
 };
