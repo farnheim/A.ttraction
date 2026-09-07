@@ -202,7 +202,8 @@ s.waitForBoot({
     };
 
     // 7b. konstruktion (form §E.6): needs the sequencer (reading 1 = timeline);
-    // reading 2 waits for the schaltung derivation (stage S6) and is not built
+    // reading 2 IS the schaltung derivation and lives in 8_koppelfeld — without
+    // that module only reading 2 is skipped, with its reason printed
     if(~cfg_app.enableKonstruktion) {
         if(~cfg_app.enableSequencer) {
             (~appDir +/+ "9_konstruktion.scd").load;

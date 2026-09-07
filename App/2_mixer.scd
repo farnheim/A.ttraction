@@ -194,10 +194,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerFx      = ();    // space-echo strip: ( dlyMode:, revMode: PopUpMenu; bass:, treble: ruler; dlyGlyph:, revGlyph: UserView )
 ~mixerSoloBtn = ();    // layer -> Button (solo)
 ~mixerMuteBtn = ();    // layer -> Button (mute)
-~mixerModNote = nil;   // StaticText: why random is locked
-~mixerModEz   = ();    // modmatrix line index -> ruler with [\label] StaticText + [\glyph] UserView (nil-safe; 8_modmatrix.scd)
-~mixerModRnd  = nil;   // Button (random) — disabled while an act is active
-~mixerGraph   = nil;   // UserView: mod graph (straight lines layer -> param)
+~mixerPatchLocked = "locked while an act is active";
+~mixerPatchNote = nil; // StaticText: the last patch, or why the patcher refused
+~mixerPatchSeed = nil; // NumberBox: seed of ~kfRandomize (0 = a fresh one per click)
+~mixerPatchBtn  = nil; // Button (patch) — disabled while an act is active
+~mixerPatchSeedVal = ~mixerPatchSeedVal ? 0;   // survives a window reopen
+~mixerGraph   = nil;   // UserView: koppelfeld graph (cables per layer pair)
 ~mixerTiers   = nil;   // UserView: tiers of ~seqTimeline
 ~mixerPresetPop  = nil;   // PopUpMenu (project presets; read by ~ungRefreshPresets)
 ~mixerPresetName = nil;   // TextField (preset name)
@@ -215,16 +217,21 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~gridLastText    = ~gridLastText;   // the field is score: survives a window reopen
 
 // piece buttons enable off ~konActive; only start/stop are gated — "score" is
-// always live and reports "no act" itself; random is the other way round
+// always live and reports "no act" itself; patch is the other way round
 ~mixerKonSync = {
     {
         var on = (~konActive == true);
         [\start, \stop].do { |k|
             ~uiBtnEnable.(~mixerKonBtns[k], on);
         };
-        ~uiBtnEnable.(~mixerModRnd, on.not);
-        ~mixerModNote !? { |t|
-            t.string_(if(on) { "locked while an act is active" } { "" });
+        ~uiBtnEnable.(~mixerPatchBtn, on.not and: { ~kfRandomize.notNil });
+        // the note carries the last patch report — only the lock message is the
+        // sync's to write, and only the sync's to take back
+        ~mixerPatchNote !? { |t|
+            case
+            { on } { t.string_(~mixerPatchLocked) }
+            { t.string == ~mixerPatchLocked } { t.string_("") }
+            { };
         };
         ~mixerGraph !? { |uv| uv.refresh };
         ~mixerTiers !? { |uv| uv.refresh };
@@ -253,16 +260,14 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerEz         = ();
     ~mixerSoloBtn    = ();
     ~mixerMuteBtn    = ();
-    ~mixerModEz      = ();
-    ~mixerModRnd     = nil;
-    ~mixerModNote    = nil;
+    ~mixerPatchNote  = nil;
+    ~mixerPatchSeed  = nil;
+    ~mixerPatchBtn   = nil;
     ~mixerGraph      = nil;
     ~mixerTiers      = nil;
     ~mixerFx         = ();
     ~mixerPresetPop  = nil;
     ~mixerPresetName = nil;
-    ~modmatrixGuiSync = nil;
-    ~modmatrixGuiRelabel = nil;
     ~mixerRecBtn     = nil;
     ~mixerGridTxt    = nil;
     ~mixerGridStatus = nil;
@@ -292,85 +297,76 @@ Ndef(\master).play(out: 0, numChannels: 2);
     };
 };
 
-~uiDrawLineGlyph = { |u, e|
-    var w = u.bounds.width, y = u.bounds.height / 2;
-    var ticks = ((e[\rate] ? 0) * 10).round.asInteger.clip(0, 12);
-    var col = if(e[\enabled] ? true) { ~uiPal.ink } { ~uiPal.rule };
-    Pen.use {
-        Pen.strokeColor = col; Pen.width = ~uiLineWidth;
-        Pen.lineDash = ~uiLineDash.(e[\depth] ? 0, e[\shape]);
-        Pen.line(4@y, (w - 12)@y); Pen.stroke;
-    };
-    Pen.strokeColor = col; Pen.width = 1;
-    ticks.do { |i| var x = 8 + (i * ((w - 28) / ticks.max(1))); Pen.line(x@(y - 8), x@(y - 4)) };
-    Pen.stroke;
-    Pen.moveTo((w - 12)@(y - 5)); Pen.lineTo((w - 2)@y); Pen.lineTo((w - 12)@(y + 5));
-    Pen.lineTo((w - 12)@(y - 5));
-    Pen.fillColor = if((e[\fm] ? 0) >= 0.6) { col } { ~uiPal.paper };
-    Pen.fillStroke;
-};
-
 // coordinates hand-fitted to the asymmetry of the drawing; a new sound class
-// will NOT appear in the graph until it has a place in both tables
+// will NOT appear in the graph until it has a place here
 ~mixerGraphPos = ( theta: 270@62, delta: 462@66, alpha: 100@212, zeta: 462@214, epsilon: 270@302 );
-~mixerGraphStacks = (
-    theta:   ( kind: \row, x: 312, y: 104, step: 44 ),
-    delta:   ( kind: \col, x: 392, y: 52,  side: \start ),
-    alpha:   ( kind: \col, x: 68,  y: 190, side: \end ),
-    zeta:    ( kind: \col, x: 392, y: 200, side: \start ),
-    epsilon: ( kind: \row, x: 226, y: 262, step: 44 )
-);
 ~mixerDrawGraph = { |u|
-    var keys = ~modKeys ? [], per = (), font = ~uiMono.(9), gfont = ~uiMono.(28), nfont = ~uiMono.(10);
-    var kon = ~konCurrent;
-    // a line's source is the layer of its LEADING coupling (~modKeys[src]), not its own target
-    var srcLayer = { |e| (keys[e[\src] ? -1] !? { |k| k[\target] }) ? e[\target] };
-    var posOf = { |layer| if(~mixerLayers.includes(layer)) { ~mixerGraphPos[layer] } };
-    var srcPos = { |e| posOf.(srcLayer.(e)) };
-    var short = { |i| var s = (~modShort ? [])[i].asString; s.copyToEnd((s.indexOf($.) ? -1) + 1) };
-    // a coupling is drawn only if BOTH ends are loaded layers with a place on
-    // the field: else the line would converge into nothing (an unloaded layer
-    // has no glyph)
-    keys.do { |e|
-        if(posOf.(e[\target]).notNil and: { srcPos.(e).notNil }) {
-            per[e[\target]] = (per[e[\target]] ? []).add(e);
+    var cables = (~kfCables ? []).select { |c| c[\enabled] != false };
+    var font = ~uiMono.(9), gfont = ~uiMono.(28), nfont = ~uiMono.(10);
+    // a pair is drawn only if BOTH layers are loaded and have a place on the
+    // field: an unloaded layer has no glyph and the line would end in nothing
+    var posOf = { |l| if(~mixerLayers.includes(l.asSymbol)) { ~mixerGraphPos[l.asSymbol] } };
+    var pairKey = { |a, b| (a.asString ++ ">" ++ b.asString).asSymbol };
+    var per = (), selfCnt = (), inLoop = (), maxN = 1;
+    // the cycle is read off the SCHEME (the verdict of ~kfApply, else the loops
+    // the derivation wrote into it) — the modmatrix line that used to carry it
+    // is gone with the module
+    var loops = (~kfVerdict !? { |v| v[\loops] })
+        ?? { (~kfSchaltung !? { |x| x[\loops] }) ? [] };
+    var mode = (~kfVerdict !? { |v| v[\mode] }) ?? { ~kfSchaltung !? { |x| x[\mode] } };
+    loops.do { |lp|
+        var ls = (lp[\nodes] ? []).collect { |n| n.asString.split($.)[0].asSymbol };
+        ls.do { |a| ls.do { |b| inLoop[pairKey.(a, b)] = true } };
+    };
+    cables.do { |c|
+        var a = c[\src][0].asSymbol, b = c[\dst][0].asSymbol;
+        if(posOf.(a).notNil and: { posOf.(b).notNil }) {
+            if(a == b) { selfCnt[a] = (selfCnt[a] ? 0) + 1 } {
+                per[pairKey.(a, b)] = (per[pairKey.(a, b)] ? 0) + 1;
+            };
         };
     };
-    per.keysValuesDo { |t, arr|
-        var st = ~mixerGraphStacks[t], dst = ~mixerGraphPos[t], sorted;
-        if(st.notNil and: { dst.notNil }) {
-            sorted = if(st[\kind] == \row) {
-                arr.sort { |a, b| srcPos.(a).x <= srcPos.(b).x }
-            } { arr };
-            sorted.do { |e, k|
-                var src = srcPos.(e), txt = short.(e[\index]), bw = txt.bounds(font).width;
-                var lx, ly, tx, ty, dx, dy, d, sx, sy, ex, ey, loop, nx, ny;
-                if(st[\kind] == \col) {
-                    ly = st[\y] + (k * 17);
-                    tx = st[\x]; ty = ly + 6;
-                    lx = if(st[\side] == \start) { st[\x] + 4 } { st[\x] - 4 - bw };
-                } {
-                    tx = st[\x] + (k * st[\step]); ly = st[\y]; lx = tx - (bw / 2);
-                    ty = if(src.y > ly) { ly + 13 } { ly - 2 };
+    per.do { |n| maxN = maxN.max(n) };
+    selfCnt.do { |n| maxN = maxN.max(n) };
+    per.keysValuesDo { |k, n|
+        var ab = k.asString.split($>);
+        var src = posOf.(ab[0]), dst = posOf.(ab[1]);
+        var dx = dst.x - src.x, dy = dst.y - src.y, d = dx.hypot(dy).max(1);
+        var ux = dx / d, uy = dy / d, px = uy.neg, py = ux;
+        var sx = src.x + (ux * 22) + (px * 3), sy = src.y + (uy * 22) + (py * 3);
+        var ex = dst.x - (ux * 26) + (px * 3), ey = dst.y - (uy * 26) + (py * 3);
+        Pen.use {
+            Pen.strokeColor = ~uiPal.ink; Pen.width = ~uiLineWidth;
+            Pen.lineDash = ~uiLineDash.(n / maxN, nil);
+            if(inLoop[k] == true) {
+                [1.7, -1.7].do { |o|
+                    Pen.line((sx + (px * o))@(sy + (py * o)), (ex + (px * o))@(ey + (py * o)));
+                    Pen.stroke;
                 };
-                dx = tx - src.x; dy = ty - src.y; d = dx.hypot(dy).max(1);
-                sx = src.x + (dx / d * 20); sy = src.y + (dy / d * 20);
-                ex = tx - (dx / d * 5);   ey = ty - (dy / d * 5);
-                loop = ((kon !? { |k| k[\lines] } !? { |ls| ls[e[\index]] } !? { |ln| ln[\loopAB] }) ? 0) == 1;
-                Pen.use {
-                    Pen.strokeColor = if(e[\enabled]) { ~uiPal.ink } { ~uiPal.rule };
-                    Pen.width = ~uiLineWidth;
-                    Pen.lineDash = ~uiLineDash.(e[\depth], e[\shape]);
-                    if(loop) {
-                        nx = dy.neg / d * 2.2; ny = dx / d * 2.2;
-                        Pen.line((sx + nx)@(sy + ny), (ex + nx)@(ey + ny)); Pen.stroke;
-                        Pen.line((sx - nx)@(sy - ny), (ex - nx)@(ey - ny)); Pen.stroke;
-                    } {
-                        Pen.line(sx@sy, ex@ey); Pen.stroke;
-                    };
-                };
-                Pen.stringAtPoint(txt, lx@ly, font, ~uiPal.ink);
+            } {
+                Pen.line(sx@sy, ex@ey); Pen.stroke;
             };
+        };
+        Pen.use {
+            Pen.fillColor = ~uiPal.ink;
+            Pen.moveTo(ex@ey);
+            Pen.lineTo((ex - (ux * 8) + (px * 3))@(ey - (uy * 8) + (py * 3)));
+            Pen.lineTo((ex - (ux * 8) - (px * 3))@(ey - (uy * 8) - (py * 3)));
+            Pen.fill;
+        };
+        ~uiPenText.(n.asString, ((sx + ex) / 2) + (px * 9), ((sy + ey) / 2) + (py * 9) - 6,
+            font, ~uiPal.ink2, \middle);
+    };
+    // an intra-layer pair has no line to draw: it is a ring on its own glyph
+    selfCnt.keysValuesDo { |l, n|
+        var pt = posOf.(l);
+        pt !? {
+            Pen.use {
+                Pen.strokeColor = ~uiPal.ink; Pen.width = ~uiLineWidth;
+                Pen.lineDash = ~uiLineDash.(n / maxN, nil);
+                Pen.addArc((pt.x - 27)@(pt.y - 25), 9, 0, 2pi); Pen.stroke;
+            };
+            ~uiPenText.(n.asString, pt.x - 27, pt.y - 44, font, ~uiPal.ink2, \middle);
         };
     };
     ~mixerGraphPos.keysValuesDo { |layer, pt|
@@ -379,6 +375,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
             ~uiPenText.(layer.asString, pt.x, pt.y + 20, nfont, ~uiPal.ink, \middle);
         };
     };
+    ~uiPenText.(
+        if(~kfNodes.isNil or: { ~kfApply.isNil }) { "koppelfeld off" } {
+            if(cables.isEmpty) { "no scheme" } {
+                "cables " ++ cables.size ++ " · " ++ (mode ? "—")
+                    ++ " · loops " ++ loops.size
+            };
+        }, 2, 2, font, ~uiPal.ink2);
 };
 
 ~mixerDrawTiers = { |u|
@@ -419,7 +422,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~ungBuildMixer = {
     var layers = ~mixerLayers, w = 1440, h = 850, scr, winRect, win;
     var gx = 1010, rx = 1034, rw = 378, tableY = 444, rowH = 28, modY = 620;
-    var hasFx = ~cfg_effects.notNil, hasMod = ~modKeys.notNil and: { ~modKeys.size > 0 };
+    var hasFx = ~cfg_effects.notNil, hasPatch = ~kfRandomize.notNil and: { ~kfApply.notNil };
     var hasGrid = ~gridGenerate.notNil;
     var fmt2 = { |v| ~uiFmt.(v, 2) }, fmt3 = { |v| ~uiFmt.(v, 3) };
     var fxModeItems = [
@@ -428,7 +431,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         "9 · 2+3 +rev", "10 · 1+3 +rev", "11 · all +rev", "12 · rev only"
     ];
     var graph, tiers, presetName, presetPop, gridTv, gridStatus, gridBtn, konRange, konTtierBox;
-    var recBtn, mkGlyph;
+    var recBtn, mkGlyph, patchSeed, patchNote;
 
     // close previous window best-effort (destroyed Qt object — contract §6)
     if(~mixerWin.notNil) { try { ~mixerWin.close } };
@@ -456,10 +459,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~uiRule.(win, Rect(0, 66, w, 1));
     ~uiRule.(win, Rect(gx, 67, 1, h - 67));
 
-    // --- mod graph ---
-    ~uiCap.(win, Rect(28, 76, 400, 14), "layers · mod graph");
+    // --- koppelfeld graph ---
+    ~uiCap.(win, Rect(28, 76, 400, 14), "layers · koppelfeld");
     graph = UserView(win, Rect(28, 92, 540, 340)).background_(~uiPal.paper);
     graph.drawFunc_({ |u| ~mixerDrawGraph.(u) });
+    // the scheme changes from four places (the patch button, an act, the IDE, a
+    // preset) — a slow self-redraw is cheaper than a hook in each of them
+    graph.frameRate_(1).animate_(true);
     ~mixerGraph = graph;
 
     // --- space echo strip: mode per instance, tone shared; GUI rides ON TOP of ~cfg_effects ---
@@ -562,31 +568,52 @@ Ndef(\master).play(out: 0, numChannels: 2);
     };
     ~uiRule.(win, Rect(0, modY - 12, gx, 1));
 
-    // --- mod matrix: 16 depths (panel index i == index in ~cfg_modmtx.lines) ---
-    ~uiCap.(win, Rect(28, modY, 300, 14), "mod matrix");
-    if(hasMod) {
-        ~mixerModNote = ~uiText.(win, Rect(430, modY, 460, 14), "", 9.5, ~uiPal.ink2, false, \right);
-        ~mixerModRnd = ~uiBtn.(win, Rect(900, modY - 4, 80, 24), "random",
-            { if(~modRandomize.notNil) { ~modRandomize.value } });
-        ~uiBtnEnable.(~mixerModRnd, ~konActive != true);
-        ~modKeys.do { |e, i|
-            var col = i div: 8, row = i mod: 8;
-            var mx  = 28 + (col * 492), my = modY + 24 + (row * 22);
-            var lbl, gl, r;
-            ~uiText.(win, Rect(mx, my, 20, 20), i.asString.padLeft(2, "0"), 9.5, ~uiPal.ink2);
-            lbl = ~uiText.(win, Rect(mx + 22, my, 118, 20), e[\label], 10.5);
-            gl = UserView(win, Rect(mx + 144, my, 90, 20)).background_(~uiPal.paper);
-            gl.drawFunc_({ |u| ~uiDrawLineGlyph.(u, ~modKeys[i] ? e) });
-            r = ~uiRulerRow.(win, mx + 240, my, 0, 120, "", ControlSpec(0, 1, \lin, 0, e[\depth]),
-                e[\depth], { |v| ~modDepthSet.(i, v) }, fmt3);
-            r[\label] = lbl; r[\glyph] = gl;
-            // coupling on an unloaded layer (subset ~cfg_app.layers) — ruler visible but dead
-            if(e[\enabled].not) { ~uiRulerEnable.(r, false) };
-            ~mixerModEz[i] = r;
+    // --- koppelfeld: the patcher of §7 in one click ---
+    ~uiCap.(win, Rect(28, modY, 300, 14), "koppelfeld · patch");
+    ~uiText.(win, Rect(28, modY + 24, 40, 20), "seed", 10.5, ~uiPal.ink2);
+    // 0 = a fresh seed per click; the seed that DREW is written back here, so a
+    // patch heard once can be asked for again (A-3)
+    patchSeed = NumberBox(win, Rect(70, modY + 22, 120, 24))
+        .clipLo_(0).clipHi_(2147483647).step_(1).scroll_step_(1)
+        .font_(~uiMono.(11)).align_(\center)
+        .background_(~uiPal.paper).normalColor_(~uiPal.ink)
+        .value_(~mixerPatchSeedVal ? 0)
+        .action_({ |nb| ~mixerPatchSeedVal = nb.value.asInteger });
+    ~mixerPatchSeed = patchSeed;
+    ~uiText.(win, Rect(206, modY + 24, 200, 20),
+        "c ← complexity · arm " ++ (((~cfg_kf !? { |x| x[\armTime] }) ? 4).asString) ++ " s",
+        10.5, ~uiPal.ink2);
+    patchNote = ~uiText.(win, Rect(400, modY + 24, 490, 20), "", 9.5, ~uiPal.ink2, false, \right);
+    ~mixerPatchNote = patchNote;
+    ~mixerPatchBtn = ~uiBtn.(win, Rect(900, modY + 22, 80, 24), "patch", {
+        var c = (~gridComplexity ? 0.5).clip(0, 1);
+        var sd = patchSeed.value.asInteger;
+        case
+        { ~kfRandomize.isNil or: { ~kfApply.isNil } } {
+            patchNote.string_("koppelfeld off (enableKoppelfeld)");
+        }
+        { ~konActive == true } { patchNote.string_(~mixerPatchLocked) }
+        {
+            var sch = ~kfRandomize.(if(sd > 0) { sd } { nil }, c);
+            if(sch.isNil) {
+                // the patcher refuses whole and says why in the post window; the
+                // live scheme is untouched, and the panel may not pretend otherwise
+                patchNote.string_("patcher refused — see the post window");
+            } {
+                var rep = sch[\report] ? ();
+                ~kfApply.(sch, (~cfg_kf !? { |x| x[\armTime] }) ? 4);
+                patchSeed.value_(rep[\seed] ? sd);
+                ~mixerPatchSeedVal = patchSeed.value.asInteger;
+                patchNote.string_("seed " ++ (rep[\seed] ? "—") ++ " · c " ++ c
+                    ++ " · cables " ++ (rep[\cables] ? 0)
+                    ++ " · targets " ++ (rep[\targets] ? 0)
+                    ++ " · " ++ (sch[\mode] ? "—"));
+            };
         };
-    } {
-        ~uiText.(win, Rect(28, modY + 24, 900, 18),
-            "mod matrix off — вытеснена koppelfeld; патч-стрип приходит на S6/S7", 11, ~uiPal.ink2);
+    });
+    if(hasPatch.not) {
+        ~uiBtnEnable.(~mixerPatchBtn, false);
+        patchNote.string_("koppelfeld off (enableKoppelfeld)");
     };
 
     // --- structure grid (right column); nil-safe without 0_grid ---
@@ -684,21 +711,6 @@ Ndef(\master).play(out: 0, numChannels: 2);
         r !? { ~uiRulerSet.(r, v) };
     };
 
-    // depth sync <- ~modDepthSet (the ruler does not call action — no feedback loop)
-    ~modmatrixGuiSync = { |i, v|
-        ~mixerModEz[i] !? { |r|
-            ~uiRulerSet.(r, v);
-            { r[\glyph].refresh; ~mixerGraph !? { |uv| uv.refresh } }.defer;
-        };
-    };
-
-    // relabel <- ~konGenerate: src->dst captions change without a window rebuild
-    ~modmatrixGuiRelabel = { |i, label|
-        {
-            ~mixerModEz[i] !? { |r| r[\label].string_(label); r[\glyph].refresh };
-            ~mixerGraph !? { |uv| uv.refresh };
-        }.defer;
-    };
     ~mixerKonSync.value;
 
     // guard: only the CURRENT window (or one already taken down by ~appCleanup)

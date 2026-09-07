@@ -343,6 +343,50 @@
     (~kfNodePos.(layer, key) ? []).select { |x| (x >= w[0]) and: { x <= w[1] } };
 };
 
+// ----- §5.1: the window of a LEVEL node is relative -------------------
+// ONE reading of "the live value of a node": the rest of its node proxy, which
+// is what the §C.5 guards of ~kfValidate read (D78). A node that is not built
+// yet answers with its spec default, exactly as the validator does.
+~kfLiveRest = { |layer, key|
+    var n = ((~kfNodes ? ())[layer.asSymbol] ? ())[key.asSymbol];
+    if(n.notNil) { n[\rest] } {
+        (~kfSpecOfNode.(layer, key) !? { |cs| cs.unmap(cs.default) }) ? 0.5
+    };
+};
+
+// ±db around a value, in the node's own normalized space. ONE formula, two
+// contexts: the derivation applies it to the SPEC DEFAULT (pure, D78), every
+// reader of a live window applies it to the live rest.
+~kfWinRel = { |cs, v, db|
+    var v0 = max(1e-9, cs.map(v));
+    var lo = cs.unmap(max(cs.minval, v0 / db.dbamp));
+    var hi = cs.unmap(min(cs.maxval, v0 * db.dbamp));
+    var need = 2 * ~cfg_kf.restMargin;
+    // a level parked ON the floor or ceiling of its spec materializes a window
+    // narrower than V7's own floor — or empty. The window then opens to that
+    // floor AROUND the live level instead of passing V7 in silence (§17 D91);
+    // ~kfValidate says so with a NOTE
+    if((hi - lo) < need) {
+        var x = v.clip(0, 1);
+        lo = (x - (need * 0.5)).clip(0, max(0, 1 - need));
+        hi = lo + need;
+    };
+    [lo.clip(0, 1), hi.clip(0, 1)]
+};
+
+// THE materialization point of a cable's window. A cable of class L carries the
+// RULE (`winRel` + `winDb`), not a pair of numbers: the derivation may not read
+// the live field (D78), while the level of a layer belongs to the hand and the
+// preset (reference §6). Every reader of a window goes through here.
+~kfWinAbs = { |layer, key, cable|
+    var cs = ~kfSpecOfNode.(layer, key);
+    if((cable !? { |c| c[\winRel] }) != true or: { cs.isNil }) {
+        (cable !? { |c| c[\win] }) ? [0, 1]
+    } {
+        ~kfWinRel.(cs, ~kfLiveRest.(layer, key), (cable[\winDb] ? ~cfg_kf.patchLDb).abs)
+    };
+};
+
 // ----- registries ------------------------------------------------------
 ~kfNodes     = ~kfNodes     ? ();   // \layer -> ( \param -> ( node: spec: rest: win: curve: cables: bus: ) )
 ~kfCables    = ~kfCables    ? [];   // applied cable table (§4.1 events)
@@ -442,9 +486,15 @@
             ~kfWinPos.(layer, key, n[\win])
         } { [] };
         if(ps.notEmpty) { [ps.first, ps.last] } {
-            var lo = n[\win][0] + ~cfg_kf.restMargin;
-            var hi = n[\win][1] - ~cfg_kf.restMargin;
-            if(lo > hi) { var m = (n[\win][0] + n[\win][1]) * 0.5; [m, m] } { [lo, hi] };
+            // a RELATIVE window is measured in dB around the live level, and the
+            // level sits at its centre by construction: the normalized margin is
+            // a different metric, and applying it here would pull the level of
+            // the layer off the value the hand and the preset set (§17 D91)
+            if(n[\winRel] == true) { n[\win] } {
+                var lo = n[\win][0] + ~cfg_kf.restMargin;
+                var hi = n[\win][1] - ~cfg_kf.restMargin;
+                if(lo > hi) { var m = (n[\win][0] + n[\win][1]) * 0.5; [m, m] } { [lo, hi] };
+            };
         };
     };
 };
@@ -504,7 +554,8 @@
     var mine = ~kfCables.select { |c|
         (c[\enabled] != false) and: { ~kfIdOf.(c[\dst][0], c[\dst][1]) == id };
     };
-    var win = if(mine.isEmpty) { [0, 1] } { (mine[0][\win] ? [0, 1]) };
+    var win = if(mine.isEmpty) { [0, 1] } { ~kfWinAbs.(layer, key, mine[0]) };
+    var winRel = mine.notEmpty and: { mine[0][\winRel] == true };
     var curve = if(mine.isEmpty) { \clip } { (mine[0][\curve] ? \clip) };
     var isP = (~kfRow.(layer, key) !? { |r| r[0] }) == \P;
     // V9: a convergence node must clip — a fold over the sum of three cables
@@ -515,7 +566,7 @@
     // addressing class P as a continuous value in ANY reachable state
     if(isP and: { mine.notEmpty }) { curve = \step };
     (
-        cables: mine, win: win, curve: curve,
+        cables: mine, win: win, winRel: winRel, curve: curve,
         hyst:  if(mine.isEmpty) { ~cfg_kf.pHyst  } { mine[0][\hyst]  ? ~cfg_kf.pHyst  },
         dwell: if(mine.isEmpty) { ~cfg_kf.pDwell } { mine[0][\dwell] ? ~cfg_kf.pDwell },
         cut:   if(mine.isEmpty) { ~cfg_kf.pCut   } { mine[0][\cut]   ? ~cfg_kf.pCut   }
@@ -749,14 +800,15 @@
             };
             reg[key] = (
                 node: ~kfNodeKey.(layer, key), spec: p[\spec], rest: ~kfRestOf.(layer, p),
-                win: [0, 1], curve: \clip, cables: [], bus: nil,
+                win: [0, 1], winRel: false, curve: \clip, cables: [], bus: nil,
                 hyst: ~cfg_kf.pHyst, dwell: ~cfg_kf.pDwell, cut: ~cfg_kf.pCut
             );
         };
         ~kfNodes[layer] = reg;
         reg.keysValuesDo { |key, n|
             var w = ~kfWireOf.(layer, key);
-            n[\win] = w[\win]; n[\curve] = w[\curve]; n[\cables] = w[\cables];
+            n[\win] = w[\win]; n[\winRel] = w[\winRel];
+            n[\curve] = w[\curve]; n[\cables] = w[\cables];
             n[\hyst] = w[\hyst]; n[\dwell] = w[\dwell]; n[\cut] = w[\cut];
         };
         // before the bodies, and the fan-out before that: a hot-swapped layer
@@ -930,7 +982,7 @@
     var raw = (sch[\cables] ? []);
     var cables = raw.select { |c| c[\enabled] != false };
     var errs = [], notes = [];
-    var wins = (), curves = (), rests = (), indeg = (), outdeg = ();
+    var wins = (), rels = (), curves = (), rests = (), indeg = (), outdeg = ();
     var steps = (), stepDef = ( hyst: ~cfg_kf.pHyst, dwell: ~cfg_kf.pDwell, cut: ~cfg_kf.pCut );
     var lam, adj, depths = [], maxDepth = 0, interlayer = 0;
     var layIn = (), layOut = (), census = ();
@@ -938,16 +990,13 @@
 
     name = ~kfIdTag;
 
-    // the scheme's rest overrides the live node state
-    ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
-        rests[~kfIdOf.(l, k)] = n[\rest];
-    }};
+    // the scheme's rest overrides the live node state; a node the scheme does
+    // not rest (every class L node — its level belongs to the hand) is read
+    // through the ONE live accessor the relative windows are built from
     (sch[\rest] ? ()).keysValuesDo { |l, e| e.keysValuesDo { |k, v|
         rests[~kfIdOf.(l, k)] = v.clip(0, 1);
     }};
-    restOf = { |l, k|
-        rests[~kfIdOf.(l, k)] ? ((~kfSpecOfNode.(l, k) !? { |cs| cs.unmap(cs.default) }) ? 0.5);
-    };
+    restOf = { |l, k| rests[~kfIdOf.(l, k)] ?? { ~kfLiveRest.(l, k) } };
 
     // V1 + V2 + destination window/curve + layer census
     cables.do { |c|
@@ -967,13 +1016,18 @@
             errs = errs.add("V0 цели нет в таблице §5: " ++ name.(did));
         };
         if(wins[did].isNil) {
-            wins[did] = c[\win] ? [0, 1];
+            wins[did] = ~kfWinAbs.(c[\dst][0], c[\dst][1], c);
+            rels[did] = (c[\winRel] == true);
             curves[did] = c[\curve] ? \clip;
             steps[did] = stepDef.collect { |v, f| c[f] ? v };
         } {
-            if(wins[did] != (c[\win] ? [0, 1])) {
+            if(wins[did] != ~kfWinAbs.(c[\dst][0], c[\dst][1], c)) {
                 errs = errs.add("V7 два кабеля в " ++ name.(did) ++ " объявляют РАЗНОЕ окно "
-                    ++ wins[did] ++ " и " ++ (c[\win] ? [0, 1]));
+                    ++ wins[did] ++ " и " ++ ~kfWinAbs.(c[\dst][0], c[\dst][1], c));
+            };
+            if(rels[did] != (c[\winRel] == true)) {
+                errs = errs.add("V7 два кабеля в " ++ name.(did) ++ " объявляют РАЗНЫЙ род "
+                    ++ "окна (относительное ±дБ / абсолютное)");
             };
             if(curves[did] != (c[\curve] ? \clip)) {
                 errs = errs.add("V7 два кабеля в " ++ name.(did) ++ " объявляют РАЗНУЮ кривую");
@@ -1122,6 +1176,21 @@
                             ++ " вне позиций таблицы окна [" ++ pos.first.round(0.001) ++ ", "
                             ++ pos.last.round(0.001) ++ "]: " ++ name.(did));
                     };
+                };
+            }
+            // §5.1 / D91: a RELATIVE window is ±winDb around the live level, and
+            // the level is its centre by construction. The normalized restMargin
+            // is a different metric — measuring it here would reject every legal
+            // window of class L and pull the layer level off what the hand set
+            { rels[did] == true } {
+                if(r < w[0] or: { r > w[1] }) {
+                    errs = errs.add("V7 живой покой " ++ r.round(0.001)
+                        ++ " вне относительного окна " ++ w ++ ": " ++ name.(did));
+                };
+                if((w[1] - w[0]) <= ((2 * cfg.restMargin) + 1e-9)) {
+                    notes = notes.add("окно " ++ name.(did)
+                        ++ " вырождено (живой уровень у края спека): раскрыто до пола 2·"
+                        ++ cfg.restMargin ++ " — ±" ++ (~cfg_kf.patchLDb) ++ " дБ не поместились");
                 };
             }
             // a window narrower than 2·restMargin admits NO legal rest at all;
@@ -1301,7 +1370,7 @@
     lam[\loops].do { |l|
         if(l[\nodes].any { |nid| nid.asString.split($.)[0] == "epsilon" }) {
             errs = errs.add("V11 §C.5: петля через epsilon — движение, читаемое "
-                ++ "как периодическое: " ++ l[\nodes].collect(_.asString).join(" > "));
+                ++ "как периодическое: " ++ l[\nodes].collect { |n| name.(n) }.join(" > "));
         };
     };
     block { |brk|
@@ -1311,12 +1380,12 @@
         // reference 3.1 p.5 counts stepping NODES, not cables: two cables into one
         // pitch node are still one walking fundamental, and the count must not
         // call that a chord progression
-        var pNodes = ();
+        var pNodes = (), pTags;
         if(lam[\mode] == \wanderung) {
             cables.do { |c|
                 if(c[\src][0].asSymbol == \theta and: { arrival.includes(c[\src][1].asSymbol) }) {
                     errs = errs.add("V11 wanderung-источник в семействе прибытия theta: "
-                        ++ c[\src][1]);
+                        ++ name.(~kfIdOf.(c[\src][0], c[\src][1])));
                 };
             };
         };
@@ -1328,11 +1397,20 @@
                 pPerLayer[l] = (pPerLayer[l] ? 0) + 1;
             };
         };
+        pTags = { |l| pNodes.keys.asArray.sort { |a, b| a.asString < b.asString }
+            .select { |did| (l.isNil) or: { did.asString.split($.)[0] == l.asString } }
+            .collect { |did| name.(did) }.join(", ") };
         pPerLayer.keysValuesDo { |l, n|
-            if(n > 1) { errs = errs.add("V11 P-целей в слое " ++ l ++ ": " ++ n ++ " > 1") };
+            if(n > 1) {
+                errs = errs.add("V11 P-целей в слое " ++ l ++ ": " ++ n ++ " > 1: " ++ pTags.(l));
+            };
         };
-        if(pNodes.size > 2) { errs = errs.add("V11 P-целей всего " ++ pNodes.size ++ " > 2") };
-        if((pPerLayer[\delta] ? 0) > 1) { errs = errs.add("V11 P-целей delta > 1") };
+        if(pNodes.size > 2) {
+            errs = errs.add("V11 P-целей всего " ++ pNodes.size ++ " > 2: " ++ pTags.(nil));
+        };
+        if((pPerLayer[\delta] ? 0) > 1) {
+            errs = errs.add("V11 P-целей delta > 1: " ++ pTags.(\delta));
+        };
         // "…and their bands must be incommensurable" (reference 3.1 p.5): two
         // fundamentals stepping on commensurable clocks read as a progression,
         // which composition.md excludes outright
@@ -1358,7 +1436,8 @@
             near !? {
                 errs = errs.add("V11 полосы двух P-целей соизмеримы: отношение "
                     ++ r.round(0.001) ++ " в октавном приведении ближе "
-                    ++ (cfg.incommTol * 100) ++ " % к " ++ near[0] ++ "/" ++ near[1]);
+                    ++ (cfg.incommTol * 100) ++ " % к " ++ near[0] ++ "/" ++ near[1]
+                    ++ ": " ++ pTags.(nil));
             };
         };
         brk.value;
@@ -1378,12 +1457,14 @@
         var lo = span.(\freqLo), hi = span.(\freqHi);
         var ml = span.(\mLevel), fl = span.(\flowLevel);
         if(lo.notNil and: { hi.notNil } and: { lo[1] > hi[0] }) {
-            errs = errs.add("V12 epsilon: freqLo верх " ++ lo[1].round(0.01)
-                ++ " > freqHi низ " ++ hi[0].round(0.01));
+            errs = errs.add("V12 " ++ name.(~kfIdOf.(\epsilon, \freqLo)) ++ " верх "
+                ++ lo[1].round(0.01) ++ " > " ++ name.(~kfIdOf.(\epsilon, \freqHi))
+                ++ " низ " ++ hi[0].round(0.01));
         };
         if(ml.notNil and: { fl.notNil } and: { ml[0] < (fl[1] * 0.5) }) {
-            errs = errs.add("V12 epsilon: mLevel низ " ++ ml[0].round(0.001)
-                ++ " < flowLevel верх − 6 dB (" ++ (fl[1] * 0.5).round(0.001) ++ ")");
+            errs = errs.add("V12 " ++ name.(~kfIdOf.(\epsilon, \mLevel)) ++ " низ "
+                ++ ml[0].round(0.001) ++ " < " ++ name.(~kfIdOf.(\epsilon, \flowLevel))
+                ++ " верх − 6 dB (" ++ (fl[1] * 0.5).round(0.001) ++ ")");
         };
         brk.value;
     };
@@ -1395,7 +1476,7 @@
         if(w.notNil and: { w[0] < 0.02 }) {
             cables.do { |c|
                 if(~kfIdOf.(c[\dst][0], c[\dst][1]) == did and: { (c[\band] ? \block) != \block }) {
-                    errs = errs.add("V13 theta.density пересекает 0.02 по полосе "
+                    errs = errs.add("V13 " ++ name.(did) ++ " пересекает 0.02 по полосе "
                         ++ c[\band] ++ " — разрешена только B4 (block)");
                 };
             };
@@ -1523,7 +1604,10 @@
 // a node id inside an error message is a TAG, not prose: ~kfPatchRepair has to
 // find the cable an error names, and `alpha.n1` is a substring of `alpha.n10`
 // (measured: three such pairs among the 111 nodes). The delimiters make the
-// match exact, and every error that names a node renders it through here
+// match exact. Every error that NAMES a node renders it through here — pass 5
+// addresses it by that name. The two errors that carry no node are the two no
+// pass addresses by name: V5 depth (pass 4 cuts it structurally, ~kfStep8Ladder)
+// and the cable ceiling, which is a refusal and not a repair
 ~kfIdTag = { |nid| "«" ++ nid.asString ++ "»" };
 
 ~kfBandOrder = [\rauheit, \puls, \gang, \block];
@@ -1730,23 +1814,27 @@
     };
 };
 
+// [ window, rest, relative? ]. A window of class L is NOT a pair of numbers
+// the act owns: §5.1 gives ±`patchLDb` dB around the LEVEL of the layer, the
+// level belongs to the hand and the preset (reference §6), and the derivation
+// may not read the live field (D78). So the cable carries the RULE, the window
+// returned here is the same rule against the SPEC DEFAULT — the derivation's own
+// pure reference frame — and no rest is derived for the node at all: it already
+// has one, and it is the hand's.
 ~kfPatchWin = { |layer, key, u, ur, st, ctx, cfg|
     var row = ~kfRow.(layer, key);
     var cs = ~kfSpecOfNode.(layer, key);
     if(row.isNil or: { cs.isNil }) { nil } {
         var cls = row[0], ex = row[2] ? ();
         var lo, hi, other, wmin;
-        if(cls == \P) { ~kfPatchWinP.(layer, key, u, cfg) } {
+        case
+        { cls == \P } { ~kfPatchWinP.(layer, key, u, cfg) }
+        { cls == \L } {
+            [~kfWinRel.(cs, (ctx[\rest][~kfIdOf.(layer, key)] ? 0.5), cfg.patchLDb), nil, true]
+        }
+        {
             lo = cfg.patchWinLo + (cfg.patchWinSpan * u);
             hi = lo + cfg.patchWinWidth;
-            if(cls == \L) {
-                // §5.1: an L window is ±3 dB around the §K.4 level and no wider —
-                // the sends read the layer BEFORE the router, so a broad amp
-                // window would gate the tail of an effect
-                var v0 = max(1e-6, cs.map(ctx[\rest][~kfIdOf.(layer, key)] ? 0.5));
-                lo = cs.unmap(max(cs.minval, v0 / cfg.patchLDb.dbamp));
-                hi = cs.unmap(min(cs.maxval, v0 * cfg.patchLDb.dbamp));
-            };
             ex[\wmin] !? { |v| lo = max(lo, v) };
             ex[\wmax] !? { |v| hi = min(hi, v) };
             // the §C.5 canon of the epsilon pairs, in the node's own space (V12):
@@ -1773,14 +1861,10 @@
                 { };
             };
             lo = lo.clip(0, 1); hi = hi.clip(0, 1);
-            // an L window is ±3 dB BY CANON (§5.1) and that is narrower than
-            // `patchWinMin` for every level node — rejecting it by width would
-            // bar the whole class from ever being a destination. What still
-            // guards the rest is V7's own floor of 2·restMargin
-            wmin = if(cls == \L) { 2 * cfg.restMargin } { cfg.patchWinMin };
+            wmin = cfg.patchWinMin;
             if((hi - lo) < wmin) { nil } {
                 [[lo, hi], (cfg.patchRestLo + ((cfg.patchRestHi - cfg.patchRestLo) * ur))
-                    .clip(lo + cfg.restMargin, hi - cfg.restMargin)]
+                    .clip(lo + cfg.restMargin, hi - cfg.restMargin), false]
             };
         };
     };
@@ -1836,7 +1920,7 @@
     var lamT = cfg.patchLamLo + ((cfg.patchLamHi - cfg.patchLamLo) * c);
     var wander = lamT > cfg.modeWanderung;
     var arrival = [\ioi0, \decel, \ioiMax, \popScale, \gapScale, \density];
-    var st = ( wins: (), rests: (), bands: (), inE: (), outE: (),
+    var st = ( wins: (), rests: (), rels: (), bands: (), inE: (), outE: (),
                cables: [], pNodes: [], pLayers: [], notes: [] );
     var anc, desc, fOk, ladderOk, winOf, bandFor, addCable, dstList, srcList, place;
     var loopPairs = [], legs = [], restSec = ();
@@ -1879,7 +1963,7 @@
     };
     winOf = { |layer, key|
         var did = ~kfIdOf.(layer, key);
-        if(st[\wins][did].notNil) { [st[\wins][did], st[\rests][did]] } {
+        if(st[\wins][did].notNil) { [st[\wins][did], st[\rests][did], st[\rels][did]] } {
             var num = ~kfPatchNodeNum.(layer, key);
             var li = lidx[layer.asSymbol] ? 0;
             ~kfPatchWin.(layer, key,
@@ -1900,14 +1984,18 @@
             if(lo > hi) { nil } { [band, bf[\fc].clip(lo, hi)] };
         };
     };
-    addCable = { |sl, sk, dl, dk, band, fc, pol, gain, win, rest|
+    addCable = { |sl, sk, dl, dk, band, fc, pol, gain, win, rest, rel|
         var sid = ~kfIdOf.(sl, sk), did = ~kfIdOf.(dl, dk), bi = ~kfBandIdx.(band);
         var cab = ( src: [sl.asSymbol, sk.asSymbol], dst: [dl.asSymbol, dk.asSymbol],
-                    pol: pol, gain: gain, fc: fc, band: band, curve: \clip, win: win );
+                    pol: pol, gain: gain, fc: fc, band: band, curve: \clip );
+        // a relative cable carries the RULE and no numbers: `win` would be a
+        // second, silently stale answer to the question ~kfWinAbs answers
+        if(rel == true) { cab[\winRel] = true; cab[\winDb] = cfg.patchLDb } { cab[\win] = win };
         st[\cables] = st[\cables].add(cab);
         st[\outE][sid] = (st[\outE][sid] ? []).add(( to: did, bi: bi, c: cab ));
         st[\inE][did]  = (st[\inE][did] ? []).add(( from: sid, bi: bi, c: cab ));
-        st[\wins][did] = win; st[\rests][did] = rest; st[\bands][did] = band;
+        st[\wins][did] = win; st[\rels][did] = (rel == true); st[\bands][did] = band;
+        rest !? { st[\rests][did] = rest };
         if((~kfRow.(dl, dk)[0] == \P) and: { st[\pNodes].includes(did).not }) {
             st[\pNodes] = st[\pNodes].add(did);
             st[\pLayers] = st[\pLayers].add(dl.asSymbol);
@@ -1976,7 +2064,7 @@
                                 out = addCable.(srcL, sk, dstL, dk, bf[0], bf[1], pol,
                                     ~kfStep6Gain.(~kfGainMax.(dstL, dk),
                                         facts[\cAB][lidx[srcL]][lidx[dstL]], false, c, lamT, cfg),
-                                    wr[0], wr[1]);
+                                    wr[0], wr[1], wr[2]);
                             };
                         };
                     };
@@ -2041,10 +2129,10 @@
                                 and: { fOk.(uid, vid) } and: { fOk.(vid, uid) }) {
                                 var c1 = addCable.(xL, uk, yL, vk, bv[0], bv[1], -1,
                                     ~kfStep6Gain.(~kfGainMax.(yL, vk), w1 / norm, true, c, lamT, cfg),
-                                    wv[0], wv[1]);
+                                    wv[0], wv[1], wv[2]);
                                 var c2 = addCable.(yL, vk, xL, uk, bu[0], bu[1], 1,
                                     ~kfStep6Gain.(~kfGainMax.(xL, uk), w2 / norm, true, c, lamT, cfg),
-                                    wu[0], wu[1]);
+                                    wu[0], wu[1], wu[2]);
                                 legs = legs.add([c1, c2]);
                                 placed = true;
                             };
@@ -2119,14 +2207,22 @@
     if(st[\pNodes].size == 2) {
         var first = (st[\inE][st[\pNodes][0]] ? []).collect { |e| e[\c] };
         var second = (st[\inE][st[\pNodes][1]] ? []).collect { |e| e[\c] };
-        var rng = ~kfBandNarrow.(\block);
         var f0 = first[0] !? { |cb| cb[\fc] };
         var done = first.isEmpty or: { second.isEmpty }
             or: { ~kfPatchIncommOct.(f0, second[0][\fc], cfg) };
         cfg.patchPeriodScales.do { |sc|
             if(done.not) {
-                var f1 = (f0 * sc).clip(rng[0], rng[1]);
-                if(~kfPatchIncommOct.(f0, f1, cfg)) {
+                var f1 = f0 * sc;
+                // four of the scales are > 1 here, so f_c GROWS: the ceilings of
+                // §5 travel with the band exactly as in the loop block above, or
+                // V9 catches what this fixed
+                var inRange = second.every { |cb|
+                    var rng = ~kfBandNarrow.(cb[\band] ? \block);
+                    var fmax = ~kfFmaxOf.(cb[\dst][0], cb[\dst][1], st[\wins]) ? 1e9;
+                    var hi = min(min(rng[1], fmax), ~kfFcCeil.value);
+                    (f1 >= rng[0]) and: { f1 <= hi };
+                };
+                if(inRange and: { ~kfPatchIncommOct.(f0, f1, cfg) }) {
                     second.do { |cb| cb[\fc] = f1 };
                     done = true;
                 };
@@ -2147,11 +2243,15 @@
         };
     };
 
-    // ----- a rest for EVERY destination, and for destinations only --------
+    // ----- a rest for EVERY destination the act OWNS ----------------------
+    // …and only for those: the level of a layer (class L) is the hand's, and a
+    // relative window is built around it instead of replacing it (§17 D91)
     st[\cables].do { |cb|
         var dl = cb[\dst][0], dk = cb[\dst][1];
-        if(restSec[dl].isNil) { restSec[dl] = () };
-        restSec[dl][dk] = st[\rests][~kfIdOf.(dl, dk)];
+        st[\rests][~kfIdOf.(dl, dk)] !? { |r|
+            if(restSec[dl].isNil) { restSec[dl] = () };
+            restSec[dl][dk] = r;
+        };
     };
 
     (
@@ -2196,7 +2296,7 @@
                     cb[\curve] = \clip;
                 };
             };
-            wins[idOf.(cb[\dst])] = cb[\win] ? [0, 1];
+            wins[idOf.(cb[\dst])] = ~kfWinAbs.(dl, dk, cb);
         };
     };
     // windows are needed whole before f_c: the sampling law reads the window of
@@ -2218,7 +2318,13 @@
         var l = parts[0].asSymbol, k = parts[1].asSymbol;
         var row = ~kfRow.(l, k);
         var mine = cables.select { |cb, i| (idOf.(cb[\dst]) == did) and: { drop.includes(i).not } };
-        if(row.notNil and: { mine.notEmpty }) {
+        if(row.notNil and: { mine.notEmpty } and: { mine[0][\winRel] == true }) {
+            // neither the window nor the rest of a relative destination is the
+            // scheme's to pull: ~kfWinAbs derives the window from the live level
+            // and the level is the hand's (§17 D91). One curve per node still holds
+            mine.do { |cb| cb[\curve] = mine[0][\curve] };
+        };
+        if(row.notNil and: { mine.notEmpty } and: { mine[0][\winRel] != true }) {
             var ex = row[2] ? ();
             var w = (mine[0][\win] ? [0, 1]).copy;
             var r = ((sch[\rest] ? ())[l] ? ())[k];
@@ -2317,15 +2423,20 @@
         var msg = v[\errors].first;
         var tagged = { |lk| msg.contains(~kfIdTag.(idOf.(lk))) };
         var victim = cables.select { |cb| tagged.(cb[\src]) and: { tagged.(cb[\dst]) } }.last
-            ?? { cables.select { |cb| tagged.(cb[\dst]) }.last };
+            ?? { cables.select { |cb| tagged.(cb[\dst]) }.last }
+            ?? { cables.select { |cb| tagged.(cb[\src]) }.last };
         victim !? { cables = cables.reject { |cb| cb === victim } };
     };
 
     cables.do { |cb|
         var dl = cb[\dst][0], dk = cb[\dst][1];
-        if(restSec[dl].isNil) { restSec[dl] = () };
-        restSec[dl][dk] = rests[idOf.(cb[\dst])]
-            ?? { ((sch[\rest] ? ())[dl] ? ())[dk] ? 0.5 };
+        var r = if(cb[\winRel] == true) { nil } {
+            rests[idOf.(cb[\dst])] ?? { ((sch[\rest] ? ())[dl] ? ())[dk] ? 0.5 };
+        };
+        r !? {
+            if(restSec[dl].isNil) { restSec[dl] = () };
+            restSec[dl][dk] = r;
+        };
     };
     sch.copy.putAll(( cables: cables, rest: restSec ))
 };
@@ -2487,19 +2598,33 @@
         v[\errors].do { |x| ("    ОШИБКА " ++ x).postln };
         nil
     } {
-        gr = ~kfGuarantees.(sch, v, facts, cfg);
-        sch[\mode] = v[\mode];
-        sch[\loops] = v[\loops];
-        sch[\report] = (sch[\report] ? ()).putAll((
-            complexity: facts[\complexity],
-            cables: v[\cables], targets: v[\targets],
-            interlayer: v[\interlayer], depths: v[\depths],
-            maxDepth: v[\maxDepth], lamMax: v[\lamMax], mode: v[\mode],
-            loops: v[\loops].size, repairs: passes, valid: true,
-            guarantees: gr,
-            notes: ((sch[\report] ? ())[\notes] ? []) ++ gr[\notes] ++ v[\notes]
-        ));
-        sch
+        // G8 (§7) is a GUARANTEE of the patcher, and the validator files the
+        // floor as a NOTE — correct for a scheme written by hand, silent for a
+        // derived one: the repair cuts cables (fan-in, ladder, the second P
+        // target), and a scheme under the floor would have gone out as a success
+        // with the broken guarantee riding in the report. The refusal is the one
+        // of `valid.not`: loud, whole, live scheme untouched
+        if(v[\cables] < cfg.cableMin) {
+            ("8_koppelfeld — " ++ (tag ? "деривация") ++ ": схема НЕ выведена, кабелей "
+                ++ v[\cables] ++ " < пола " ++ cfg.cableMin ++ " — гарантия G8 §7 не "
+                ++ "держится (ремонт снял кабели за " ++ passes ++ " проход(ов))").error;
+            v[\notes].do { |x| ("    NOTE " ++ x).postln };
+            nil
+        } {
+            gr = ~kfGuarantees.(sch, v, facts, cfg);
+            sch[\mode] = v[\mode];
+            sch[\loops] = v[\loops];
+            sch[\report] = (sch[\report] ? ()).putAll((
+                complexity: facts[\complexity],
+                cables: v[\cables], targets: v[\targets],
+                interlayer: v[\interlayer], depths: v[\depths],
+                maxDepth: v[\maxDepth], lamMax: v[\lamMax], mode: v[\mode],
+                loops: v[\loops].size, repairs: passes, valid: true,
+                guarantees: gr,
+                notes: ((sch[\report] ? ())[\notes] ? []) ++ gr[\notes] ++ v[\notes]
+            ));
+            sch
+        };
     };
 };
 
@@ -2557,7 +2682,8 @@
     // the node -> layer mapping is NOT rebuilt (footgun 9): only bodies change
     ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
         var w = ~kfWireOf.(l, k);
-        n[\win] = w[\win]; n[\curve] = w[\curve]; n[\cables] = w[\cables];
+        n[\win] = w[\win]; n[\winRel] = w[\winRel];
+        n[\curve] = w[\curve]; n[\cables] = w[\cables];
         n[\hyst] = w[\hyst]; n[\dwell] = w[\dwell]; n[\cut] = w[\cut];
     }};
     ~kfFanOutBuild.value;

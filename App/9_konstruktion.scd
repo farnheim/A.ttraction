@@ -266,6 +266,12 @@
         } {
             var sch = kon[\schaltung], rep = sch[\report] ? ();
             var cables = (sch[\cables] ? []).select { |cb| cb[\enabled] != false };
+            // the window of a class L cable is a RULE (±dB around the live level),
+            // not a pair of numbers — the score prints what ~kfWinAbs materializes,
+            // as the field, the validator and the log do
+            var winOf = { |cb|
+                (~kfWinAbs !? { |f| f.(cb[\dst][0], cb[\dst][1], cb) }) ? (cb[\win] ? [0, 1]);
+            };
             sb.add("- кабелей: " ++ cables.size ++ " · целей: " ++ (rep[\targets] ? "—")
                 ++ " · межслойных: " ++ fmt.((rep[\interlayer] ? 0) * 100, 1) ++ " %"
                 ++ " · глубины: " ++ ((rep[\depths] ? []).asString));
@@ -285,8 +291,9 @@
                     ++ " | " ++ fmt.(cb[\fc], 4)
                     ++ " | " ++ cb[\band]
                     ++ " | " ++ cb[\curve]
-                    ++ " | " ++ fmt.((cb[\win] ? [])[0], 3) ++ "…"
-                    ++ fmt.((cb[\win] ? [])[1], 3) ++ " |");
+                    ++ " | " ++ fmt.(winOf.(cb)[0], 3) ++ "…"
+                    ++ fmt.(winOf.(cb)[1], 3)
+                    ++ if(cb[\winRel] == true) { " ±" ++ cb[\winDb] ++ " дБ" } { "" } ++ " |");
             };
             sb.add("");
             sb.add("### Циклы (Λ = Π gain; период T ≈ 2·Στ)");
