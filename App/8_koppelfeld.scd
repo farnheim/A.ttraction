@@ -520,17 +520,25 @@
     };
 };
 
-// ----- node body (§3.1/§3.3/§3.4) --------------------------------------
-~kfNodeBody = { |layer, key, warn = true|
+// ----- node plan (§3.1/§3.4) -------------------------------------------
+// The resolved wiring of ONE node, language side: cables that actually have a
+// source, their band bounds, the position table of a step node. The live body
+// below and the NRT graph of `.claude/Tools/log_patch.scd` are BOTH built from
+// this plan — an offline log that measured a different graph than the one that
+// sounds would be worse than no log at all.
+// The plan MUTATES the registry of a degraded P node (\curve -> \clip and the
+// rest through ~setParam) unless `commit: false` is passed: a caller that only
+// INSPECTS a node must pass it, or looking at the field rewrites the field.
+~kfNodePlan = { |layer, key, warn = true, commit = true|
     var n = (~kfNodes[layer.asSymbol] ? ())[key.asSymbol];
-    if(n.notNil) {
+    if(n.isNil) { nil } {
         var cs   = n[\spec];
         var rest = n[\rest];
         var wlo  = n[\win][0], whi = n[\win][1];
         var fold = (n[\curve] == \fold);
         var step = (n[\curve] == \step);
+        var degraded = false;
         var pos, bnds, gaps, idx0;
-        var armBus = ~kfArmBus.value;
         var wired = [];
         // windows of ALL nodes — the dynamic f_max is read off the rate node
         var wins = ();
@@ -552,7 +560,8 @@
                 bnd = ~kfBand[c[\band] ? \block] ? [0.004, 0.05];
                 hi  = min(bnd[1], (~kfFmaxOf.(layer, key, wins) ? bnd[1]));
                 wired = wired.add((
-                    slot: i, bus: sn[\bus], spec: sn[\spec], rest: sn[\rest],
+                    slot: i, src: [c[\src][0].asSymbol, c[\src][1].asSymbol],
+                    bus: sn[\bus], spec: sn[\spec], rest: sn[\rest],
                     fc: c[\fc], fcLo: bnd[0], fcHi: hi,
                     pol: c[\pol] ? 1, gain: c[\gain] ? 0,
                     gmax: ~kfGainMax.(layer, key)
@@ -569,6 +578,7 @@
                     ++ " содержит " ++ pos.size ++ " позиций таблицы (нужно ≥ "
                     ++ ~cfg_kf.pPosMin ++ "), ступень недостижима — узел остаётся clip").error;
                 step = false;
+                degraded = true;
                 // the registry must state what the body IS: ~kfRestBounds and
                 // ~kfRestApply branch on \curve, and a \step registry over a
                 // clipping body snaps the rest onto lattice positions the body
@@ -576,15 +586,38 @@
                 // under a live scheme, or a direct ~kfInstall. The rest goes
                 // back through ~setParam for the same reason as in ~kfBuildLayer:
                 // the store must carry what the clipping body will sound
-                n[\curve] = \clip;
-                ~setParam.(layer.asSymbol, key.asSymbol, cs.map(rest));
-                rest = n[\rest];
+                if(commit) {
+                    n[\curve] = \clip;
+                    ~setParam.(layer.asSymbol, key.asSymbol, cs.map(rest));
+                    rest = n[\rest];
+                };
             } {
                 bnds = (0 .. pos.size - 2).collect { |i| (pos[i] + pos[i + 1]) * 0.5 };
                 gaps = (0 .. pos.size - 2).collect { |i| pos[i + 1] - pos[i] };
                 idx0 = bnds.count { |b| rest > b };
             };
         };
+        (
+            node: n[\node], spec: cs, rest: rest, wlo: wlo, whi: whi,
+            fold: fold, step: step, degraded: degraded,
+            pos: pos, bnds: bnds, gaps: gaps, idx0: idx0,
+            hyst: n[\hyst], dwell: n[\dwell], cut: n[\cut], wired: wired
+        )
+    };
+};
+
+// ----- node body (§3.1/§3.3/§3.4) --------------------------------------
+~kfNodeBody = { |layer, key, warn = true|
+    var n = (~kfNodes[layer.asSymbol] ? ())[key.asSymbol];
+    var p = ~kfNodePlan.(layer, key, warn);
+    if(p.notNil) {
+        var cs   = p[\spec];
+        var rest = p[\rest];
+        var wlo  = p[\wlo], whi = p[\whi];
+        var fold = p[\fold], step = p[\step];
+        var pos  = p[\pos], bnds = p[\bnds], gaps = p[\gaps], idx0 = p[\idx0];
+        var wired = p[\wired];
+        var armBus = ~kfArmBus.value;
         // EXACTLY ONE channel: a two-channel node would go through n_mapan and
         // cover the NEIGHBOURING layer control — silent corruption (§3.3)
         Ndef(n[\node], {
@@ -619,7 +652,7 @@
                 // down to undershoot it by the same — the pair `up ≤ dn` makes a
                 // chatter across one boundary impossible by arithmetic
                 var prev = LocalIn.ar(1, idx0);
-                var hyst = \hyst.ar(n[\hyst]).clip(~cfg_kf.pHyst, ~cfg_kf.pHystMax);
+                var hyst = \hyst.ar(p[\hyst]).clip(~cfg_kf.pHyst, ~cfg_kf.pHystMax);
                 var up = 0, dn = 0, wantUp, wantDn, tgt, free, idx, stepV;
                 bnds.do { |b, i|
                     up = up + (u > (b + (hyst * gaps[i])));
@@ -631,14 +664,14 @@
                     + ((1 - wantUp) * (1 - wantDn) * prev);
                 // dwell measured on the FED-BACK index: one block late, which is
                 // nothing against 20 s, and it needs no second state variable
-                free = Sweep.ar(Changed.ar(prev), 1) > \dwell.ar(n[\dwell]).max(~cfg_kf.pDwell);
+                free = Sweep.ar(Changed.ar(prev), 1) > \dwell.ar(p[\dwell]).max(~cfg_kf.pDwell);
                 idx = prev + (free * (tgt - prev));
                 LocalOut.ar(idx);
                 stepV = pos[0];
                 gaps.do { |g, i| stepV = stepV + ((idx > (i + 0.5)) * g) };
                 // the cut, and nothing but the cut: between steps the value is a
                 // constant, so dF/dt = 0 holds by construction (C-6)
-                Lag.ar(stepV, \cut.ar(n[\cut]).clip(0, ~cfg_kf.pCut))
+                Lag.ar(stepV, \cut.ar(p[\cut]).clip(0, ~cfg_kf.pCut))
             }
             { fold } {
                 Fold.ar(u, \wlo.ar(wlo), \whi.ar(whi))
@@ -748,6 +781,7 @@
                 ~kfNodeBody.(c[\dst][0], c[\dst][1]);
             };
         };
+        ~kfMeterRebuild.value;
     };
 };
 
@@ -1369,6 +1403,14 @@
 // ----- applying a scheme (§10.2): a cut, not a crossfade ---------------
 ~kfInstall = { |sch|
     var was = [];
+    // the log is closed BEFORE ~kfCables moves, so the file ends on data of the
+    // scheme its own preamble describes: the analyser judges occupancy by
+    // `# win=`, D-9/D-10 by `# loops=` and the mode verdict by `# mode=`, and
+    // rows recorded after a scheme change would be read against the old one
+    ~kfLogFile !? {
+        "8_koppelfeld — схема сменилась под открытым логом, лог закрыт".warn;
+        ~kfLogStop.value;
+    };
     ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
         if(n[\cables].notEmpty) { was = was.add([l, k]) };
     }};
@@ -1562,9 +1604,227 @@
     );
 };
 
+
+// ----- §9.2 proxy meter + §12.1 live logger ----------------------------
+// ONE OSC message for all 111 values, not one SendReply per node: 111 · 20/s
+// would be 2 220 messages a second on the language thread. The S7 window reads
+// the same ~kfLive array the logger writes.
+~kfLive       = ~kfLive       ? [];
+~kfMeterIds   = ~kfMeterIds   ? [];
+~kfMeterRate  = ~kfMeterRate  ? 20;
+~kfCmdPeriod  = ~kfCmdPeriod;
+~kfLogFile    = ~kfLogFile;
+~kfLogTask    = ~kfLogTask;
+~kfLogT0      = ~kfLogT0;
+~kfLogOwnsMeter = ~kfLogOwnsMeter ? false;
+~kfLogCols    = ~kfLogCols    ? [];
+
+// the ONLY honest predicate for "the meter is running": Ndef(\kf_meter).source
+// survives Cmd-., the non-permanent OSCdef does not (AbstractResponderFunc
+// registers itself with CmdPeriod), and without the responder no value ever
+// reaches ~kfLive or the log
+~kfMeterOnP = { OSCdef.all[\kfvals].notNil };
+
+~kfMeterFree = {
+    OSCdef.all[\kfvals] !? { |d| d.free };
+    Ndef(\kf_meter).clear;
+    ~kfMeterIds = [];
+    // ~kfLive is a READING surface (S7): a frozen last frame left behind is
+    // indistinguishable from a live field
+    ~kfLive = [];
+};
+
+// Channel order for BOTH logs: layers sorted, params in the order their layer
+// declares them. Any other order (registry hash order) would make a live log
+// and an NRT log of the same scheme incomparable — and D-14 compares them.
+~kfLogIds = {
+    var out = [];
+    (~kfNodes ? ()).keys.asArray.sort.do { |l|
+        ((~ungSpecs[l] !? { |sp| sp.params.collect { |p| p[\key] } }) ? []).do { |k|
+            if((~kfNodes[l] ? ())[k].notNil) { out = out.add([l, k]) };
+        };
+    };
+    out
+};
+
+~kfLogIdStr = { |ids| ids.collect { |lk| ~kfIdOf.(lk[0], lk[1]).asString } };
+
+// the `#` preamble both log forms carry: for a CSV it is the head of the file,
+// for a 111-channel wav the sidecar `<out.wav>.meta`. The analyser needs the
+// windows (occupancy, sticking) and the loop periods (D-9, D-10) — a bare
+// matrix of numbers cannot be judged against §11.D at all.
+~kfLogMeta = { |ids, rate, source, skip = 0|
+    var sch = ~kfSchaltung ? ();
+    var v = ~kfVerdict;
+    var loops = if(v.isNil) { [] } { v[\loops] };
+    var num = { |x| x.asFloat.asStringPrec(6) };
+    var per = { |field| ids.collect { |lk|
+        var n = ~kfNodes[lk[0]][lk[1]];
+        ~kfIdOf.(lk[0], lk[1]).asString ++ ":" ++ field.(n)
+    }.join(",") };
+    String.streamContents { |o|
+        o << "# koppelfeld log v1 · source=" << source
+          << " · seed=" << (sch[\seed] ? "-")
+          << " · c=" << (sch[\complexity] ? "-")
+          << " · mode=" << (if(v.isNil) { \ruhe } { v[\mode] })
+          << " · rate=" << num.(rate)
+          << " · skip=" << num.(skip)
+          << " · cables=" << ~kfCables.count { |c| c[\enabled] != false }
+          << " · t0=" << Date.localtime.stamp << "\n";
+        o << "# nodes=" << ~kfLogIdStr.(ids).join(",") << "\n";
+        o << "# win=" << per.({ |n| num.(n[\win][0]) ++ ":" ++ num.(n[\win][1]) }) << "\n";
+        o << "# rest=" << per.({ |n| num.(n[\rest]) }) << "\n";
+        o << "# curve=" << per.({ |n| n[\curve].asString }) << "\n";
+        o << "# edges=" << ~kfCables.select { |c| c[\enabled] != false }.collect { |c|
+            ~kfIdOf.(c[\src][0], c[\src][1]).asString ++ ">" ++ ~kfIdOf.(c[\dst][0], c[\dst][1]).asString
+                ++ ":" ++ num.(c[\pol] ? 1) ++ ":" ++ num.(c[\gain] ? 0)
+                ++ ":" ++ num.(c[\fc]) ++ ":" ++ (c[\band] ? \block)
+        }.join(",") << "\n";
+        o << "# loops=" << loops.collect { |l|
+            l[\nodes].collect(_.asString).join(">") ++ ":" ++ num.(l[\lam])
+                ++ ":" ++ num.(l[\tau]) ++ ":" ++ num.(l[\period])
+        }.join(";") << "\n";
+    };
+};
+
+~kfMeterOn = { |on = true, rate = 20|
+    if(on) {
+        var ids = ~kfLogIds.value.select { |lk| ~kfNodes[lk[0]][lk[1]][\bus].notNil };
+        // the log's header fixes its columns once; rows of another width land
+        // either dropped or shifted onto foreign ids in readCsv. Compared
+        // against ~kfLogCols and NOT ~kfMeterIds — ~kfLogStart arms the meter
+        // with the file already open and would otherwise close its own log.
+        // No recursion: ~kfLogStop nils ~kfLogFile before it touches the meter
+        if(~kfLogFile.notNil and: { ~kfLogIdStr.(ids) != ~kfLogCols }) {
+            "8_koppelfeld — под открытым логом сменился состав узлов, лог закрыт".warn;
+            ~kfLogStop.value;
+        };
+        ~kfMeterIds = ids;
+        ~kfMeterRate = rate;
+        ~kfLive = 0 ! ids.size;
+        if(ids.isEmpty) {
+            "8_koppelfeld — метр: узлов на шинах нет, включать нечего".warn;
+            ~kfMeterFree.value;
+        } {
+            Ndef(\kf_meter, {
+                // node buses carry MAPPED values; every metric of §11.D is
+                // stated in normalized space, so the meter unmaps once here
+                // instead of teaching the analyser 111 specs
+                var vals = ids.collect { |lk|
+                    var n = ~kfNodes[lk[0]][lk[1]];
+                    n[\spec].unmap(InFeedback.ar(n[\bus], 1))
+                };
+                SendReply.kr(Impulse.kr(rate), '/kfvals', A2K.kr(vals));
+                DC.kr(0)
+            });
+            Ndef(\kf_meter).fadeTime = 0;
+            Ndef(\kf_meter).wakeUp;
+            OSCdef(\kfvals, { |msg|
+                ~kfLive = msg.copyRange(3, msg.size - 1);
+                ~kfLogFile !? { |f|
+                    var t = Main.elapsedTime;
+                    ~kfLogT0 = ~kfLogT0 ? t;
+                    f.write((t - ~kfLogT0).asStringPrec(7) ++ ","
+                        ++ ~kfLive.collect { |x| x.asStringPrec(5) }.join(",") ++ "\n");
+                };
+            }, '/kfvals', s.addr);
+        };
+    } {
+        // switching the meter off cuts the rows an open log lives on: the file
+        // would be closed by its own `dur` truncated under a full-size header
+        if(~kfLogFile.notNil) {
+            "8_koppelfeld — метр выключен под открытым логом, лог закрыт".warn;
+            ~kfLogStop.value;
+        };
+        ~kfMeterFree.value;
+    };
+    on
+};
+
+// a hot-swapped layer gets NEW bus indices, and Ndef(\kf_meter) carries the OLD
+// ones baked into its graph: without a rebuild the meter goes on reading
+// whatever now sits on the freed buses, and an open log records it under a
+// header that still names the swapped layer
+~kfMeterRebuild = {
+    if(~kfMeterOnP.value) { ~kfMeterOn.(true, ~kfMeterRate) };
+};
+
+// ~kfLogStart.(path, dur, rate) — the REFERENCE log (§12.1): real time, the
+// sounding graph, one row per meter tick. The NRT logger is the fast one; this
+// one is what it is checked against (D-14).
+~kfLogStart = { |path, dur = 300, rate = 20|
+    var ids, owns;
+    ~kfLogStop.value;
+    ids = ~kfLogIds.value.select { |lk| ~kfNodes[lk[0]][lk[1]][\bus].notNil };
+    if(ids.isEmpty) {
+        "8_koppelfeld — ~kfLogStart: поле узлов пусто, лог не открыт".error;
+        nil
+    } {
+        // ownership is decided BEFORE the header: a borrowed meter keeps its own
+        // rate (a log has no right to degrade the window that switched it on,
+        // and ~kfLogStop restores nothing), and the header must name the rate
+        // the rows actually arrive at
+        owns = ~kfMeterOnP.value.not;
+        if(owns.not) { rate = ~kfMeterRate };
+        ~kfLogFile = File(path.standardizePath, "w");
+        if(~kfLogFile.isOpen.not) {
+            ("8_koppelfeld — ~kfLogStart: не открыть " ++ path).error;
+            ~kfLogFile = nil;
+            nil
+        } {
+            ~kfLogT0 = nil;
+            ~kfLogOwnsMeter = owns;
+            ~kfLogCols = ~kfLogIdStr.(ids);
+            ~kfLogFile.write(~kfLogMeta.(ids, rate, "live", 0));
+            ~kfLogFile.write("t," ++ ~kfLogCols.join(",") ++ "\n");
+            // an owned meter is armed AFTER the file: an OSC tick arriving
+            // between the two would write a row with no header above it
+            if(owns) { ~kfMeterOn.(true, rate) };
+            // the task drops its OWN handle before stopping: Routine:stop called
+            // from inside the routine is `nil.alwaysYield`, so a ~kfLogStop that
+            // began by stopping this task would abort right there and never
+            // close the file
+            ~kfLogTask = fork { dur.wait; ~kfLogTask = nil; ~kfLogStop.value };
+            ("8_koppelfeld — лог начат: " ++ path ++ " · " ++ ids.size
+                ++ " узлов · " ++ rate ++ " Гц · " ++ dur ++ " с"
+                ++ if(owns) { " · метр наш" } { " · метр чужой, частота его" }).postln;
+            path
+        };
+    };
+};
+
+~kfLogStop = {
+    ~kfLogTask !? { |tk| tk.stop }; ~kfLogTask = nil;
+    ~kfLogFile !? { |f|
+        // the handle is dropped BEFORE the meter is touched: ~kfMeterOn closes
+        // an open log itself, and a ~kfLogFile still set here would send the
+        // two into each other
+        f.close;
+        ~kfLogFile = nil;
+        ~kfLogCols = [];
+        // the meter belongs to whoever switched it on: the S7 window may be
+        // holding it, and a log ending must not blind the window
+        if(~kfLogOwnsMeter) { ~kfMeterOn.(false) };
+        ~kfLogOwnsMeter = false;
+        "8_koppelfeld — лог закрыт".postln;
+    };
+};
+
+// Cmd-. frees the non-permanent OSCdef and kills the meter synth, but the `dur`
+// fork runs on TempoClock.default, which CmdPeriod.run leaves alone (as it does
+// ~kfApplyTask and ~kfHandTask), and an open File is no server resource at all:
+// the hook has to stop the task AND close the file, or the log stays open with
+// its tail unflushed while the next ~kfMeterOn re-registers the OSCdef, which
+// then appends rows into that stale handle with no header
+~kfCmdPeriod !? { |f| CmdPeriod.remove(f) };
+~kfCmdPeriod = { ~kfLogStop.value };
+CmdPeriod.add(~kfCmdPeriod);
+
 // tear the whole field down — called from ~appCleanup BEFORE
 // Ndef.all.do(_.clear): Cmd-. kills synths but NOT nodeMaps
 ~kfClear = {
+    ~kfLogStop.value;
+    ~kfMeterOn.(false);
     ~kfApplyTask !? { |tk| tk.stop }; ~kfApplyTask = nil;
     ~kfHandTask  !? { |tk| tk.stop }; ~kfHandTask  = nil;
     (~kfNodes ? ()).keys.asArray.do { |l| ~kfDropLayer.(l) };
@@ -1579,6 +1839,7 @@
 
 ~kfArmBus.value;
 (~activeLayers ? ~ungSpecs.keys.asArray.sort).do { |l| ~kfBuildLayer.(l) };
+~kfMeterRebuild.value;
 ~kfTableAudit.value;
 // no scheme applied yet — arm goes up at once: the identity scheme (0 cables)
 // does not depend on it, and the first ~kfPoke must be audible

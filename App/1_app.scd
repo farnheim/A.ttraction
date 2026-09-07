@@ -138,6 +138,8 @@ s.waitForBoot({
         // would throw at step 8b and abort the build before start
         ~kfNodes = nil; ~kfRestSet = nil; ~kfRebind = nil; ~kfReport = nil;
         ~kfSelfTest = nil; ~kfPeakHold = nil; ~kfClear = nil;
+        ~kfMeterOn = nil; ~kfLogStart = nil; ~kfLogStop = nil; ~kfLive = [];
+        ~kfMeterOnP = nil; ~kfMeterFree = nil; ~kfLogCols = [];
         "UNGRUND app — koppelfeld ВЫКЛ (enableKoppelfeld=false).".postln;
     };
 
