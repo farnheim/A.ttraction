@@ -9,6 +9,8 @@
 // registries, ~kfLambda, validator V1–V13, ~kfPoke.
 // Stage S3: curve `step` for the 20 pitch nodes (class P) — ~kfLattice (94 Hz,
 // 3-limit), position table per node, hysteresis, dwell, cut ≤ 30 ms.
+// Stage S6: the `patch:` section of a preset (§8.2) — the module owns the
+// format, 0_lib only writes the string; live gain ~kfGainSet.
 // Buses: 111 node audio (1 ch) + 1 control for arm; §3.7 — 5x headroom.
 // Loads AFTER 0_grid (alphabet: ~gridClassOrder / ~gridLayerOf) and the layers
 // (~ungSpecs), and BEFORE the mixer.
@@ -393,6 +395,7 @@
 ~kfFanOut    = ~kfFanOut    ? ();   // \layer -> ( \param -> [ ( dst: [l,k], slot: i ) ] ) — reverse edges
 ~kfSchaltung = ~kfSchaltung;        // the applied scheme
 ~kfVerdict   = ~kfVerdict;          // validator verdict of the last ~kfApply
+~kfVerdictStale = ~kfVerdictStale ? false;   // …and whether a hand edit outdated it
 ~kfArmed     = ~kfArmed ? false;
 // ~kfRestApply rebuilds a step body so the bus follows the new rest at once;
 // the builders below write rest and build the body themselves, and set this
@@ -820,7 +823,11 @@
         ~kfRestQuiet = true;
         {
             reg.keysValuesDo { |key, n|
-                if(n[\cables].notEmpty) { ~setParam.(layer, key, n[\spec].map(n[\rest])) };
+                if(n[\cables].notEmpty) {
+                    ~kfRestApply.(layer, key, n[\rest]) !? { |acc|
+                        ~ungValsSet.(layer, key, n[\spec].map(acc));
+                    };
+                };
             };
         }.protect { ~kfRestQuiet = false };
         // two passes: a body build needs the source bus, so pass one gives every
@@ -2692,9 +2699,17 @@
     ~kfRestQuiet = true;
     // destination rests are brought into the NEW window through ~setParam:
     // ~ungVals, tuner and preset must carry what sounds, not what was asked
+    // normalized in, normalized written: ~setParam takes a value in real units
+    // and hands it back through `unmap(map(x))`, which on an exp ControlSpec
+    // moves the last bit on every pass — a preset would restore the scheme all
+    // but bit for bit, and applying one scheme twice would creep
     {
         ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
-            if(n[\cables].notEmpty) { ~setParam.(l, k, n[\spec].map(n[\rest])) };
+            if(n[\cables].notEmpty) {
+                ~kfRestApply.(l, k, n[\rest]) !? { |acc|
+                    ~ungValsSet.(l, k, n[\spec].map(acc));
+                };
+            };
         }};
         // the scheme's rest goes in BEFORE the bodies (and after ~kfFanOut,
         // which ~kfRest needs): a P body bakes the index of its start position
@@ -2704,7 +2719,11 @@
         // in the nodeMap (D26)
         (sch[\rest] ? ()).keysValuesDo { |l, e| e.keysValuesDo { |k, v|
             var cs = ~kfSpecOfNode.(l, k);
-            cs !? { ~setParam.(l, k, cs.map(v.clip(0, 1))) };
+            cs !? {
+                ~kfRestApply.(l, k, v.clip(0, 1)) !? { |acc|
+                    ~ungValsSet.(l, k, cs.map(acc));
+                };
+            };
         }};
     }.protect { ~kfRestQuiet = false };
     was.do { |lk| ~kfNodeBody.(lk[0], lk[1]) };
@@ -2714,6 +2733,12 @@
         };
     }};
     ~kfSchaltung = sch;
+    // ~kfPrune may have disabled a cable the verdict still counts: Λ, the
+    // excited-loop count and the mode are all functions of the edge set
+    ~kfVerdictStale = ~kfCables.any { |c| c[\enabled] == false };
+    // §8.4: the mixer rebuilds its per-cable gain strips here. ~kfInstall runs
+    // inside the fork of ~kfApply, so the .defer is owed by the GUI side
+    ~kfGuiRelabel !? (_.value);
 };
 
 ~kfApply = { |sch, armT|
@@ -2739,6 +2764,176 @@
 
 // a cut on a form block boundary (Axiom IV): the same path with T = 0
 ~kfCut = { |sch| ~kfApply.(sch, 0) };
+
+// ----- §8.2 the `patch:` section of a preset ---------------------------
+// The module owns the FORMAT; 0_lib only drops the string into the file.
+// The section is written off the LIVE registries, never off ~kfSchaltung: a
+// preset must record what sounds, and a gain corrected by hand lives in
+// ~kfCables and nowhere else.
+~kfSchemeLive = {
+    var sch = ~kfSchaltung ? ();
+    var rest = ();
+    ~kfNodes.keysValuesDo { |l, reg| reg.keysValuesDo { |k, n|
+        // only destinations: the other 111 − |targets| nodes hold the values of
+        // the `layers` section, and a rest written for them would be a second
+        // answer to the same question (§8.2)
+        if(n[\cables].notEmpty) {
+            if(rest[l].isNil) { rest[l] = () };
+            rest[l][k] = n[\rest];
+        };
+    }};
+    (
+        seed: sch[\seed], complexity: sch[\complexity],
+        armTime: sch[\armTime] ? ~cfg_kf.armTime,
+        rest: rest,
+        // disabled cables included: §10.3 keeps them in the table, and a preset
+        // that dropped them would silently reroute the scheme on the next save
+        cables: (~kfCables ? []).collect { |c| c.copy }
+    )
+};
+
+// A preset that reads back as a DIFFERENT double is not a preset. round(0.0001)
+// of the sections in 0_lib cannot be used here: `fc` lives at the 0.004 floor of
+// band `block`, and rounding would push a cable out of its band (V9). Shortest
+// literal that parses back to the very same value — verified for both `.asFloat`
+// and the interpreter's own reading of the literal (2026-09-07).
+// The CLASS is kept too: a Float printed as "1" comes back an Integer, and
+// Integer does not answer `asStringPrec` (the S5 crash of log_patch.scd).
+~kfNumText = { |v|
+    if(v.isKindOf(Integer)) { v.asString } {
+        var x = v.asFloat, out = nil;
+        [6, 9, 12, 17].do { |p|
+            if(out.isNil) {
+                var t = x.asStringPrec(p);
+                if(t.asFloat == x) { out = t };
+            };
+        };
+        out = out ? x.asStringPrec(17);
+        if(out.includes($.).not and: { out.includes($e).not }) { out = out ++ ".0" };
+        out
+    }
+};
+
+~kfLitText = { |v|
+    case
+    { v.isKindOf(Symbol) } { "\\" ++ v }
+    { v.isKindOf(Boolean) } { v.asString }
+    { v.isKindOf(SequenceableCollection) } {
+        "[" ++ v.collect { |x| ~kfLitText.(x) }.join(", ") ++ "]"
+    }
+    { v.isKindOf(Number) } { ~kfNumText.(v) }
+    { v.asString };
+};
+
+// fixed order, and only the keys a cable actually carries: a class L cable
+// carries the RULE of its window (`winRel`/`winDb`) and never a pair of numbers
+// (§17 D91) — an expanded window would measure the preset, not the scheme
+~kfCableFields = [\src, \dst, \pol, \gain, \fc, \band, \curve, \win, \winRel,
+    \winDb, \hyst, \dwell, \cut, \enabled];
+
+~kfSchemeText = { |sch|
+    var e = sch ? ();
+    var rest = e[\rest] ? ();
+    var lines = [], cabs;
+    [\seed, \complexity, \armTime].do { |k|
+        e[k] !? { |v| lines = lines.add("        " ++ k ++ ": " ++ ~kfLitText.(v)) };
+    };
+    // Event key order is HASH order: a section written straight off it would
+    // differ between two saves of one scheme, and the stage criterion is that
+    // save and load agree character for character
+    if(rest.notEmpty) {
+        var ls = rest.keys.asArray.sort { |a, b| a.asString < b.asString }.collect { |l|
+            var ks = rest[l].keys.asArray.sort { |a, b| a.asString < b.asString };
+            "            " ++ l ++ ": ( "
+                ++ ks.collect { |k| k ++ ": " ++ ~kfLitText.(rest[l][k]) }.join(", ")
+                ++ " )";
+        };
+        lines = lines.add("        rest: (\n" ++ ls.join(",\n") ++ "\n        )");
+    };
+    cabs = (e[\cables] ? []).collect { |c|
+        "            ( " ++ ~kfCableFields.select { |f| c[f].notNil }
+            .collect { |f| f ++ ": " ++ ~kfLitText.(c[f]) }.join(", ") ++ " )";
+    };
+    lines = lines.add("        cables: [\n" ++ cabs.join(",\n") ++ "\n        ]");
+    "(\n" ++ lines.join(",\n") ++ "\n    )"
+};
+
+// what ~savePreset asks for: the whole section, or nil when there is no scheme
+~kfPresetSection = {
+    if((~kfCables ? []).isEmpty) { nil } {
+        "    patch: " ++ ~kfSchemeText.(~kfSchemeLive.value)
+    }
+};
+
+~kfSchemeFromPreset = { |e|
+    var src = e ? ();
+    var rest = (), out;
+    (src[\rest] ? ()).keysValuesDo { |l, ks|
+        var sec = ();
+        ks.keysValuesDo { |k, v| sec[k.asSymbol] = v };
+        rest[l.asSymbol] = sec;
+    };
+    out = (
+        armTime: src[\armTime] ? ~cfg_kf.armTime, rest: rest,
+        cables: (src[\cables] ? []).collect { |c|
+            var cb = c.copy;
+            cb[\src] = cb[\src].collect(_.asSymbol);
+            cb[\dst] = cb[\dst].collect(_.asSymbol);
+            cb[\band]  !? { |b| cb[\band]  = b.asSymbol };
+            cb[\curve] !? { |b| cb[\curve] = b.asSymbol };
+            cb
+        }
+    );
+    src[\seed] !? { |v| out[\seed] = v };
+    src[\complexity] !? { |v| out[\complexity] = v };
+    // the mark has to happen BEFORE ~kfValidate, or the validator counts fan-in,
+    // loops and bands over a node that does not exist. Same sense as ~kfPrune:
+    // disabled with a warning, never rerouted to a neighbour (§10.3)
+    out[\cables].do { |cb|
+        if(cb[\enabled] != false) {
+            var okS = ~kfSpecOfNode.(cb[\src][0], cb[\src][1]).notNil;
+            var okD = ~kfSpecOfNode.(cb[\dst][0], cb[\dst][1]).notNil;
+            if(okS.not or: { okD.not }) {
+                cb[\enabled] = false;
+                ("8_koppelfeld — кабель пресета " ++ cb[\src][0] ++ "." ++ cb[\src][1]
+                    ++ " -> " ++ cb[\dst][0] ++ "." ++ cb[\dst][1]
+                    ++ " ВЫКЛЮЧЕН: узла нет в spec (перенаправление запрещено)").warn;
+            };
+        };
+    };
+    out
+};
+
+// ----- the hand on a cable gain (§9.1 inspector, §8.4 gain strips) ------
+// The cable event here is the SAME object the node registry carries: ~kfWireOf
+// selects out of ~kfCables and ~kfInstall stores the selection into the node,
+// so ~kfNodePlan, the next body build and ~kfPresetSection all read this write.
+~kfGainSet = { |cable, v|
+    if(cable.isNil) { nil } {
+        var dl = cable[\dst][0].asSymbol, dk = cable[\dst][1].asSymbol;
+        var n = (~kfNodes[dl] ? ())[dk];
+        var g = v.clip(0, min(~cfg_kf.gainAbsMax, ~kfGainMax.(dl, dk)));
+        var slot = n !? { n[\cables].detectIndex { |c| c === cable } };
+        cable[\gain] = g;
+        if(n.notNil and: { slot.notNil }) {
+            Ndef(n[\node]).set(("g" ++ slot).asSymbol, g);
+        };
+        ~kfVerdictStale = true;
+        g
+    }
+};
+
+// Λ, the excited-loop count and the mode are functions of the gains, so a hand
+// edit makes the verdict of the last ~kfApply a statement about a graph that no
+// longer stands. Recomputed no more often than asked (the patch strip asks once
+// a second) and SILENTLY: ~kfVerdictPost is the voice of an apply, not of a knob
+~kfVerdictRefresh = {
+    if(~kfVerdictStale == true) {
+        ~kfVerdict = ~kfValidate.(~kfSchemeLive.value);
+        ~kfVerdictStale = false;
+    };
+    ~kfVerdict
+};
 
 // ----- reconcile the §5 table with ~ungSpecs, name by name --------------
 ~kfTableAudit = {
@@ -3098,6 +3293,7 @@ CmdPeriod.add(~kfCmdPeriod);
     ~kfFanOut = ();
     ~kfSchaltung = nil;
     ~kfVerdict = nil;
+    ~kfVerdictStale = false;
     ~kfArmed = false;
 };
 

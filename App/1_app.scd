@@ -144,6 +144,11 @@ s.waitForBoot({
         ~kfMeterOnP = nil; ~kfMeterFree = nil; ~kfLogCols = [];
         ~kfGraphFacts = nil; ~kfRandomize = nil; ~kfApply = nil; ~kfCut = nil;
         ~kfArm = nil; ~kfDisarm = nil; ~kfPoke = nil;
+        // …the preset format among them: a surviving ~kfPresetSection would make
+        // ~savePreset write the topology of a run that is no longer there
+        ~kfSchemeLive = nil; ~kfSchemeText = nil; ~kfPresetSection = nil;
+        ~kfSchemeFromPreset = nil; ~kfGainSet = nil; ~kfVerdictRefresh = nil;
+        ~kfVerdict = nil; ~kfVerdictStale = false;
         ~kfCables = []; ~kfSchaltung = nil;
         "UNGRUND app — koppelfeld ВЫКЛ (enableKoppelfeld=false).".postln;
     };

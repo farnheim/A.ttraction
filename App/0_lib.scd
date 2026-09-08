@@ -31,6 +31,15 @@
     // the tuner and the preset would carry something other than what sounds
     accepted = ~kfRestSet !? { ~kfRestSet.(layer, key, v) };
     if(accepted.isNumber) { v = accepted } { Ndef(layer).set(key, v) };
+    ~ungValsSet.(layer, key, v);
+};
+
+// the tail of ~setParam without the write to the control: for a caller that has
+// already written the value in the NORMALIZED space of its node. It may not go
+// back through ~setParam, because `unmap(map(x))` on an exp ControlSpec is not
+// idempotent — one ULP per pass, and a preset would stop restoring bit for bit
+~ungValsSet = { |layer, key, v|
+    layer = layer.asSymbol; key = key.asSymbol;
     if(~ungVals[layer].isNil) { ~ungVals[layer] = () };
     ~ungVals[layer][key] = v;
     if(~ungTuner[layer].notNil and: { ~ungTunerSync[layer].notNil }) {
@@ -112,6 +121,10 @@
             ++ ", bass: " ++ ~cfg_effects.rev_bass.round(0.0001)
             ++ ", treble: " ++ ~cfg_effects.rev_treble.round(0.0001) ++ " )");
     };
+    // §8.2: the topology. The module owns the format down to the number of
+    // digits (round(0.0001) above would push a cable out of its band); here it
+    // is one string, and nil when koppelfeld is off or holds no scheme
+    ~kfPresetSection !? { |f| f.value !? { |txt| sections.add(txt) } };
     text = "// UNGRUND project preset · " ++ name ++ " · " ++ Date.getDate.stamp
         ++ "\n(\n" ++ sections.join(",\n") ++ "\n)\n";
     File.use(path, "w", { |f| f.write(text) });
@@ -121,13 +134,29 @@
 };
 
 ~loadPreset = { |name|
-    var path, e;
+    var path, e, patch, patchOn = false, armT;
     path = ~ungPresetDir.value +/+ (name.asString ++ ".scd");
     if(File.exists(path).not) {
         ("preset не найден: " ++ path).warn; nil
     } {
         e = path.load;                       // event literal from file
         if(e.isKindOf(Event)) {
+            // §8.2, strict order: disarm — layers/mixer/fx — apply. The section
+            // ABSENT leaves the topology alone entirely (partial-preset rule);
+            // present with the module off is a loud refusal, not a silent skip
+            patch = e[\patch];
+            patch !? {
+                if(~kfApply.isNil or: { ~kfSchemeFromPreset.isNil }) {
+                    ("preset " ++ name ++ " несёт секцию patch, но koppelfeld ВЫКЛ "
+                        ++ "(enableKoppelfeld=false) — топология не тронута").warn;
+                } {
+                    patchOn = true;
+                    armT = patch[\armTime] ? ~cfg_kf.armTime;
+                    // hand released: a preset is a full restore of the state, and
+                    // a live deviation surviving it would make the field lie
+                    ~kfDisarm.(armT);
+                };
+            };
             e[\layers] !? { |ls|
                 ls.keysValuesDo { |layer, vals|
                     var spec = ~ungSpecOf.(layer);
@@ -193,6 +222,18 @@
                             wid[\revGlyph] !? { |uv| uv.refresh };
                         };
                     }.defer;
+                };
+            };
+            // last, and after the layers: the destination rests of the scheme
+            // travel INSIDE it, and the `layers` section must not overwrite them
+            if(patchOn) {
+                if(~kfApply.(~kfSchemeFromPreset.(patch), armT).isNil) {
+                    // the validator refused: the live topology is untouched, so
+                    // the disarm above must be taken back — a preset that fails
+                    // may not leave the field silent behind a valid scheme
+                    ("preset " ++ name ++ ": секция patch отвергнута валидатором — "
+                        ++ "прежняя схема остаётся, поле взводится обратно").warn;
+                    ~kfArm.(armT);
                 };
             };
             ("preset loaded <- " ++ path.basename).postln;
@@ -378,12 +419,16 @@
         view: uv, spec: spec, norm: spec.unmap(v0 ? spec.default).clip(0, 1),
         act: action, enabled: true, fmt: { |v| ~uiFmt.(v, 3) }
     );
+    // r[\spec], never the captured argument: ~uiRulerSet/~uiRulerGet already read
+    // the slot, so a ruler whose spec was swapped (koppelfeld gain strips, whose
+    // ceiling is the class of the CURRENT destination) would otherwise report and
+    // act through the spec it was born with while drawing the new one
     var apply = { |px|
         if(r[\enabled]) {
             r[\norm] = ((px - 4) / (uv.bounds.width - 8)).clip(0, 1);
             uv.refresh;
-            r[\valTxt] !? { |t| t.string_(r[\fmt].(spec.map(r[\norm]))) };
-            r[\act].value(spec.map(r[\norm]));
+            r[\valTxt] !? { |t| t.string_(r[\fmt].(r[\spec].map(r[\norm]))) };
+            r[\act].value(r[\spec].map(r[\norm]));
         };
     };
     uv.drawFunc_({ |u|

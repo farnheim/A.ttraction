@@ -201,6 +201,14 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerPatchSeedVal = ~mixerPatchSeedVal ? 0;   // survives a window reopen
 ~mixerGraph   = nil;   // UserView: koppelfeld graph (cables per layer pair)
 ~mixerTiers   = nil;   // UserView: tiers of ~seqTimeline
+~mixerKfStrip = nil;   // UserView: scheme state (mode · Λmax · cables · verdict · armed)
+~mixerKfBtns  = ();    // \arm / \disarm / \window Buttons
+~mixerGainPop = nil;   // PopUpMenu (page of 16 cable gains)
+~mixerGainRows = [];   // one row per strip: ( txt: ruler: cable: spec: )
+~kfGainPage   = ~kfGainPage ? 0;   // survives a window reopen
+// mixer export, called by ~kfInstall (§8.4/D103): nil while there is no window,
+// so a scheme applied with the desk closed touches no dead widget
+~kfGuiRelabel = ~kfGuiRelabel;
 ~mixerPresetPop  = nil;   // PopUpMenu (project presets; read by ~ungRefreshPresets)
 ~mixerPresetName = nil;   // TextField (preset name)
 ~mixSoloCur   = ~mixSoloCur;   // current solo layer (or nil), survives reopen
@@ -265,6 +273,11 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerPatchBtn   = nil;
     ~mixerGraph      = nil;
     ~mixerTiers      = nil;
+    ~mixerKfStrip    = nil;
+    ~mixerKfBtns     = ();
+    ~mixerGainPop    = nil;
+    ~mixerGainRows   = [];
+    ~kfGuiRelabel    = nil;
     ~mixerFx         = ();
     ~mixerPresetPop  = nil;
     ~mixerPresetName = nil;
@@ -307,7 +320,18 @@ Ndef(\master).play(out: 0, numChannels: 2);
     // field: an unloaded layer has no glyph and the line would end in nothing
     var posOf = { |l| if(~mixerLayers.includes(l.asSymbol)) { ~mixerGraphPos[l.asSymbol] } };
     var pairKey = { |a, b| (a.asString ++ ">" ++ b.asString).asSymbol };
-    var per = (), selfCnt = (), inLoop = (), maxN = 1;
+    var per = (), selfCnt = (), inLoop = ();
+    // §8.4: the stroke reads Σgain of the pair, the caption its cable count —
+    // two different facts, so one may not be derived from the other
+    var sumG = (), selfSum = (), curveCnt = (), selfCurve = ();
+    var bump = { |reg, k, cv| if(reg[k].isNil) { reg[k] = () }; reg[k][cv] = (reg[k][cv] ? 0) + 1 };
+    // fixed order, not keysValuesDo: an Event iterates by hash, and a tie would
+    // pick a different curve from frame to frame
+    var domCurve = { |e|
+        var best = nil, bn = 0;
+        [\clip, \fold, \step].do { |cv| if(((e ? ())[cv] ? 0) > bn) { bn = e[cv]; best = cv } };
+        best
+    };
     // the cycle is read off the SCHEME (the verdict of ~kfApply, else the loops
     // the derivation wrote into it) — the modmatrix line that used to carry it
     // is gone with the module
@@ -320,14 +344,20 @@ Ndef(\master).play(out: 0, numChannels: 2);
     };
     cables.do { |c|
         var a = c[\src][0].asSymbol, b = c[\dst][0].asSymbol;
+        var g = c[\gain] ? 0, cv = c[\curve] ? \clip;
         if(posOf.(a).notNil and: { posOf.(b).notNil }) {
-            if(a == b) { selfCnt[a] = (selfCnt[a] ? 0) + 1 } {
-                per[pairKey.(a, b)] = (per[pairKey.(a, b)] ? 0) + 1;
+            if(a == b) {
+                selfCnt[a] = (selfCnt[a] ? 0) + 1;
+                selfSum[a] = (selfSum[a] ? 0) + g;
+                bump.(selfCurve, a, cv);
+            } {
+                var k = pairKey.(a, b);
+                per[k] = (per[k] ? 0) + 1;
+                sumG[k] = (sumG[k] ? 0) + g;
+                bump.(curveCnt, k, cv);
             };
         };
     };
-    per.do { |n| maxN = maxN.max(n) };
-    selfCnt.do { |n| maxN = maxN.max(n) };
     per.keysValuesDo { |k, n|
         var ab = k.asString.split($>);
         var src = posOf.(ab[0]), dst = posOf.(ab[1]);
@@ -337,7 +367,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         var ex = dst.x - (ux * 26) + (px * 3), ey = dst.y - (uy * 26) + (py * 3);
         Pen.use {
             Pen.strokeColor = ~uiPal.ink; Pen.width = ~uiLineWidth;
-            Pen.lineDash = ~uiLineDash.(n / maxN, nil);
+            Pen.lineDash = ~uiLineDash.((sumG[k] ? 0) / 4, domCurve.(curveCnt[k]));
             if(inLoop[k] == true) {
                 [1.7, -1.7].do { |o|
                     Pen.line((sx + (px * o))@(sy + (py * o)), (ex + (px * o))@(ey + (py * o)));
@@ -363,7 +393,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         pt !? {
             Pen.use {
                 Pen.strokeColor = ~uiPal.ink; Pen.width = ~uiLineWidth;
-                Pen.lineDash = ~uiLineDash.(n / maxN, nil);
+                Pen.lineDash = ~uiLineDash.((selfSum[l] ? 0) / 4, domCurve.(selfCurve[l]));
                 Pen.addArc((pt.x - 27)@(pt.y - 25), 9, 0, 2pi); Pen.stroke;
             };
             ~uiPenText.(n.asString, pt.x - 27, pt.y - 44, font, ~uiPal.ink2, \middle);
@@ -419,9 +449,93 @@ Ndef(\master).play(out: 0, numChannels: 2);
     };
 };
 
+// --- koppelfeld: scheme state + per-cable gains (§8.4) -------------------
+// the strip redraws itself once a second for the same reason the graph does —
+// the scheme changes from four places (patch button, act, IDE, preset) — and it
+// is the ONE caller of ~kfVerdictRefresh (D99): a gain moved by hand makes the
+// verdict of the last ~kfApply a statement about a graph that no longer stands
+~mixerDrawKfStrip = { |u|
+    var f = ~uiMono.(10), str;
+    if(~kfReport.isNil or: { ~kfNodes.isNil }) {
+        str = "koppelfeld off (enableKoppelfeld)";
+    } {
+        var v = if(~kfVerdictRefresh.notNil) { ~kfVerdictRefresh.value } { ~kfVerdict };
+        var rep = ~kfReport.value;
+        // a NOTE is half the verdict: V10 files an unpatched layer as a note, so
+        // "ok" alone would show a scheme that never touches epsilon as complete
+        var notes = (v !? { |x| (x[\notes] ? []).size }) ? 0;
+        // the parens are load-bearing: `++` after the last block of a bare `case`
+        // would append to that BLOCK, not to the string the case returns
+        var verdict = (case
+            { v.isNil }    { "no verdict" }
+            { v[\valid] }   { "V1–V13 ok" }
+            { "V1–V13 · " ++ v[\errors].size ++ " error" ++ if(v[\errors].size == 1) { "" } { "s" } })
+            ++ if(notes > 0) { " · " ++ notes ++ " note" ++ if(notes == 1) { "" } { "s" } } { "" };
+        str = (rep[\mode] ? "—").asString
+            ++ " · Λmax " ++ ~uiFmt.(rep[\lamMax] ? 0, 2)
+            ++ " · cables " ++ rep[\cables] ++ "/" ++ ((~cfg_kf !? { |x| x[\cableMax] }) ? 64)
+            ++ if((rep[\disabled] ? 0) > 0) { " (off " ++ rep[\disabled] ++ ")" } { "" }
+            ++ " · interlayer " ++ ~uiFmt.((rep[\interlayer] ? 0) * 100, 1) ++ " %"
+            ++ " · " ++ verdict
+            ++ " · " ++ if(rep[\armed] == true) { "armed" } { "disarmed" };
+    };
+    ~uiPenText.(str, 0, 3, f, ~uiPal.ink);
+};
+
+// a strip is one ENABLED cable; the page shows 16 of them
+~mixerGainCables = { (~kfCables ? []).select { |c| c[\enabled] != false } };
+~mixerGainPages  = { ((~mixerGainCables.value.size / 16).ceil.asInteger).clip(1, 4) };
+~mixerGainLabel  = { |lk|
+    (~uiPhi[lk[0].asSymbol] ? "") ++ " " ++ lk[1].asString.keep(12)
+};
+
+// rebind labels, specs and values of the 16 strips: called by ~kfInstall on every
+// scheme change and by the page popup. Silent on a dead window, and every widget
+// touch is deferred — ~kfInstall runs inside the fork of ~kfApply
+~mixerGainRelabel = {
+    {
+        if(~mixerWin.notNil and: { ~mixerGainRows.notEmpty }) {
+            var cables = ~mixerGainCables.value;
+            var pages = ~mixerGainPages.value;
+            var gmaxAbs = (~cfg_kf !? { |x| x[\gainAbsMax] }) ? 4;
+            var items = if(cables.isEmpty) { ["no cables"] } {
+                pages.collect { |i|
+                    "gains " ++ ((i * 16) + 1) ++ "–" ++ ((i + 1) * 16).min(cables.size)
+                };
+            };
+            ~kfGainPage = (~kfGainPage ? 0).clip(0, pages - 1);
+            ~uiPopupItems.(~mixerGainPop, items);
+            ~uiPopupSet.(~mixerGainPop, ~kfGainPage);
+            ~mixerGainRows.do { |row, i|
+                // the row holds the cable EVENT, never its index in ~kfCables:
+                // ~kfGainSet finds the slot by object identity and ~kfInstall
+                // replaces the whole table
+                var c = cables[(~kfGainPage * 16) + i];
+                row[\cable] = c;
+                if(c.isNil) {
+                    row[\spec] = ControlSpec(0, gmaxAbs, \lin);
+                    row[\ruler][\spec] = row[\spec];
+                    row[\txt].string_("—");
+                    ~uiRulerSet.(row[\ruler], 0);
+                    ~uiRulerEnable.(row[\ruler], false);
+                } {
+                    var gmax = if(~kfGainMax.notNil) {
+                        min(gmaxAbs, ~kfGainMax.(c[\dst][0], c[\dst][1]))
+                    } { gmaxAbs };
+                    row[\spec] = ControlSpec(0, gmax.max(0.0001), \lin);
+                    row[\ruler][\spec] = row[\spec];
+                    row[\txt].string_(~mixerGainLabel.(c[\src]) ++ " → " ++ ~mixerGainLabel.(c[\dst]));
+                    ~uiRulerSet.(row[\ruler], (c[\gain] ? 0).clip(0, row[\spec].maxval));
+                    ~uiRulerEnable.(row[\ruler], ~kfGainSet.notNil);
+                };
+            };
+        };
+    }.defer;
+};
+
 ~ungBuildMixer = {
     var layers = ~mixerLayers, w = 1440, h = 850, scr, winRect, win;
-    var gx = 1010, rx = 1034, rw = 378, tableY = 444, rowH = 28, modY = 620;
+    var gx = 1010, rx = 1034, rw = 378, tableY = 444, rowH = 28, modY = 610;
     var hasFx = ~cfg_effects.notNil, hasPatch = ~kfRandomize.notNil and: { ~kfApply.notNil };
     var hasGrid = ~gridGenerate.notNil;
     var fmt2 = { |v| ~uiFmt.(v, 2) }, fmt3 = { |v| ~uiFmt.(v, 3) };
@@ -431,7 +545,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
         "9 · 2+3 +rev", "10 · 1+3 +rev", "11 · all +rev", "12 · rev only"
     ];
     var graph, tiers, presetName, presetPop, gridTv, gridStatus, gridBtn, konRange, konTtierBox;
-    var recBtn, mkGlyph, patchSeed, patchNote;
+    var recBtn, mkGlyph, patchSeed, patchNote, kfStrip, armT;
 
     // close previous window best-effort (destroyed Qt object — contract §6)
     if(~mixerWin.notNil) { try { ~mixerWin.close } };
@@ -615,6 +729,51 @@ Ndef(\master).play(out: 0, numChannels: 2);
         ~uiBtnEnable.(~mixerPatchBtn, false);
         patchNote.string_("koppelfeld off (enableKoppelfeld)");
     };
+
+    // --- koppelfeld: scheme state + arm/disarm + the window of S7 ---
+    kfStrip = UserView(win, Rect(28, modY + 48, 610, 20)).background_(~uiPal.paper);
+    kfStrip.drawFunc_({ |u| ~mixerDrawKfStrip.(u) });
+    // same reason as the graph above: the scheme changes from four places, and
+    // the verdict ages under the hand (D99) — a slow self-redraw, not four hooks
+    kfStrip.frameRate_(1).animate_(true);
+    ~mixerKfStrip = kfStrip;
+
+    armT = { (~cfg_kf !? { |x| x[\armTime] }) ? 4 };
+    ~mixerKfBtns = (
+        arm: ~uiBtn.(win, Rect(652, modY + 46, 64, 24), "arm",
+            { ~kfArm !? { |f| f.(armT.value) } }),
+        disarm: ~uiBtn.(win, Rect(722, modY + 46, 74, 24), "disarm",
+            { ~kfDisarm !? { |f| f.(armT.value) } }),
+        // S7 defines ~openKoppelfeld (precedent ~openMixer/~openTuner/~openViz);
+        // until then the button says so instead of doing nothing on a click
+        window: ~uiBtn.(win, Rect(804, modY + 46, 176, 24),
+            if(~openKoppelfeld.notNil) { "koppelfeld" } { "koppelfeld — not loaded" },
+            { ~openKoppelfeld !? (_.value) })
+    );
+    if(hasPatch.not) {
+        [\arm, \disarm].do { |k| ~uiBtnEnable.(~mixerKfBtns[k], false) };
+    };
+    if(~openKoppelfeld.isNil) { ~uiBtnEnable.(~mixerKfBtns[\window], false) };
+
+    // --- koppelfeld: 16 cable gains per page (§8.4) ---
+    ~uiCap.(win, Rect(28, modY + 76, 260, 14), "koppelfeld · cable gains");
+    ~mixerGainPop = ~uiPopup.(win, Rect(292, modY + 72, 130, 22), ["—"], 0,
+        { |idx| ~kfGainPage = idx; ~kfGuiRelabel !? (_.value) });
+    ~mixerGainRows = 16.collect { |i|
+        var col = i div: 8, gy = modY + 96 + ((i % 8) * 16);
+        var x = 28 + (col * 476);
+        var row = ( cable: nil, spec: ControlSpec(0, 4, \lin) );
+        row[\txt] = ~uiText.(win, Rect(x, gy, 196, 16), "—", 9.5, ~uiPal.ink2);
+        row[\ruler] = ~uiRuler.(win, Rect(x + 200, gy, 176, 14), row[\spec], 0, { |v|
+            row[\cable] !? { |c| ~kfGainSet !? { |f| f.(c, v) } };
+        });
+        row[\ruler][\valTxt] = ~uiText.(win, Rect(x + 382, gy, 56, 16), fmt2.(0), 9.5);
+        row[\ruler][\fmt] = fmt2;
+        row;
+    };
+    // mixer export, not module 8's: it dies with the window it draws into
+    ~kfGuiRelabel = ~mixerGainRelabel;
+    ~kfGuiRelabel.value;
 
     // --- structure grid (right column); nil-safe without 0_grid ---
     ~uiCap.(win, Rect(rx, 76, rw, 14), "structure grid 16×16");
