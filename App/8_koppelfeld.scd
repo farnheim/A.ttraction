@@ -9,8 +9,12 @@
 // registries, ~kfLambda, validator V1–V13, ~kfPoke.
 // Stage S3: curve `step` for the 20 pitch nodes (class P) — ~kfLattice (94 Hz,
 // 3-limit), position table per node, hysteresis, dwell, cut ≤ 30 ms.
+// Stage S4: the §9.2 proxy meter and the §12.1 live logger.
+// Stage S5: the patcher — ~kfGraphFacts, the eight steps of §6, the ordered
+// repair, ~kfDeriveScheme/~kfRandomize; the SAME law ~konDerive enters (§17 D85).
 // Stage S6: the `patch:` section of a preset (§8.2) — the module owns the
 // format, 0_lib only writes the string; live gain ~kfGainSet.
+// Stage S7 (the §9 window) lives in 8b_kfwindow.scd, which loads right after.
 // Buses: 111 node audio (1 ch) + 1 control for arm; §3.7 — 5x headroom.
 // Loads AFTER 0_grid (alphabet: ~gridClassOrder / ~gridLayerOf) and the layers
 // (~ungSpecs), and BEFORE the mixer.
@@ -944,7 +948,7 @@
     };
     loops = loops.sort { |a, b| a[\lam] > b[\lam] };
     lamMax = if(loops.isEmpty) { 0 } { loops[0][\lam] };
-    dom = loops.detect { |l| true };
+    dom = loops.first;
 
     mode = \ruhe;
     if(lamMax >= cfg.modeUmlauf) {
@@ -992,8 +996,8 @@
     var wins = (), rels = (), curves = (), rests = (), indeg = (), outdeg = ();
     var steps = (), stepDef = ( hyst: ~cfg_kf.pHyst, dwell: ~cfg_kf.pDwell, cut: ~cfg_kf.pCut );
     var lam, adj, depths = [], maxDepth = 0, interlayer = 0;
-    var layIn = (), layOut = (), census = ();
-    var restOf, winOf, reach, name;
+    var layIn = (), layOut = (), census = (), degenerate = ();
+    var restOf, reach, name;
 
     name = ~kfIdTag;
 
@@ -1057,7 +1061,6 @@
         layOut[sl] = (layOut[sl] ? 0) + 1;
         layIn[dl] = (layIn[dl] ? 0) + 1;
     };
-    winOf = { |l, k| wins[~kfIdOf.(l, k)] ? [0, 1] };
 
     indeg.keysValuesDo { |k, v|
         if(v > cfg.fanIn) { errs = errs.add("V2 фан-ин " ++ v ++ " > " ++ cfg.fanIn ++ ": " ++ name.(k)) };
@@ -1142,7 +1145,11 @@
                     ++ " — кабель не проведён: " ++ tag);
             };
             if((c[\pol] ? 1).abs != 1) { errs = errs.add("V9 pol не ±1: " ++ tag) };
-            if(fmax.notNil and: { fmax < (~kfBand[\block][0] * 2) }) {
+            // per NODE, not per cable: three cables into one degenerate target
+            // filed the same sentence three times
+            if(fmax.notNil and: { fmax < (~kfBand[\block][0] * 2) }
+                and: { degenerate[did].isNil }) {
+                degenerate[did] = true;
                 notes = notes.add("узел " ++ name.(did) ++ ": f_max " ++ fmax.round(0.0001)
                     ++ " < 2× пола B4 — цель формально легальна, практически вырождена");
             };
@@ -1253,7 +1260,7 @@
             ++ lam[\lamMax].round(0.001) ++ " как " ++ lam[\mode]
             ++ " — V11 применяется по ВЫВЕДЕННОМУ (§4.4)");
     };
-    block { |brk|
+    block {
         var said = ();
         cables.do { |c|
             var did = ~kfIdOf.(c[\dst][0], c[\dst][1]);
@@ -1265,7 +1272,6 @@
                     ++ "Λ, режим и V11 считаются по clip");
             };
         };
-        brk.value;
     };
 
     reach = { |from, maxD|
@@ -1319,7 +1325,7 @@
     }};
 
     // V5 (depth, length presence) + V6 (τ ladder) in one simple-path walk
-    block { |brk|
+    block {
         var lens = (), bad = (), walk;
         walk = { |node, seen, prev, d|
             if(d > maxDepth) { maxDepth = d };
@@ -1357,7 +1363,6 @@
             notes = notes.add("V5 присутствуют длины " ++ depths ++ ", не все 1.."
                 ++ cfg.depthMax ++ " (гарантия патчера, не инвариант схемы)");
         };
-        brk.value;
     };
 
     // V10: interlayer share, in/out per layer, census connectivity
@@ -1380,7 +1385,7 @@
                 ++ "как периодическое: " ++ l[\nodes].collect { |n| name.(n) }.join(" > "));
         };
     };
-    block { |brk|
+    block {
         var arrival = [\ioi0, \decel, \ioiMax, \popScale, \gapScale, \density];
         var pTargets = cables.select { |c| (~kfRow.(c[\dst][0], c[\dst][1]) !? { |r| r[0] }) == \P };
         var pPerLayer = ();
@@ -1447,12 +1452,11 @@
                     ++ ": " ++ pTags.(nil));
             };
         };
-        brk.value;
     };
 
     // V12: epsilon freqLo ≤ freqHi in ALL reachable states;
     // mLevel ≥ flowLevel − 6 dB
-    block { |brk|
+    block {
         var span = { |k|
             var cs = ~kfSpecOfNode.(\epsilon, k);
             var w = wins[~kfIdOf.(\epsilon, k)];
@@ -1473,11 +1477,10 @@
                 ++ ml[0].round(0.001) ++ " < " ++ name.(~kfIdOf.(\epsilon, \flowLevel))
                 ++ " верх − 6 dB (" ++ (fl[1] * 0.5).round(0.001) ++ ")");
         };
-        brk.value;
     };
 
     // V13: theta.density may cross the 0.02 threshold on a B4 cable only
-    block { |brk|
+    block {
         var did = ~kfIdOf.(\theta, \density);
         var w = wins[did];
         if(w.notNil and: { w[0] < 0.02 }) {
@@ -1488,7 +1491,6 @@
                 };
             };
         };
-        brk.value;
     };
 
     (
@@ -2292,7 +2294,6 @@
             var cls = row[0];
             var cl = ~kfClass[cls] ? ();
             var gmax = ~kfGainMax.(dl, dk);
-            var rng, ceil;
             cb[\pol] = if((cb[\pol] ? 1) < 0) { -1 } { 1 };
             cb[\gain] = (cb[\gain] ? 0).clip(cfg.gainMin, max(cfg.gainMin, gmax));
             if(gmax < cfg.gainMin) { drop = drop.add(i) };

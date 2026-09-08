@@ -192,4 +192,6 @@ Ndef(\space_echo_dly).fadeTime = 2;
 // effect returns -> ~busFxReturn (two writers summing into the return is §K.3)
 Ndef(\space_echo_rev).play(out: ~busFxReturn.index, numChannels: 2);
 Ndef(\space_echo_dly).play(out: ~busFxReturn.index, numChannels: 2);
+
+"6_effects — RE-201 ×2: \\space_echo_rev (§K.1) + \\space_echo_dly (§K.2).".postln;
 )

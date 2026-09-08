@@ -11,18 +11,18 @@
 // target may also be the mixer: \mix_<layer> param \vol, or a send
 // aggregator \fxsendRev / \fxsendDly param \send_<layer> (see 2_mixer.scd).
 ~cfg_lfo = (
+    // min/max are in the UNIT OF THE TARGET's spec row, not in Hz: a \freq row
+    // of a layer is in MIDI NOTES, and Hz numbers there sweep the control past
+    // its own clip into the Nyquist guard (freqHi 600..1000 did exactly that)
     lines: [
         // alpha: very slow volume breathing (§C.1)
-        ( target: \alpha,   param: \amp,    shape: \noise,  rate: 0.03, min: 0.16, max: 0.24 ),
+        ( target: \alpha,   param: \amp,    shape: \noise, rate: 0.03,  min: 0.16, max: 0.24 ),
 
-        // delta: slow Q drift (§C.4)
-        ( target: \delta,    param: \rq,     shape: \sine,   rate: 0.05, min: 0.015, max: 0.03 ),
+        // delta: slow drift of the plate ring (§C.4 — modulation ≤ 0.25 Hz)
+        ( target: \delta,   param: \plateQ, shape: \sine,  rate: 0.05,  min: 0.7,  max: 1.1 ),
 
-        // epsilon: drift of the comb sweep top (§C.5)
-        ( target: \epsilon, param: \freqHi, shape: \noise,  rate: 0.012, min: 600, max: 1000 ),
-
-        // theta: slow AM rate drift (scintillation, §C.8)
-        ( target: \theta,   param: \lfnRate, shape: \tri,   rate: 0.02, min: 0.08, max: 0.16 ),
+        // epsilon: drift of the streak sweep top (§C.5); 600–1000 Hz in notes
+        ( target: \epsilon, param: \freqHi, shape: \noise, rate: 0.012, min: 74.7, max: 83.2 ),
 
         // mixer: slow breathing of theta's reverb send
         ( target: \fxsendRev, param: \send_theta, shape: \sine, rate: 0.025, min: 0.45, max: 0.70 )

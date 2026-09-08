@@ -16,55 +16,55 @@
     name: \epsilon,
     params: [
         // --- group \freq: streak endpoints + held modes (MIDI notes, 47–1504 Hz) ---
-        ( key: \freqLo, label: "низ дрейфа", group: \freq, disp: \note,
+        ( key: \freqLo, group: \freq, disp: \note,
           spec: ControlSpec(30.28, 90.28, \lin, 0, 30.28), reread: \cont, arMod: \freq ),  // 47 Hz ÷2
-        ( key: \freqHi, label: "верх дрейфа", group: \freq, disp: \note,
+        ( key: \freqHi, group: \freq, disp: \note,
           spec: ControlSpec(30.28, 90.28, \lin, 0, 49.30), reread: \cont, arMod: \freq ),  // 141 Hz ×3/2
-        ( key: \m1, label: "мода 1", group: \freq, disp: \note,
+        ( key: \m1, group: \freq, disp: \note,
           spec: ControlSpec(30.28, 90.28, \lin, 0, 30.28), reread: \contBlock, arMod: \freq ),  // 47 Hz ÷2
-        ( key: \m2, label: "мода 2", group: \freq, disp: \note,
+        ( key: \m2, group: \freq, disp: \note,
           spec: ControlSpec(30.28, 90.28, \lin, 0, 37.30), reread: \contBlock, arMod: \freq ),  // 70.5 Hz ×3/4
-        ( key: \m3, label: "мода 3", group: \freq, disp: \note,
+        ( key: \m3, group: \freq, disp: \note,
           spec: ControlSpec(30.28, 90.28, \lin, 0, 49.30), reread: \contBlock, arMod: \freq ),  // 141 Hz ×3/2
-        ( key: \m4, label: "мода 4", group: \freq, disp: \note,
+        ( key: \m4, group: \freq, disp: \note,
           spec: ControlSpec(30.28, 90.28, \lin, 0, 54.28), reread: \contBlock, arMod: \freq ),  // 188 Hz ×2
-        ( key: \flowCeil, label: "потолок потока", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \flowCeil, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(1200, 5000, \exp, 0, 2500), reread: \contBlock, arMod: \freq ),  // amendment (e): 1.2–5 kHz
 
         // --- group \tone: mode field (the principal stratum) ---
-        ( key: \mLevel, label: "уровень мод", group: \tone,
+        ( key: \mLevel, group: \tone,
           spec: ControlSpec(0.0, 0.5, \lin, 0, 0.35), reread: \cont, arMod: \lin ),  // up to +6 dB over the flow (inverted)
-        ( key: \mWidth, label: "ширина мод", group: \tone,
+        ( key: \mWidth, group: \tone,
           spec: ControlSpec(0.02, 0.3, \exp, 0, 0.06), reread: \contBlock, arMod: \freq ),  // mode rq — drives the flatness metric
-        ( key: \mBreath, label: "дыхание мод", group: \tone, unit: " Hz",
+        ( key: \mBreath, group: \tone, unit: " Hz",
           spec: ControlSpec(0.02, 0.1, \exp, 0, 0.04), reread: [\seg, \mBreath], arMod: \rate ),  // per-mode breathing base rate
 
         // --- group \tone: flow (excitation, subordinate) ---
-        ( key: \flowLevel, label: "уровень потока", group: \tone,
+        ( key: \flowLevel, group: \tone,
           spec: ControlSpec(0.0, 0.5, \lin, 0, 0.15), reread: \cont, arMod: \lin ),  // the modes' medium
-        ( key: \diffDepth, label: "диффузия", group: \tone,
+        ( key: \diffDepth, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.6), reread: \cont, arMod: \lin ),  // AllpassC delay-mod depth
 
         // --- group \tone: streak (the §C.5 motion identity) ---
-        ( key: \streakLevel, label: "уровень полосы", group: \tone,
+        ( key: \streakLevel, group: \tone,
           spec: ControlSpec(0.0, 0.5, \lin, 0, 0.20), reread: \cont, arMod: \lin ),  // audible, not dominant
-        ( key: \streakWidth, label: "ширина полосы", group: \tone,
+        ( key: \streakWidth, group: \tone,
           spec: ControlSpec(0.1, 1.5, \exp, 0, 0.45), reread: \cont, arMod: \freq ),  // band formant rq (softness)
         // reread is an LFN segment at rate 1/driftPeriod: the [\seg, \key] grammar
         // cannot express a reciprocal, so the band ceiling is 1/(2·win_hi) (§5.3)
-        ( key: \driftPeriod, label: "период дрейфа", group: \tone, unit: " s",
+        ( key: \driftPeriod, group: \tone, unit: " s",
           spec: ControlSpec(20, 240, \exp, 0, 180), reread: [\seg, \driftPeriod], arMod: \rate ),  // §C.5 two-LFN law period T
 
         // --- group \tone: surface + space ---
-        ( key: \surfDepth, label: "глуб. поверхн.", group: \tone, unit: " dB",
+        ( key: \surfDepth, group: \tone, unit: " dB",
           spec: ControlSpec(0.0, 6.0, \lin, 0, 3.0), reread: \cont, arMod: \lin ),  // a cave's air is not still
-        ( key: \surfRate, label: "част. поверхн.", group: \tone, unit: " Hz",
+        ( key: \surfRate, group: \tone, unit: " Hz",
           spec: ControlSpec(0.05, 0.3, \exp, 0, 0.09), reread: [\seg, \surfRate], arMod: \rate ),  // aperiodic by UGen choice
-        ( key: \decorrWidth, label: "декорреляция", group: \tone,
+        ( key: \decorrWidth, group: \tone,
           spec: ControlSpec(0.0, 0.3, \lin, 0, 0.2), reread: \cont, arMod: \lin ),  // L/R decorrelation, centre fixed
 
         // --- group \tone: master ---
-        ( key: \amp, label: "громкость", group: \tone,
+        ( key: \amp, group: \tone,
           spec: ControlSpec(0.0, 0.3, \lin, 0, 0.14), reread: \cont, arMod: \lin )  // §K.4 schliere level
     ]
 );

@@ -23,10 +23,9 @@
     colPad:    4,      // left inset of a row inside its column …
     gutter:    12,     // … and the lane on its right the cables run in
     rowH:      18,     // §9.1
-    headH:     88,     // header block: caption, title, state strip, buttons
     barX:      90,     // value scale, from the row's left inset …
     barW:      76,     // … and its width
-    fieldY:    88,
+    fieldY:    88,     // top of the field = bottom of the header block
     fieldH:    500,
     margin:    14,     // window margin; the inspector is anchored off the RIGHT
     inspW:     300,
@@ -74,7 +73,6 @@
 ~kfWinOwnsMeter = ~kfWinOwnsMeter ? false;
 // Font() allocates: ~uiMono.(9) called per row would build 333 fonts a frame
 ~kfWinFontRow   = ~uiMono.(9);
-~kfWinFontBold  = ~uiMono.(9, true);
 ~kfWinFontLine  = ~uiMono.(10);
 
 // f_max spans 30 Hz (zeta continuous) down to 1/(2·win_hi) of an `inv` node —
@@ -128,17 +126,12 @@
         ~kfWinLiveMap = ();
         ids.do { |lk, i| ~kfWinLiveMap[~kfIdOf.(lk[0], lk[1])] = i };
         ~kfWinLiveIds = ids;
-        ~kfRows.do { |r| r[\liveIdx] = ~kfWinLiveMap[r[\id]] };
+        (~kfRows ? []).do { |r| r[\liveIdx] = ~kfWinLiveMap[r[\id]] };
     };
 };
 
 ~kfWinLiveOf = { |id|
-    var ids = ~kfMeterIds ? [];
-    if(ids !== ~kfWinLiveIds) {
-        ~kfWinLiveMap = ();
-        ids.do { |lk, i| ~kfWinLiveMap[~kfIdOf.(lk[0], lk[1])] = i };
-        ~kfWinLiveIds = ids;
-    };
+    ~kfWinLiveSync.value;
     ~kfWinLiveMap[id] !? { |i| (~kfLive ? [])[i] };
 };
 
@@ -713,15 +706,14 @@
 ~ungBuildKfWindow = {
     var cfg = ~cfg_kfwin, pal = ~uiPal;
     var w = cfg.winW, h = cfg.winH, scr, winRect, win;
-    var ix, iw, fieldW, live, y;
-    var fmt2 = { |v| ~uiFmt.(v, 2) }, fmt3 = { |v| ~uiFmt.(v, 3) };
+    var ix, iw, fieldW, y;
+    var fmt3 = { |v| ~uiFmt.(v, 3) };
 
     // close previous window best-effort (destroyed Qt object — contract §6)
     if(~kfWin.notNil) { try { ~kfWin.close } };
     ~kfResetSlots.value;
 
-    live = (~kfNodes ? ()).notNil and: { (~kfNodes ? ()).notEmpty };
-    if(live.not) {
+    if((~kfNodes ? ()).isEmpty) {
         "8b_kfwindow — поля нет (~kfNodes пусто): окно не открыто.".warn;
         nil
     } {

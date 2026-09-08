@@ -143,31 +143,25 @@ s.waitForBoot({
         (~appDir +/+ "8b_kfwindow.scd").load;
         s.sync;
     } {
-        // off: tear down a previous enabled run through the module's OWN
-        // registry, else a layer starts with a dangling n_mapa
-        if(~kfClear.notNil) { ~kfClear.value };
-        // drop ALL module hooks: a surviving ~kfSelfTest from a previous run
-        // would throw at step 8b and abort the build before start, a surviving
-        // ~kfGraphFacts would make 9_konstruktion believe the module is loaded,
-        // and a surviving ~kfRandomize would derive against ~kfNodes = nil
-        ~kfNodes = nil; ~kfRestSet = nil; ~kfRebind = nil; ~kfReport = nil;
-        ~kfSelfTest = nil; ~kfPeakHold = nil; ~kfClear = nil;
-        ~kfMeterOn = nil; ~kfLogStart = nil; ~kfLogStop = nil; ~kfLive = [];
-        ~kfMeterOnP = nil; ~kfMeterFree = nil; ~kfLogCols = [];
-        ~kfGraphFacts = nil; ~kfRandomize = nil; ~kfApply = nil; ~kfCut = nil;
-        ~kfArm = nil; ~kfDisarm = nil; ~kfPoke = nil;
-        // …the preset format among them: a surviving ~kfPresetSection would make
-        // ~savePreset write the topology of a run that is no longer there
-        ~kfSchemeLive = nil; ~kfSchemeText = nil; ~kfPresetSection = nil;
-        ~kfSchemeFromPreset = nil; ~kfGainSet = nil; ~kfVerdictRefresh = nil;
-        ~kfVerdict = nil; ~kfVerdictStale = false;
-        ~kfCables = []; ~kfSchaltung = nil;
-        // …and the window of §9 with them: a surviving ~openKoppelfeld would
-        // leave the desk button live over a field that is not there, and a
-        // surviving ~kfStripText would have both state strips read ~kfReport = nil
+        // off: the §9 window goes first (§10.4 — its own onClose stops the meter),
+        // then the field through the module's OWN registry, else a layer starts
+        // with a dangling n_mapa
         ~kfWin !? { |kw| { try { kw.close } }.defer; ~kfWin = nil };
-        ~openKoppelfeld = nil; ~kfStripText = nil; ~kfResetSlots = nil;
-        ~kfGuiSync = nil; ~kfRows = []; ~kfWinCables = []; ~kfSel = ();
+        if(~kfClear.notNil) { ~kfClear.value };
+        // and only THEN the hooks — by prefix, never as an enumerated list: a
+        // list drifts the day module 8 or 8b publishes one more name, and a
+        // hook left standing over a dead field is silent. A surviving
+        // ~kfSelfTest throws at step 8b and aborts the build before start, a
+        // surviving ~kfGraphFacts makes 9_konstruktion believe the module is
+        // loaded, a surviving ~kfPresetSection makes ~savePreset write the
+        // topology of a run that is no longer there
+        currentEnvironment.keys.asArray.do { |k|
+            var nm = k.asString;
+            if(nm.beginsWith("kf") or: { nm.beginsWith("cfg_kf") }) {
+                currentEnvironment.removeAt(k);
+            };
+        };
+        ~openKoppelfeld = nil;
         "UNGRUND app — koppelfeld ВЫКЛ (enableKoppelfeld=false).".postln;
     };
 

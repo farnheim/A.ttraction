@@ -20,38 +20,38 @@
         // no disp: an octave index is not a frequency; round in LOGIC holds the
         // lattice. reread [\event, \fragment]: a fragment is not a parameter, the
         // whole arrival law sets its rate; the 0.05 Hz band ceiling is static (§5.5)
-        ( key: \fragOct, label: "октава мод", group: \freq,
+        ( key: \fragOct, group: \freq,
           spec: ControlSpec(-1, 0, \lin, 1, 0), reread: [\event, \fragment], arMod: \latch ),
 
         // --- group \tone: the arrival law (NEVER lagged — they latch at the
         // population boundary, where Dgeom/Ddup re-poll their kr inputs) ---
-        ( key: \ioi0, label: "IOI головы", group: \tone, unit: " s",
+        ( key: \ioi0, group: \tone, unit: " s",
           spec: ControlSpec(0.012, 0.120, \exp, 0, 0.018), reread: \pop, arMod: \demand ),  // head IOI; \exp — a time constant over 10:1
-        ( key: \decel, label: "замедление", group: \tone,
+        ( key: \decel, group: \tone,
           spec: ControlSpec(1.05, 1.40, \lin, 0, 1.22), reread: \pop, arMod: \demand ),  // decel <= 1 is unreachable by construction
-        ( key: \ioiMax, label: "потолок истощ.", group: \tone, unit: " s",
+        ( key: \ioiMax, group: \tone, unit: " s",
           spec: ControlSpec(0.4, 1.5, \lin, 0, 0.60), reread: \pop, arMod: \demand ),  // exhaustion floor -> kMax
-        ( key: \popScale, label: "разм. популяции", group: \tone,
+        ( key: \popScale, group: \tone,
           spec: ControlSpec(0.5, 2.0, \lin, 0, 1.0), reread: \pop, arMod: \demand ),  // scales wheel 6
-        ( key: \gapScale, label: "пауза", group: \tone,
+        ( key: \gapScale, group: \tone,
           spec: ControlSpec(0.3, 3.0, \lin, 0, 1.0), reread: \pop, arMod: \demand ),  // scales wheel 7
         // \lin on purpose (\exp excludes 0 = hard off); the exponential lives in
         // 6**(1-2d) on the inter-population gap. Do NOT "harmonize" with alpha.
         // Two consumers: a continuous off-gate and gapMul once per population —
         // the SLOWEST one is declared (§5.5)
-        ( key: \density, label: "плотность", group: \tone,
+        ( key: \density, group: \tone,
           spec: ControlSpec(0, 1, \lin, 0, 0.5), reread: \pop, arMod: \demand ),  // layer mean 0..~6 /s; <=0.02 = off-gate
 
         // --- group \tone: the contact + level ---
-        ( key: \edgeWidth, label: "ширина контакта", group: \tone,
+        ( key: \edgeWidth, group: \tone,
           spec: ControlSpec(0.2, 1.0, \lin, 0, 0.7), reread: [\event, \fragment], arMod: \freq ),  // scales wheel 2's rq; narrow = clean ping, wide = grain survives
-        ( key: \edgeAmp, label: "уровень контакта", group: \tone,
+        ( key: \edgeAmp, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.45), reread: [\event, \fragment], arMod: \lin ),  // kante level vs the mode sum; 0.0 = a bell (a control, not a defect)
-        ( key: \decayScale, label: "масшт. затух.", group: \tone,
+        ( key: \decayScale, group: \tone,
           spec: ControlSpec(0.3, 1.0, \lin, 0, 0.68), reread: [\event, \fragment], arMod: \freq ),  // can only SHORTEN the size law
-        ( key: \spread, label: "разброс пан.", group: \tone,
+        ( key: \spread, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.8), reread: [\event, \fragment], arMod: \latch ),  // scales wheel 4; never moves one position
-        ( key: \amp, label: "громкость", group: \tone,
+        ( key: \amp, group: \tone,
           spec: ControlSpec(0.0, 0.30, \lin, 0, 0.09), reread: \cont, arMod: \lin )  // §K.4; §F band −24…−10 dBFS peak
     ]
 );

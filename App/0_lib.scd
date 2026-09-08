@@ -402,9 +402,12 @@
 // coupling depth reads as stroke LENGTH: line weight stays constant, else a
 // strong coupling floods the field and the weak ones next to it vanish
 ~uiLineWidth = 1.1;
-~uiLineDash = { |depth, shape|
+// …and the destination CURVE reads as a BROKEN stroke: only `fold` reflects at
+// the window edge, and that is the one fact of a cable a glance has to give
+// before any number
+~uiLineDash = { |depth, curve|
     var on = 1.5 + (depth.clip(0, 1) * 14);
-    if(shape == \noise) { FloatArray[on, 3, on * 0.35, 3] } { FloatArray[on, 3] };
+    if(curve == \fold) { FloatArray[on, 3, on * 0.35, 3] } { FloatArray[on, 3] };
 };
 
 ~uiPenText = { |str, x, y, font, color, anchor = \left|
@@ -419,10 +422,10 @@
         view: uv, spec: spec, norm: spec.unmap(v0 ? spec.default).clip(0, 1),
         act: action, enabled: true, fmt: { |v| ~uiFmt.(v, 3) }
     );
-    // r[\spec], never the captured argument: ~uiRulerSet/~uiRulerGet already read
-    // the slot, so a ruler whose spec was swapped (koppelfeld gain strips, whose
-    // ceiling is the class of the CURRENT destination) would otherwise report and
-    // act through the spec it was born with while drawing the new one
+    // r[\spec], never the captured argument: ~uiRulerSet already reads the slot,
+    // so a ruler whose spec was swapped (koppelfeld gain strips, whose ceiling is
+    // the class of the CURRENT destination) would otherwise act through the spec
+    // it was born with while drawing the new one
     var apply = { |px|
         if(r[\enabled]) {
             r[\norm] = ((px - 4) / (uv.bounds.width - 8)).clip(0, 1);
@@ -465,7 +468,6 @@
     r[\norm] = r[\spec].unmap(v).clip(0, 1);
     { r[\view].refresh; r[\valTxt] !? { |t| t.string_(r[\fmt].(v)) } }.defer;
 };
-~uiRulerGet    = { |r| r[\spec].map(r[\norm]) };
 ~uiRulerEnable = { |r, on| r[\enabled] = on; { r[\view].refresh }.defer };
 
 // |b| ≤ 3: beyond that the fifths coordinate stops reading and the pitch drifts
@@ -709,7 +711,6 @@
     { ~ungTuner[layer].bounds_(winRect).front }.defer(0.3);
 };
 
-// open the layer tuner window (deferred to AppClock)
 ~openTuner = { |layer|
     layer = layer.asSymbol;
     if(~ungSpecOf.(layer).isNil) {
@@ -719,9 +720,8 @@
     };
 };
 
-// close all tuner windows (called from ~appCleanup)
 ~ungCloseTuners = {
-    ~ungTuner.values.do { |win| if(win.notNil) { { win.close }.defer } };
+    ~ungTuner.values.do { |win| win !? { { try { win.close } }.defer } };
 };
 
 "0_lib — инструментарий отстройки готов (~openTuner.(\\layer)).".postln;

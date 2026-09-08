@@ -11,13 +11,15 @@
 //              param: \name (only for type \layer), min: lo, max: hi )
 ~cfg_ctrl = (
     channel: nil,    // nil = any MIDI channel
+    // min/max are in the UNIT OF THE TARGET's spec row: a \freq row of a layer is
+    // in MIDI NOTES, and Hz numbers there drive the control past its own clip
     map: [
-        ( cc: 1,  type: \mixVol,  target: \alpha,            min: 0.0,  max: 1.0 ),
-        ( cc: 7,  type: \master,                              min: 0.0,  max: 1.0 ),
-        ( cc: 21, type: \layer,   target: \delta, param: \freq, min: 100, max: 2000 ),
-        ( cc: 22, type: \mixSendRev, target: \theta,          min: 0.0,  max: 1.0 ),
-        ( cc: 23, type: \layer,   target: \epsilon, param: \freqHi, min: 300, max: 2000 ),
-        ( cc: 24, type: \lfoRate, target: 0,                  min: 0.005, max: 0.2 )
+        ( cc: 1,  type: \mixVol,     target: \alpha,                   min: 0.0,   max: 1.0 ),
+        ( cc: 7,  type: \master,                                        min: 0.0,   max: 1.0 ),
+        ( cc: 21, type: \layer,      target: \delta,   param: \f1,       min: 36,    max: 84 ),
+        ( cc: 22, type: \mixSendRev, target: \theta,                     min: 0.0,   max: 1.0 ),
+        ( cc: 23, type: \layer,      target: \epsilon, param: \freqHi,   min: 30.28, max: 90.28 ),
+        ( cc: 24, type: \lfoRate,    target: 0,                         min: 0.005, max: 0.2 )
     ]
 );
 
@@ -26,11 +28,9 @@
 if(MIDIClient.initialized.not) { MIDIClient.init };
 MIDIIn.connectAll;
 
-// fast lookup cc -> config line
 ~ctrlByCC = ();
 ~cfg_ctrl.map.do { |line| ~ctrlByCC[line.cc] = line };
 
-// scale 0–127 -> [min, max] (linear)
 ~ctrlScale = { |val, lo, hi| (val / 127).linlin(0, 1, lo, hi) };
 
 MIDIdef.cc(\ung_cc, { |val, num, chan|

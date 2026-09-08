@@ -518,7 +518,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     var gx = 1010, rx = 1034, rw = 378, tableY = 444, rowH = 28, modY = 610;
     var hasFx = ~cfg_effects.notNil, hasPatch = ~kfRandomize.notNil and: { ~kfApply.notNil };
     var hasGrid = ~gridGenerate.notNil;
-    var fmt2 = { |v| ~uiFmt.(v, 2) }, fmt3 = { |v| ~uiFmt.(v, 3) };
+    var fmt2 = { |v| ~uiFmt.(v, 2) };
     var fxModeItems = [
         "1 · 1 tap", "2 · 2 tap", "3 · 1+2 tap", "4 · 1+2+3 echo",
         "5 · 1 +rev", "6 · 2 +rev", "7 · 3 +rev", "8 · 1+2 +rev",
@@ -724,8 +724,8 @@ Ndef(\master).play(out: 0, numChannels: 2);
             { ~kfArm !? { |f| f.(armT.value) } }),
         disarm: ~uiBtn.(win, Rect(722, modY + 46, 74, 24), "disarm",
             { ~kfDisarm !? { |f| f.(armT.value) } }),
-        // S7 defines ~openKoppelfeld (precedent ~openMixer/~openTuner/~openViz);
-        // until then the button says so instead of doing nothing on a click
+        // 8b_kfwindow defines ~openKoppelfeld and loads BEFORE the desk; with the
+        // module off the label says so instead of doing nothing on a click
         window: ~uiBtn.(win, Rect(804, modY + 46, 176, 24),
             if(~openKoppelfeld.notNil) { "koppelfeld" } { "koppelfeld — not loaded" },
             { ~openKoppelfeld !? (_.value) })
@@ -861,7 +861,6 @@ Ndef(\master).play(out: 0, numChannels: 2);
     win.front;
 };
 
-// open the mixer window (deferred to AppClock)
 ~openMixer = { { ~ungBuildMixer.value }.defer };
 
 "2_mixer — маршрутизация + сеттеры + окно Desk (~openMixer).".postln;

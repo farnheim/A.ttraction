@@ -17,7 +17,6 @@
 // ===== LOGIC — window + polling ======================================
 ~vizPollRoutine = ~vizPollRoutine;   // stopped in onClose
 
-// read the current LFO proxy value (async -> callback)
 ~vizReadLfo = { |lfoKey, action|
     var proxy = Ndef(lfoKey);
     if(proxy.notNil and: { proxy.bus.notNil }) {
@@ -96,31 +95,32 @@
 };
 
 ~ungBuildViz = {
-    var w, seqH, lfoRowH, lines, h, y, seqView, lfoBars, lfoLabels;
+    var w, seqH, lfoRowH, lines, h, y, seqView, lfoBars, lfoLabels, win;
     w       = ~cfg_viz.w;
     seqH    = ~cfg_viz.seqH;
     lfoRowH = ~cfg_viz.lfoRowH;
-    lines   = (~cfg_lfo.notNil).if({ ~cfg_lfo.lines }, { [] });
+    lines   = if(~cfg_lfo.notNil) { ~cfg_lfo.lines } { [] };
     h       = 70 + seqH + 46 + (max(lines.size, 1) * lfoRowH) + 40;
 
-    if(~vizWin.notNil) { ~vizWin.close };
+    if(~vizWin.notNil) { try { ~vizWin.close } };
     lfoBars   = ();
     lfoLabels = ();
 
-    ~vizWin = Window("UNGRUND · timeline", Rect(900, 60, w, h)).background_(~uiPal.paper);
+    win = Window("UNGRUND · timeline", Rect(900, 60, w, h)).background_(~uiPal.paper);
+    ~vizWin = win;
 
-    ~uiCap.(~vizWin, Rect(28, 12, 600, 14), "ungrund · 4_sequencer + 7_viz · tiers and live LFO");
-    ~uiTitle.(~vizWin, Rect(28, 26, 300, 36), "Timeline");
-    ~uiBtn.(~vizWin, Rect(w - 100, 28, 72, 26), "close", { ~vizWin.close });
-    ~uiRule.(~vizWin, Rect(0, 66, w, 1));
+    ~uiCap.(win, Rect(28, 12, 600, 14), "ungrund · 4_sequencer + 7_viz · tiers and live LFO");
+    ~uiTitle.(win, Rect(28, 26, 300, 36), "Timeline");
+    ~uiBtn.(win, Rect(w - 100, 28, 72, 26), "close", { win.close });
+    ~uiRule.(win, Rect(0, 66, w, 1));
 
     // --- section 1: timeline ---------------------------------------------
     if(~cfg_seq.isNil) {
-        ~uiText.(~vizWin, Rect(28, 80, w - 56, 22), "sequencer not loaded (enableSequencer = false)", 11, ~uiPal.ink2);
+        ~uiText.(win, Rect(28, 80, w - 56, 22), "sequencer not loaded (enableSequencer = false)", 11, ~uiPal.ink2);
     } {
-        ~uiCap.(~vizWin, Rect(28, 78, 600, 14),
+        ~uiCap.(win, Rect(28, 78, 600, 14),
             "blocks · " ++ if(~seqTimeline.notNil, "~seqTimeline (act)", "~cfg_seq.timeline (demo)"));
-        seqView = UserView(~vizWin, Rect(28, 96, w - 56, seqH)).background_(~uiPal.paper);
+        seqView = UserView(win, Rect(28, 96, w - 56, seqH)).background_(~uiPal.paper);
         // ~seqTimeline is read INSIDE drawFunc (the view animates): an act shows at once
         seqView.drawFunc_({ |uv| ~vizDrawTimeline.(uv) });
         seqView.frameRate_(10).animate_(true);
@@ -128,28 +128,28 @@
 
     // --- section 2: LFO -------------------------------------------------
     y = 96 + seqH + 16;
-    ~uiRule.(~vizWin, Rect(28, y, w - 56, 1));
-    ~uiCap.(~vizWin, Rect(28, y + 10, 300, 14), "lfo · 3_lfo · live values");
+    ~uiRule.(win, Rect(28, y, w - 56, 1));
+    ~uiCap.(win, Rect(28, y + 10, 300, 14), "lfo · 3_lfo · live values");
     y = y + 30;
 
     if(~cfg_lfo.isNil) {
-        ~uiText.(~vizWin, Rect(28, y, w - 56, 22), "LFO not loaded (enableLfo = false)", 11, ~uiPal.ink2);
+        ~uiText.(win, Rect(28, y, w - 56, 22), "LFO not loaded (enableLfo = false)", 11, ~uiPal.ink2);
     } {
         lines.do { |line, i|
             var ry = y + (i * lfoRowH), lo = line.min, hi = line.max, gl;
-            ~uiText.(~vizWin, Rect(28, ry, 260, 18), line.target.asString ++ "." ++ line.param.asString, 10.5);
-            gl = UserView(~vizWin, Rect(292, ry, 40, 18)).background_(~uiPal.paper);
+            ~uiText.(win, Rect(28, ry, 260, 18), line.target.asString ++ "." ++ line.param.asString, 10.5);
+            gl = UserView(win, Rect(292, ry, 40, 18)).background_(~uiPal.paper);
             gl.drawFunc_({ |u| ~vizDrawShape.(u, line.shape) });
-            ~uiText.(~vizWin, Rect(344, ry, 90, 18), line.rate.asString ++ " Hz", 10.5, ~uiPal.ink2);
-            ~uiText.(~vizWin, Rect(440, ry, 200, 18), "[" ++ lo ++ " … " ++ hi ++ "]", 10.5, ~uiPal.ink2);
-            lfoBars[i] = ~uiRuler.(~vizWin, Rect(28, ry + 18, 300, 20), ControlSpec(lo, hi), lo, nil);
+            ~uiText.(win, Rect(344, ry, 90, 18), line.rate.asString ++ " Hz", 10.5, ~uiPal.ink2);
+            ~uiText.(win, Rect(440, ry, 200, 18), "[" ++ lo ++ " … " ++ hi ++ "]", 10.5, ~uiPal.ink2);
+            lfoBars[i] = ~uiRuler.(win, Rect(28, ry + 18, 300, 20), ControlSpec(lo, hi), lo, nil);
             ~uiRulerEnable.(lfoBars[i], false);
-            lfoLabels[i] = ~uiText.(~vizWin, Rect(336, ry + 18, 80, 20), "—", 10.5);
+            lfoLabels[i] = ~uiText.(win, Rect(336, ry + 18, 80, 20), "—", 10.5);
         };
     };
 
     // --- LFO value polling on AppClock ----------------------------------
-    if(~vizPollRoutine.notNil) { ~vizPollRoutine.stop };
+    ~vizPollRoutine !? { |r| r.stop };
     if(~cfg_lfo.notNil and: { ~lfoKeys.notNil }) {
         ~vizPollRoutine = Routine({
             var dt = 1 / (~cfg_viz.pollRate.max(1));
@@ -170,17 +170,22 @@
         }).play(AppClock);
     };
 
-    ~vizWin.onClose_({
-        if(~vizPollRoutine.notNil) { ~vizPollRoutine.stop; ~vizPollRoutine = nil };
-        ~vizWin = nil;
+    // guard: only the CURRENT window (or one already taken down by ~appCleanup)
+    // may stop the poll routine and clear the slot — the deferred onClose of an
+    // OLD window would otherwise blind the NEW one (contract §6)
+    win.onClose_({
+        if(~vizWin.isNil or: { ~vizWin === win }) {
+            ~vizPollRoutine !? { |r| r.stop }; ~vizPollRoutine = nil;
+            ~vizWin = nil;
+        };
     });
-    ~vizWin.front;
+    win.front;
 };
 
 ~openViz  = { { ~ungBuildViz.value }.defer };
 ~vizClose = {
-    if(~vizPollRoutine.notNil) { ~vizPollRoutine.stop; ~vizPollRoutine = nil };
-    if(~vizWin.notNil) { { ~vizWin.close }.defer };
+    ~vizPollRoutine !? { |r| r.stop }; ~vizPollRoutine = nil;
+    ~vizWin !? { |vw| { try { vw.close } }.defer };
 };
 
 "7_viz — окно Timeline готово (~openViz / ~vizClose).".postln;

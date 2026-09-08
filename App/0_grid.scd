@@ -226,8 +226,7 @@
         side ? \down;
     };
     var order = { |dc, alt|
-        var sides = if(dc < 0) { [\left, \right] } { if(dc > 0) { [\right, \left] } { [\left, \right] } };
-        sides ++ [alt];
+        (if(dc > 0) { [\right, \left] } { [\left, \right] }) ++ [alt];
     };
     graph[\nodes].do { |n|
         var used = ();

@@ -16,7 +16,7 @@
           set: [[\alpha, \amp, 0.22]] ),
         ( t: 4,   active: [\theta],                 gone: [] ),
         ( t: 36,  active: [\delta],                  gone: [],
-          set: [[\delta, \freq, 188]] ),
+          set: [[\delta, \f2, 53.71]] ),   // 188 Hz as a MIDI note (\delta has no \freq)
         ( t: 52,  active: [\epsilon],               gone: [\delta] ),
         ( t: 68,  active: [],                         gone: [\epsilon, \theta] ),
         ( t: 72,  active: [],                         gone: [\alpha] ),

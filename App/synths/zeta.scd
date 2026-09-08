@@ -12,59 +12,59 @@
     name: \zeta,
     params: [
         // --- group \freq ---
-        ( key: \bedHpf, label: "низ подложки", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \bedHpf, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(80, 600, \exp, 0, 270), reread: \contBlock, arMod: \freq ),  // bed low edge
-        ( key: \bedLpf, label: "потолок подложки", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \bedLpf, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(3000, 12000, \exp, 0, 11000), reread: \contBlock, arMod: \freq ),  // bed ceiling (tape hiss)
-        ( key: \bedHumpFreq, label: "центр горба", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \bedHumpFreq, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(600, 2500, \exp, 0, 1200), reread: \contBlock, arMod: \freq ),  // energy centroid ~1.2k
-        ( key: \subFreq, label: "потолок суба", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \subFreq, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(40, 200, \exp, 0, 120), reread: \contBlock, arMod: \freq ),  // sub-rumble ceiling
-        ( key: \fineHpf, label: "наклон тиков", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \fineHpf, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(1500, 8000, \exp, 0, 2000), reread: \contBlock, arMod: \freq ),  // fine-crackle HF tilt
-        ( key: \popHpf, label: "наклон щелчков", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \popHpf, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(500, 6000, \exp, 0, 1500), reread: \contBlock, arMod: \freq ),  // pop HF tilt
-        ( key: \bodyFreq, label: "частота тела", group: \freq, unit: " Hz", disp: \hz,
+        ( key: \bodyFreq, group: \freq, unit: " Hz", disp: \hz,
           spec: ControlSpec(80, 600, \exp, 0, 180), reread: [\event, \popRate], arMod: \freq ),  // pop "thock" body freq
 
         // --- group \tone ---
-        ( key: \amp, label: "громкость", group: \tone,
+        ( key: \amp, group: \tone,
           spec: ControlSpec(0.0, 0.5, \lin, 0, 0.32), reread: \cont, arMod: \lin ),  // layer master level
-        ( key: \bedAmp, label: "уровень подложки", group: \tone,
+        ( key: \bedAmp, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.6), reread: \cont, arMod: \lin ),  // bed level
-        ( key: \bedHumpRq, label: "ширина горба", group: \tone,
+        ( key: \bedHumpRq, group: \tone,
           spec: ControlSpec(0.2, 1.5, \lin, 0, 0.6), reread: \contBlock, arMod: \freq ),  // hump width (rq)
-        ( key: \bedHumpAmt, label: "выраж. горба", group: \tone,
+        ( key: \bedHumpAmt, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.55), reread: \cont, arMod: \lin ),  // hump prominence
-        ( key: \bedDriftRate, label: "част. wow", group: \tone, unit: " Hz",
+        ( key: \bedDriftRate, group: \tone, unit: " Hz",
           spec: ControlSpec(0.02, 2.0, \exp, 0, 0.1), reread: [\seg, \bedDriftRate], arMod: \rate ),  // wow drift rate
-        ( key: \bedDriftDepth, label: "глуб. wow", group: \tone,
+        ( key: \bedDriftDepth, group: \tone,
           spec: ControlSpec(0.0, 0.8, \lin, 0, 0.25), reread: \cont, arMod: \lin ),  // drift depth
-        ( key: \subAmt, label: "суб-гул", group: \tone,
+        ( key: \subAmt, group: \tone,
           spec: ControlSpec(0.0, 0.3, \lin, 0, 0.0), reread: \cont, arMod: \lin ),  // sub-rumble level
-        ( key: \fineRate, label: "плотн. тиков", group: \tone, unit: " /s",
+        ( key: \fineRate, group: \tone, unit: " /s",
           spec: ControlSpec(5, 120, \exp, 0, 45), reread: [\event, \fineRate], arMod: \rate ),  // fine-crackle density
-        ( key: \fineDecay, label: "затух. тика", group: \tone, unit: " s",
+        ( key: \fineDecay, group: \tone, unit: " s",
           spec: ControlSpec(0.0003, 0.005, \exp, 0, 0.0015), reread: [\event, \fineRate], arMod: \freq ),  // tick decay
-        ( key: \fineAmpMin, label: "ниж. край тиков", group: \tone,
+        ( key: \fineAmpMin, group: \tone,
           spec: ControlSpec(0.005, 0.3, \exp, 0, 0.04), reread: [\event, \fineRate], arMod: \freq ),  // tick exp-dist low edge (TExpRand bound: scalar, A2K)
-        ( key: \fineAmt, label: "уровень тиков", group: \tone,
+        ( key: \fineAmt, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.48), reread: \cont, arMod: \lin ),  // fine-crackle level
-        ( key: \popRate, label: "плотн. щелчков", group: \tone, unit: " /s",
+        ( key: \popRate, group: \tone, unit: " /s",
           spec: ControlSpec(0.2, 8.0, \exp, 0, 2.4), reread: [\event, \popRate], arMod: \rate ),  // pop density
-        ( key: \popDecay, label: "затух. щелчка", group: \tone, unit: " s",
+        ( key: \popDecay, group: \tone, unit: " s",
           spec: ControlSpec(0.002, 0.03, \exp, 0, 0.006), reread: [\event, \popRate], arMod: \freq ),  // pop decay
-        ( key: \popAmpMin, label: "ниж. край щелчков", group: \tone,
+        ( key: \popAmpMin, group: \tone,
           spec: ControlSpec(0.01, 0.5, \exp, 0, 0.14), reread: [\event, \popRate], arMod: \freq ),  // pop exp-dist low edge (TExpRand bound: scalar, A2K)
-        ( key: \popAmt, label: "уровень щелчков", group: \tone,
+        ( key: \popAmt, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.85), reread: \cont, arMod: \lin ),  // pop level
-        ( key: \bodyAmt, label: "тело", group: \tone,
+        ( key: \bodyAmt, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.4), reread: \cont, arMod: \lin ),  // "thock" prominence
-        ( key: \bodyRing, label: "звон тела", group: \tone, unit: " s",
+        ( key: \bodyRing, group: \tone, unit: " s",
           spec: ControlSpec(0.005, 0.12, \exp, 0, 0.04), reread: [\event, \popRate], arMod: \freq ),  // body ring time
-        ( key: \panWidth, label: "ширина пан.", group: \tone,
+        ( key: \panWidth, group: \tone,
           spec: ControlSpec(0.0, 0.4, \lin, 0, 0.3), reread: \cont, arMod: \lin ),  // §F: pan ≤ ±0.4
-        ( key: \panRate, label: "част. пан.", group: \tone, unit: " Hz",
+        ( key: \panRate, group: \tone, unit: " Hz",
           spec: ControlSpec(0.02, 2.0, \exp, 0, 0.15), reread: [\seg, \panRate], arMod: \rate )  // §F: slow pan
     ]
 );

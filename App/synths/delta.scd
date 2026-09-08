@@ -15,70 +15,70 @@
     name: \delta,
     params: [
         // --- group \freq: 5 voice fundamentals (MIDI notes) ---
-        ( key: \f1, label: "нота 1", group: \freq, disp: \note,
+        ( key: \f1, group: \freq, disp: \note,
           spec: ControlSpec(36, 84, \lin, 0, 48.71), reread: \cont, arMod: \freq ),  // 141 Hz ×3/2
-        ( key: \f2, label: "нота 2", group: \freq, disp: \note,
+        ( key: \f2, group: \freq, disp: \note,
           spec: ControlSpec(36, 84, \lin, 0, 53.71), reread: \cont, arMod: \freq ),  // 188 Hz ×2
-        ( key: \f3, label: "нота 3", group: \freq, disp: \note,
+        ( key: \f3, group: \freq, disp: \note,
           spec: ControlSpec(36, 84, \lin, 0, 60.72), reread: \cont, arMod: \freq ),  // 282 Hz ×3
-        ( key: \f4, label: "нота 4", group: \freq, disp: \note,
+        ( key: \f4, group: \freq, disp: \note,
           spec: ControlSpec(36, 84, \lin, 0, 65.71), reread: \cont, arMod: \freq ),  // 376 Hz ×4
-        ( key: \f5, label: "нота 5", group: \freq, disp: \note,
+        ( key: \f5, group: \freq, disp: \note,
           spec: ControlSpec(36, 84, \lin, 0, 72.72), reread: \cont, arMod: \freq ),  // 564 Hz ×6
 
         // --- group \tone: glottal source ---
-        ( key: \amp, label: "громкость", group: \tone,
+        ( key: \amp, group: \tone,
           spec: ControlSpec(0.0, 0.5, \lin, 0, 0.18), reread: \cont, arMod: \lin ),  // layer level (§K.4)
-        ( key: \voiced, label: "голос", group: \tone,
+        ( key: \voiced, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.8), reread: \cont, arMod: \lin ),  // phonation level
-        ( key: \breath, label: "дыхание", group: \tone,
+        ( key: \breath, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.3), reread: \cont, arMod: \lin ),  // aspiration level
-        ( key: \bright, label: "яркость истока", group: \tone,
+        ( key: \bright, group: \tone,
           spec: ControlSpec(3.0, 20.0, \exp, 0, 9.0), reread: \contBlock, arMod: \freq ),  // glottal tilt (LPF = fund×bright)
 
-        ( key: \detune, label: "расстройка", group: \tone, unit: " ct",
+        ( key: \detune, group: \tone, unit: " ct",
           spec: ControlSpec(0.0, 15.0, \lin, 0, 6.0), reread: \cont, arMod: \lin ),  // unison scatter
-        ( key: \driftRate, label: "дрейф хора", group: \tone, unit: " Hz",
+        ( key: \driftRate, group: \tone, unit: " Hz",
           spec: ControlSpec(0.02, 0.2, \exp, 0, 0.07), reread: [\seg, \driftRate], arMod: \rate ),  // detune wander (§C.4 ≤0.25)
-        ( key: \jitter, label: "дрожь тона", group: \tone,
+        ( key: \jitter, group: \tone,
           spec: ControlSpec(0.0, 0.004, \lin, 0, 0.0015), reread: \cont, arMod: \lin ),  // aperiodic micro-jitter ≤0.4%
-        ( key: \shimmer, label: "мерцание", group: \tone,
+        ( key: \shimmer, group: \tone,
           spec: ControlSpec(0.0, 0.2, \lin, 0, 0.06), reread: \cont, arMod: \lin ),  // fast shallow amp flutter
 
         // --- group \tone: vowel bank ---
-        ( key: \vowelSel, label: "выбор гласной", group: \tone,
+        ( key: \vowelSel, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.5), reread: \contBlock, arMod: \freq ),  // interpolate to next vowel
-        ( key: \vowelDrift, label: "дрейф гласной", group: \tone,
+        ( key: \vowelDrift, group: \tone,
           spec: ControlSpec(0.0, 0.3, \lin, 0, 0.1), reread: \cont, arMod: \lin ),  // slow vowel wander (≤0.1 Hz)
-        ( key: \formWidth, label: "ширина формант", group: \tone,
+        ( key: \formWidth, group: \tone,
           spec: ControlSpec(0.7, 2.0, \lin, 0, 1.0), reread: \cont, arMod: \freq ),  // bandwidth scale (static)
-        ( key: \formTrack, label: "форм. за высотой", group: \tone,
+        ( key: \formTrack, group: \tone,
           spec: ControlSpec(0.0, 0.7, \lin, 0, 0.35), reread: \cont, arMod: \freq ),  // formant register tracking
-        ( key: \ring, label: "певч. форманта", group: \tone,
+        ( key: \ring, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.4), reread: \cont, arMod: \lin ),  // 2.6–3.6 kHz cluster gain
-        ( key: \beatRate, label: "биения", group: \tone, unit: " Hz",
+        ( key: \beatRate, group: \tone, unit: " Hz",
           spec: ControlSpec(0.05, 0.25, \exp, 0, 0.15), reread: [\seg, \beatRate], arMod: \rate ),  // §C.4 formant beating (≤0.25)
 
         // --- group \tone: metal plates ---
-        ( key: \metal, label: "голос/металл", group: \tone,
+        ( key: \metal, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.35), reread: \cont, arMod: \lin ),  // bank crossfade (0 = choir)
-        ( key: \plateQ, label: "звон пластины", group: \tone,
+        ( key: \plateQ, group: \tone,
           spec: ControlSpec(0.05, 3.0, \exp, 0, 0.9), reread: \contBlock, arMod: \freq ),  // plate ring time
-        ( key: \plateSpread, label: "разброс звона", group: \tone,
+        ( key: \plateSpread, group: \tone,
           spec: ControlSpec(0.0, 0.05, \lin, 0, 0.015), reread: \contBlock, arMod: \freq ),  // ring detune across voices
 
         // --- group \tone: breathing ---
-        ( key: \breathDepth, label: "глуб. дыхания", group: \tone,
+        ( key: \breathDepth, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.5), reread: \cont, arMod: \lin ),  // dip ≤ −6 dB (§C.4)
-        ( key: \breathRate, label: "част. дыхания", group: \tone, unit: " Hz",
+        ( key: \breathRate, group: \tone, unit: " Hz",
           spec: ControlSpec(0.02, 0.25, \exp, 0, 0.08), reread: [\seg, \breathRate], arMod: \rate ),  // §C.4 period ≥ 4 s
 
         // --- group \tone: levels and space ---
-        ( key: \voiceLevel, label: "уровень голосов", group: \tone,
+        ( key: \voiceLevel, group: \tone,
           spec: ControlSpec(0.0, 1.0, \lin, 0, 0.7), reread: \cont, arMod: \lin ),  // voice-sum level (pre amp)
-        ( key: \panWidth, label: "ширина пан.", group: \tone,
+        ( key: \panWidth, group: \tone,
           spec: ControlSpec(0.0, 0.3, \lin, 0, 0.22), reread: \cont, arMod: \lin ),  // §F: pan ≤ ±0.3
-        ( key: \panRate, label: "част. пан.", group: \tone, unit: " Hz",
+        ( key: \panRate, group: \tone, unit: " Hz",
           spec: ControlSpec(0.01, 0.5, \exp, 0, 0.06), reread: [\seg, \panRate], arMod: \rate )  // §F: slow pan drift
     ]
 );
