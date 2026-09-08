@@ -451,35 +451,15 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
 // --- koppelfeld: scheme state + per-cable gains (§8.4) -------------------
 // the strip redraws itself once a second for the same reason the graph does —
-// the scheme changes from four places (patch button, act, IDE, preset) — and it
-// is the ONE caller of ~kfVerdictRefresh (D99): a gain moved by hand makes the
-// verdict of the last ~kfApply a statement about a graph that no longer stands
+// the scheme changes from four places (patch button, act, IDE, preset) — and the
+// sentence it draws belongs to module 8 (~kfStripText), which the koppelfeld
+// window of §9 draws too: one condition of the field, one spelling. Reading it
+// refreshes a verdict aged by a hand edit (D99), which is why both callers are
+// 1 Hz strips and neither is a 6 fps field
 ~mixerDrawKfStrip = { |u|
-    var f = ~uiMono.(10), str;
-    if(~kfReport.isNil or: { ~kfNodes.isNil }) {
-        str = "koppelfeld off (enableKoppelfeld)";
-    } {
-        var v = if(~kfVerdictRefresh.notNil) { ~kfVerdictRefresh.value } { ~kfVerdict };
-        var rep = ~kfReport.value;
-        // a NOTE is half the verdict: V10 files an unpatched layer as a note, so
-        // "ok" alone would show a scheme that never touches epsilon as complete
-        var notes = (v !? { |x| (x[\notes] ? []).size }) ? 0;
-        // the parens are load-bearing: `++` after the last block of a bare `case`
-        // would append to that BLOCK, not to the string the case returns
-        var verdict = (case
-            { v.isNil }    { "no verdict" }
-            { v[\valid] }   { "V1–V13 ok" }
-            { "V1–V13 · " ++ v[\errors].size ++ " error" ++ if(v[\errors].size == 1) { "" } { "s" } })
-            ++ if(notes > 0) { " · " ++ notes ++ " note" ++ if(notes == 1) { "" } { "s" } } { "" };
-        str = (rep[\mode] ? "—").asString
-            ++ " · Λmax " ++ ~uiFmt.(rep[\lamMax] ? 0, 2)
-            ++ " · cables " ++ rep[\cables] ++ "/" ++ ((~cfg_kf !? { |x| x[\cableMax] }) ? 64)
-            ++ if((rep[\disabled] ? 0) > 0) { " (off " ++ rep[\disabled] ++ ")" } { "" }
-            ++ " · interlayer " ++ ~uiFmt.((rep[\interlayer] ? 0) * 100, 1) ++ " %"
-            ++ " · " ++ verdict
-            ++ " · " ++ if(rep[\armed] == true) { "armed" } { "disarmed" };
-    };
-    ~uiPenText.(str, 0, 3, f, ~uiPal.ink);
+    ~uiPenText.(
+        if(~kfStripText.isNil) { "koppelfeld off (enableKoppelfeld)" } { ~kfStripText.value },
+        0, 3, ~uiMono.(10), ~uiPal.ink);
 };
 
 // a strip is one ENABLED cable; the page shows 16 of them

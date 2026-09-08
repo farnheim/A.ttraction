@@ -2925,7 +2925,7 @@
 
 // Λ, the excited-loop count and the mode are functions of the gains, so a hand
 // edit makes the verdict of the last ~kfApply a statement about a graph that no
-// longer stands. Recomputed no more often than asked (the patch strip asks once
+// longer stands. Recomputed no more often than asked (both state strips ask once
 // a second) and SILENTLY: ~kfVerdictPost is the voice of an apply, not of a knob
 ~kfVerdictRefresh = {
     if(~kfVerdictStale == true) {
@@ -2933,6 +2933,33 @@
         ~kfVerdictStale = false;
     };
     ~kfVerdict
+};
+
+// ONE sentence stating the condition of the field: the desk strip (§8.4) and
+// the header of the koppelfeld window (§9.1) are two VIEWS of it, never two
+// spellings — the module owns the format, exactly as it owns the preset section.
+// Reading it refreshes a verdict aged by a hand edit, so every caller must be a
+// slow one: both strips redraw at 1 Hz.
+~kfStripText = {
+    var v = ~kfVerdictRefresh.value;
+    var rep = ~kfReport.value;
+    // a NOTE is half the verdict: V10 files an unpatched layer as a note, so
+    // "ok" alone would show a scheme that never touches epsilon as complete
+    var notes = (v !? { |x| (x[\notes] ? []).size }) ? 0;
+    // the parens are load-bearing: `++` after the last block of a bare `case`
+    // would append to that BLOCK, not to the string the case returns
+    var verdict = (case
+        { v.isNil }   { "no verdict" }
+        { v[\valid] } { "V1–V13 ok" }
+        { "V1–V13 · " ++ v[\errors].size ++ " error" ++ if(v[\errors].size == 1) { "" } { "s" } })
+        ++ if(notes > 0) { " · " ++ notes ++ " note" ++ if(notes == 1) { "" } { "s" } } { "" };
+    (rep[\mode] ? "—").asString
+        ++ " · Λmax " ++ ~uiFmt.(rep[\lamMax] ? 0, 2)
+        ++ " · cables " ++ rep[\cables] ++ "/" ++ ~cfg_kf.cableMax
+        ++ if((rep[\disabled] ? 0) > 0) { " (off " ++ rep[\disabled] ++ ")" } { "" }
+        ++ " · interlayer " ++ ~uiFmt.((rep[\interlayer] ? 0) * 100, 1) ++ " %"
+        ++ " · " ++ verdict
+        ++ " · " ++ if(rep[\armed] == true) { "armed" } { "disarmed" };
 };
 
 // ----- reconcile the §5 table with ~ungSpecs, name by name --------------

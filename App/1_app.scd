@@ -41,7 +41,15 @@ s.options.numWireBufs = 384;
     if(~mixRecOn == true) { s.stopRecording; ~mixRecOn = false };
     if(~ungCloseTuners.notNil) { ~ungCloseTuners.value };
     if(~vizClose.notNil)       { ~vizClose.value };
-    if(~mixerWin.notNil)       { { ~mixerWin.close }.defer; ~mixerWin = nil };
+    // the handle is CAPTURED, as below: the deferred block runs after the slot
+    // is nil'd, and `{ ~mixerWin.close }.defer` then calls nil.close — an error
+    // on every full reset (seen in the 8b acceptance run, 2026-09-08)
+    ~mixerWin !? { |mw| { try { mw.close } }.defer; ~mixerWin = nil };
+    // §10.4: the koppelfeld window goes down BEFORE the field it draws — its own
+    // onClose is what stops the §9.2 meter, and a window left standing over a
+    // cleared registry would draw 111 rows of nil. The handle is captured: the
+    // deferred block runs after ~kfWin is nil'd
+    ~kfWin !? { |kw| { try { kw.close } }.defer; ~kfWin = nil };
     // BEFORE Ndef.all.do(_.clear): a cleared proxy would leave the layer an
     // `n_mapa` onto a dead bus, and the control would freeze on garbage
     if(~kfClear.notNil) { ~kfClear.value };
@@ -130,6 +138,10 @@ s.waitForBoot({
     if(~cfg_app.enableKoppelfeld) {
         (~appDir +/+ "8_koppelfeld.scd").load;
         s.sync;
+        // 3c. the Nord window (§9), straight after the core and BEFORE the
+        // mixer: the desk binds ~openKoppelfeld into its button at build time
+        (~appDir +/+ "8b_kfwindow.scd").load;
+        s.sync;
     } {
         // off: tear down a previous enabled run through the module's OWN
         // registry, else a layer starts with a dangling n_mapa
@@ -150,6 +162,12 @@ s.waitForBoot({
         ~kfSchemeFromPreset = nil; ~kfGainSet = nil; ~kfVerdictRefresh = nil;
         ~kfVerdict = nil; ~kfVerdictStale = false;
         ~kfCables = []; ~kfSchaltung = nil;
+        // …and the window of §9 with them: a surviving ~openKoppelfeld would
+        // leave the desk button live over a field that is not there, and a
+        // surviving ~kfStripText would have both state strips read ~kfReport = nil
+        ~kfWin !? { |kw| { try { kw.close } }.defer; ~kfWin = nil };
+        ~openKoppelfeld = nil; ~kfStripText = nil; ~kfResetSlots = nil;
+        ~kfGuiSync = nil; ~kfRows = []; ~kfWinCables = []; ~kfSel = ();
         "UNGRUND app — koppelfeld ВЫКЛ (enableKoppelfeld=false).".postln;
     };
 
