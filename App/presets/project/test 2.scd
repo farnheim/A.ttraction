@@ -121,11 +121,11 @@
     mixer: (
         master: 0.9,
         levels: (
-            alpha: ( vol: 0.85, sendRev: 0.2955, sendDly: 0.2 ),
-            delta: ( vol: 0.2955, sendRev: 0.0833, sendDly: 0.0 ),
-            epsilon: ( vol: 0.75, sendRev: 0.197, sendDly: 0.1212 ),
-            theta: ( vol: 0.3561, sendRev: 0.2879, sendDly: 0.053 ),
-            zeta: ( vol: 0.803, sendRev: 0.15, sendDly: 0.0833 )
+            alpha: ( vol: 0.85, sendRev: 0.0443, sendDly: 0.03 ),
+            delta: ( vol: 0.2955, sendRev: 0.0125, sendDly: 0.0 ),
+            epsilon: ( vol: 0.75, sendRev: 0.0295, sendDly: 0.0182 ),
+            theta: ( vol: 0.3561, sendRev: 0.0432, sendDly: 0.0079 ),
+            zeta: ( vol: 0.803, sendRev: 0.0225, sendDly: 0.0125 )
         ),
         muted: []
     ),

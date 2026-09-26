@@ -63,7 +63,7 @@
         ++ dsts.size ++ " destinations · audio rate");
     ~uiTitle.(win, Rect(28, 26, 300, 36), "Matrix");
     info = ~uiText.(win, Rect(ww - 548, 32, 520, 16), status.value, 10.5, pal.ink2, false, \right);
-    ~uiRule.(win, Rect(0, 66, ww, 1));
+    ~uiRule.(win, Rect(0, 66, ww, 1)).resize_(2);
 
     x = 28;
     ~uiBtn.(win, Rect(x, 78, 64, 26), "dice", { ~netDice.value }); x = x + 72;
@@ -76,7 +76,7 @@
     ~uiBtn.(win, Rect(x, 78, 104, 26), "dice bases", {
         ~netLayers.value.do { |l| ~netDiceBase.(l, 0.35) };
     }); x = x + 132;
-    ~uiBtn.(win, Rect(x, 78, 64, 26), "desk", { ~openMixer !? { |f| f.value } }); x = x + 72;
+    ~uiBtn.(win, Rect(x, 78, 64, 26), "ungrund", { ~openMixer !? { |f| f.value } }); x = x + 72;
     ~uiBtn.(win, Rect(x, 78, 92, 26), "machines", { ~openMachines.value });
 
     x = 28;
@@ -91,9 +91,9 @@
     };
 
     ~preset.bar(win, ww - 28 - ((~cfg_presets.btnW * 3) + (~cfg_presets.gap * 2)), 78, \matrix);
-    ~uiRule.(win, Rect(0, hh - 1, ww, 1));
+    ~uiRule.(win, Rect(0, hh - 1, ww, 1)).resize_(2);
 
-    scroll = ScrollView(win, Rect(0, hh, ww, wh - hh)).hasBorder_(false).background_(pal.paper);
+    scroll = ScrollView(win, Rect(0, hh, ww, wh - hh)).hasBorder_(false).background_(pal.paper).resize_(5);
     canvas = UserView(scroll, Rect(0, 0, cw, ch)).background_(pal.paper);
 
     canvas.drawFunc_({ |u|
@@ -225,16 +225,22 @@
     ~macWin !? { |w| try { w.close } };
     win = Window("NET · machines", Rect(60, 60, ww, wh)).background_(pal.paper);
     ~macWin = win;
-    scroll = ScrollView(win, Rect(0, 0, ww, wh)).hasBorder_(false).background_(pal.paper);
+    scroll = ScrollView(win, Rect(0, 0, ww, wh)).hasBorder_(false).background_(pal.paper).resize_(5);
     view = CompositeView(scroll, Rect(0, 0, cw, ch)).background_(pal.paper);
+    // the canvas never shrinks below its content (the scroll bars stay) but grows
+    // with a larger window, so the rules on it reach the window edge
+    scroll.onResize_({ |sv|
+        var ib = sv.innerBounds;
+        view.resizeTo(ib.width.max(cw), ib.height.max(ch));
+    });
 
     ~uiTitle.(view, Rect(28, 26, 300, 36), "Machines");
-    ~uiRule.(view, Rect(0, 66, cw, 1));
+    ~uiRule.(view, Rect(0, 66, cw, 1)).resize_(2);
 
     layers.do { |l, li|
         var x0 = 28 + (li * colW), params = ~ungSpecOf.(l).params;
         rulers[l] = ();
-        if(li > 0) { ~uiRule.(view, Rect(x0 - 14, 67, 1, ch - 67)) };
+        if(li > 0) { ~uiRule.(view, Rect(x0 - 14, 67, 1, ch - 67)).resize_(4) };
         ~uiText.(view, Rect(x0, 76, 30, 26), ~uiPhi[l] ? "", 18);
         ~uiText.(view, Rect(x0 + 30, 78, 200, 22), l.asString, 14, pal.ink, true);
         ~uiBtn.(view, Rect(x0, 110, 84, 24), "defaults", { ~netDefaults.(l) });

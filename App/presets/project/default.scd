@@ -110,11 +110,11 @@
     mixer: (
         master: 0.9,
         levels: (
-            alpha:   ( vol: 0.85, sendRev: 0.55, sendDly: 0.2 ),
-            delta:   ( vol: 0.8,  sendRev: 0.45, sendDly: 0.0 ),
-            epsilon: ( vol: 0.75, sendRev: 0.15, sendDly: 0.0 ),
-            zeta:    ( vol: 0.75, sendRev: 0.15, sendDly: 0.0 ),
-            theta:   ( vol: 0.8,  sendRev: 0.16, sendDly: 0.0 )
+            alpha:   ( vol: 0.85, sendRev: 0.0825, sendDly: 0.03 ),
+            delta:   ( vol: 0.8,  sendRev: 0.0675, sendDly: 0.0 ),
+            epsilon: ( vol: 0.75, sendRev: 0.0225, sendDly: 0.0 ),
+            zeta:    ( vol: 0.75, sendRev: 0.0225, sendDly: 0.0 ),
+            theta:   ( vol: 0.8,  sendRev: 0.024, sendDly: 0.0 )
         )
     ),
     fx: ( rev_mode: 11, dly_mode: 4, bass: 0.0, treble: -0.15 )
