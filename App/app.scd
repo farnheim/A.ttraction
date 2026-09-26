@@ -1,4 +1,4 @@
-// App/1_app.scd — NET: boot, the field, the machines, the out, the two pages.
+// App/app.scd — NET: boot, the field, the machines, the out, the two pages.
 // Run the whole block. Stop: Cmd-. · full reset: ~appCleanup.value(true).
 
 
@@ -6,12 +6,12 @@
 (
 ~cfg_app = (
     layers:       nil,     // nil = every synths/*.scd; or e.g. [\alpha, \theta]
-    autoPreset:   true,    // load presets/default.scd if present
+    autoPreset:   true,    // load presets/project/default.scd if present
     openMatrix:   true,
     openMachines: true,
     openMixer:    true,
-    enableEffects: true,   // 6_effects.scd — two Space Echo instances on the sends
-    enableMixer:  true,    // 2_mixer.scd — vol/sends/mute/solo/rec + master
+    enableEffects: true,   // effects.scd — two Space Echo instances on the sends
+    enableMixer:  true,    // mixer.scd — vol/sends/mute/solo/rec + master
     dice:         false    // throw a random matrix at start
 );
 
@@ -49,8 +49,9 @@ s.waitForBoot({
     var files;
 
     ~appCleanup.value(false);
-    (~appDir +/+ "0_lib.scd").load;
-    (~appDir +/+ "0_ui.scd").load;
+    (~appDir +/+ "lib.scd").load;
+    (~appDir +/+ "ui.scd").load;
+    (~appDir +/+ "presets.scd").load;
     s.sync;
 
     files = (~appDir +/+ "synths" +/+ "*.scd").pathMatch.sort;
@@ -67,13 +68,13 @@ s.waitForBoot({
     ~busFxSendDly = Bus.audio(s, 2);
     ~busFxReturn  = Bus.audio(s, 2);
     s.sync;
-    if(~cfg_app.enableEffects) { (~appDir +/+ "6_effects.scd").load; s.sync };
-    (~appDir +/+ "3_matrix.scd").load;
-    if(~cfg_app.enableMixer) { (~appDir +/+ "2_mixer.scd").load; s.sync };
+    if(~cfg_app.enableEffects) { (~appDir +/+ "effects.scd").load; s.sync };
+    (~appDir +/+ "matrix.scd").load;
+    if(~cfg_app.enableMixer) { (~appDir +/+ "mixer.scd").load; s.sync };
     ~netRewire.value;
 
-    if(~cfg_app.autoPreset and: { ~listPresets.value.any { |n| n == "default" } }) {
-        ~loadPreset.("default");
+    if(~cfg_app.autoPreset and: { ~preset.names(\project).any { |n| n == "default" } }) {
+        ~preset.load(\project, "default");
     };
     if(~cfg_app.dice) { ~netDice.value };
 

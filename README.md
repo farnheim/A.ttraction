@@ -12,7 +12,7 @@ lattice underneath everything.
 
 ## Quick start
 
-1. Open `App/1_app.scd` in the SuperCollider IDE.
+1. Open `App/app.scd` in the SuperCollider IDE.
 2. Select all (Cmd-A) and execute (Shift-Return) — the server boots, layers
    load, the project preset `default.scd` auto-loads (layers + mixer + fx),
    and the mixer window opens.

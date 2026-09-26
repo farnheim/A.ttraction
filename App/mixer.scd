@@ -1,4 +1,4 @@
-// App/2_mixer.scd — MIXER: per-machine vol + two fx sends, one aggregator per
+// App/mixer.scd — MIXER: per-machine vol + two fx sends, one aggregator per
 // bus, master (LeakDC + Limiter), solo/mute, recorder, mixer window (~openMixer).
 // The output stage only: nothing here touches the field.
 
@@ -185,20 +185,20 @@ Ndef(\master).play(out: 0, numChannels: 2);
 // update record-button visual from ~mixRecOn (no-op without window)
 
 
-// ===== GUI — Desk window (0_ui kit) ===================================
+// ===== GUI — Desk window (ui kit) ===================================
 ~mixerEz = ~mixerEz ? (); ~mixerSoloBtn = ~mixerSoloBtn ? (); ~mixerMuteBtn = ~mixerMuteBtn ? ();
 ~mixerFx = ~mixerFx ? ();
 
 ~mixerBuild = {
     var pal = ~uiPal, layers = ~mixerLayers, rowH = 28, tableY = 110;
-    var fxX = 1010, w = 1440, h = (tableY + (layers.size * rowH) + 40).max(360);
+    var fxX = 1010, w = 1440, h = (tableY + (layers.size * rowH) + 40).max(440);
     var fmt2 = { |v| ~uiFmt.(v, 2) };
     var fxModeItems = [
         "1 · 1 tap", "2 · 2 tap", "3 · 1+2 tap", "4 · 1+2+3 echo",
         "5 · 1 +rev", "6 · 2 +rev", "7 · 3 +rev", "8 · 1+2 +rev",
         "9 · 2+3 +rev", "10 · 1+3 +rev", "11 · all +rev", "12 · rev only"
     ];
-    var scr = Window.availableBounds, win, presetName, presetPop, mkGlyph;
+    var scr = Window.availableBounds, win, mkGlyph;
 
     ~mixerWin !? { |x| try { x.close } };
     w = w.min(scr.width); h = h.min(scr.height);
@@ -286,18 +286,10 @@ Ndef(\master).play(out: 0, numChannels: 2);
     };
     ~uiRule.(win, Rect(fxX, 234, 400, 1));
 
-    ~uiCap.(win, Rect(fxX, 246, 380, 14), "preset");
-    presetName = TextField(win, Rect(fxX, 266, 190, 24)).string_("").font_(~uiMono.(11))
-        .background_(pal.paper).stringColor_(pal.ink);
-    ~uiBtn.(win, Rect(fxX + 198, 266, 70, 24), "save", {
-        ~savePreset.(presetName.string);
-        ~uiPopupItems.(presetPop, ~netPresetItems.value);
-    });
-    presetPop = ~uiPopup.(win, Rect(fxX, 298, 190, 24), ~netPresetItems.value, 0, { });
-    ~uiBtn.(win, Rect(fxX + 198, 298, 60, 24), "load", {
-        var items = ~listPresets.value;
-        if(presetPop[\index] < items.size) { ~loadPreset.(items[presetPop[\index]]) };
-    });
+    ~uiCap.(win, Rect(fxX, 246, 380, 14), "desk preset");
+    ~preset.bar(win, fxX, 266, \mixer);
+    ~uiCap.(win, Rect(fxX, 334, 380, 14), "project · machines + desk + matrix");
+    ~preset.bar(win, fxX, 354, \project);
 
     win.onClose_({
         if(~mixerWin === win) {
@@ -318,5 +310,5 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixerRefreshSolo = { ~mixerSoloBtn.keysValuesDo { |l, b| ~uiBtnSet.(b, ~mixSoloCur == l) } };
 ~mixerRecSync = { ~uiBtnSet.(~mixerRecBtn, ~mixRecOn) };
 
-"2_mixer — ~openMixer".postln;
+"mixer — ~openMixer".postln;
 )

@@ -1,4 +1,4 @@
-// App/6_effects.scd — UNGRUND · EFFECTS (§K): one RE-201 body (~spaceEchoBody)
+// App/effects.scd — UNGRUND · EFFECTS (§K): one RE-201 body (~spaceEchoBody)
 // in two instances — \space_echo_rev (§K.1, ~busFxSendRev) and \space_echo_dly
 // (§K.2, ~busFxSendDly); both returns -> ~busFxReturn.
 // Spec + post-tuning deviations: docs/features/effects/dsp-spec.md.
@@ -193,5 +193,5 @@ Ndef(\space_echo_dly).fadeTime = 2;
 Ndef(\space_echo_rev).play(out: ~busFxReturn.index, numChannels: 2);
 Ndef(\space_echo_dly).play(out: ~busFxReturn.index, numChannels: 2);
 
-"6_effects — RE-201 ×2: \\space_echo_rev (§K.1) + \\space_echo_dly (§K.2).".postln;
+"effects — RE-201 ×2: \\space_echo_rev (§K.1) + \\space_echo_dly (§K.2).".postln;
 )

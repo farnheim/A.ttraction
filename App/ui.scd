@@ -1,4 +1,4 @@
-// App/0_ui.scd — UI kit: monochrome paper/ink, hand-drawn buttons, rulers and
+// App/ui.scd — UI kit: monochrome paper/ink, hand-drawn buttons, rulers and
 // popups (Qt widgets draw in the OS style and ignore the palette). Loads before
 // the windows; pure language side.
 
@@ -195,7 +195,7 @@
 };
 ~uiRulerEnable = { |r, on| r[\enabled] = on; { r[\view].refresh }.defer };
 
-// space echo: three tape heads (mode masks from 6_effects) + a spring on reverb
+// space echo: three tape heads (mode masks from effects) + a spring on reverb
 ~uiDrawEcho = { |u, mode|
     var h1 = [1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0], h2 = [0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0];
     var h3 = [0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0], rv = [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
@@ -215,5 +215,5 @@
     };
 };
 
-"0_ui — ui kit".postln;
+"ui — ui kit".postln;
 )

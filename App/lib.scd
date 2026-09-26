@@ -1,4 +1,4 @@
-// App/0_lib.scd — NET · the one field. Every machine publishes its parameters,
+// App/lib.scd — NET · the one field. Every machine publishes its parameters,
 // its inner variables and its output as audio-rate sources, and takes audio-rate
 // modulation into the same parameters, variables and one audio input. A cell of
 // the matrix is one synth: source bus -> depth -> destination bus. Nothing else.
@@ -23,9 +23,6 @@
 ~netCells  = ~netCells  ? Dictionary.new;
 ~netHooks  = ~netHooks  ? ();
 ~netViews  = ~netViews  ? ();
-
-~ungPresetRoot = ((~appDir ? (thisProcess.nowExecutingPath !? (_.dirname))) ? "")
-    +/+ "presets";
 
 ~ungSpecOf = { |layer| ~ungSpecs[layer.asSymbol] };
 ~netLayers = {
@@ -332,155 +329,5 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, rmu
 };
 
 
-// ----- presets: base values + levels + the matrix, one file -----
-~ungPresetDir = {
-    var root = ~ungPresetRoot;
-    if(File.exists(root).not) { File.mkdir(root) };
-    root
-};
-~listPresets = {
-    (~ungPresetDir.value +/+ "*.scd").pathMatch
-        .collect { |p| PathName(p).fileNameWithoutExtension }.sort
-};
-~savePreset = { |name|
-    var path, e, ls = ();
-    name = (name ? "").asString;
-    if(name.isEmpty) { name = "net_" ++ Date.getDate.stamp };
-    path = ~ungPresetDir.value +/+ (name ++ ".scd");
-    ~netLayers.value.do { |l|
-        var d = ();
-        ~ungSpecOf.(l).params.do { |p| d[p.key] = ~netGet.(l, p.key) };
-        ls[l] = d;
-    };
-    e = (
-        layers: ls,
-        mixer:  ~cfg_mixer !? { |m| (
-            master: m.master,
-            levels: m.levels.collect(_.copy),
-            muted:  (~mixMuted ? ()).keys.asArray.select { |l| ~mixMuted[l] == true },
-            solo:   ~mixSoloCur
-        ) },
-        fx:     ~cfg_effects !? { |fx| (
-            rev_mode: fx.rev_mode, dly_mode: fx.dly_mode, bass: fx.rev_bass, treble: fx.rev_treble
-        ) },
-        wander: [~cfg_net.wander, ~cfg_net.wanderRate],
-        cells:  ~netCells.values.asArray.collect { |c| c[\src] ++ c[\dst] ++ [c[\depth]] }
-    );
-    File.use(path, "w", { |f|
-        f.write("// net preset · " ++ name ++ " · " ++ Date.getDate.stamp ++ "\n"
-            ++ e.asCompileString ++ "\n");
-    });
-    ("preset saved -> " ++ path).postln;
-    path
-};
-~loadPreset = { |name|
-    var path = ~ungPresetDir.value +/+ (name.asString ++ ".scd"), e;
-    if(File.exists(path).not) { ("preset не найден: " ++ path).warn; nil } {
-        e = path.load;
-        if(e.isKindOf(Event).not) { ("preset повреждён: " ++ path).warn; nil } {
-            e[\layers] !? { |ls|
-                ~machinePresetName = ();
-                ls.keysValuesDo { |l, vals|
-                    if(~ungSpecOf.(l).notNil) {
-                        vals.keysValuesDo { |k, v| if(~netParam.(l, k).notNil) { ~setParam.(l, k, v) } };
-                    };
-                };
-            };
-            e[\mixer] !? { |m|
-                if(~mixSet.notNil) {
-                    m[\levels] !? { |rows|
-                        rows.keysValuesDo { |l, lv|
-                            if((~mixerLayers ? []).includes(l.asSymbol)) {
-                                lv.keysValuesDo { |which, v| ~mixSet.(l.asSymbol, which, v) };
-                            };
-                        };
-                    };
-                    m[\master] !? { |v| ~masterSet.(v) };
-                    m[\muted] !? { |ml|
-                        ~mixMuted = ();
-                        ml.do { |l| ~mixMuted[l.asSymbol] = true };
-                        ~mixSoloCur = m[\solo] !? (_.asSymbol);
-                        ~mixApplyLevels.value;
-                        ~mixerRefreshMute.value;
-                        ~mixerRefreshSolo.value;
-                    };
-                };
-            };
-            e[\fx] !? { |fx|
-                if(~cfg_effects.notNil) {
-                    [
-                        [\rev_mode, \mode,   [\space_echo_rev], [\rev_mode]],
-                        [\dly_mode, \mode,   [\space_echo_dly], [\dly_mode]],
-                        [\bass,     \bass,   [\space_echo_rev, \space_echo_dly], [\rev_bass, \dly_bass]],
-                        [\treble,   \treble, [\space_echo_rev, \space_echo_dly], [\rev_treble, \dly_treble]]
-                    ].do { |row|
-                        fx[row[0]] !? { |v|
-                            row[2].do { |n| Ndef(n).set(row[1], v) };
-                            row[3].do { |k| ~cfg_effects[k] = v };
-                        };
-                    };
-                    ~mixerFx !? { |wid|
-                        wid[\revMode] !? { |p| ~uiPopupSet.(p, (~cfg_effects.rev_mode - 1).clip(0, 11)) };
-                        wid[\dlyMode] !? { |p| ~uiPopupSet.(p, (~cfg_effects.dly_mode - 1).clip(0, 11)) };
-                        wid[\bass]    !? { |r| ~uiRulerSet.(r, ~cfg_effects.rev_bass) };
-                        wid[\treble]  !? { |r| ~uiRulerSet.(r, ~cfg_effects.rev_treble) };
-                        { wid[\dlyGlyph] !? (_.refresh); wid[\revGlyph] !? (_.refresh) }.defer;
-                    };
-                };
-            };
-            e[\wander] !? { |w| ~netWander.(w[0], w[1]) };
-            e[\cells]  !? { |cs|
-                ~netClear.(false);
-                cs.do { |c| ~netPut.(c[0], c[1], c[2], c[3], c[4]) };
-            };
-            ~netChanged.value;
-            ~netHooks.do { |f| f.(nil, nil, nil) };
-            ("preset loaded <- " ++ path.basename).postln;
-            e
-        }
-    }
-};
-
-// ----- machine presets: one machine's base values, one file -----
-~machinePresetName = ~machinePresetName ? ();
-~machinePresetDir = { |layer|
-    var dir = ~ungPresetDir.value +/+ "machines" +/+ layer.asString;
-    if(File.exists(dir).not) { File.mkdir(dir) };
-    dir
-};
-~saveMachinePreset = { |layer, path|
-    var d = ();
-    layer = layer.asSymbol;
-    if(PathName(path).extension != "scd") { path = path ++ ".scd" };
-    ~ungSpecOf.(layer).params.do { |p| d[p.key] = ~netGet.(layer, p.key) };
-    File.use(path, "w", { |f|
-        f.write("// machine preset · " ++ layer ++ " · " ++ Date.getDate.stamp ++ "\n"
-            ++ (machine: layer, params: d).asCompileString ++ "\n");
-    });
-    ~machinePresetName[layer] = PathName(path).fileNameWithoutExtension;
-    ("machine preset saved -> " ++ path).postln;
-    path
-};
-// a project preset is accepted too: its layers section holds this machine
-~loadMachinePreset = { |layer, path|
-    var e, vals;
-    layer = layer.asSymbol;
-    e = if(File.exists(path)) { path.load };
-    vals = if(e.isKindOf(Event)) {
-        if(e[\machine].isNil or: { e[\machine].asSymbol == layer }) {
-            e[\params] ?? { e[\layers] !? { |ls| ls[layer] } }
-        }
-    };
-    if(vals.isKindOf(Event).not) {
-        ("не пресет машины " ++ layer ++ ": " ++ path).warn; nil
-    } {
-        vals.keysValuesDo { |k, v| if(~netParam.(layer, k).notNil) { ~setParam.(layer, k, v) } };
-        ~machinePresetName[layer] = PathName(path).fileNameWithoutExtension;
-        ~netHooks.do { |f| f.(layer, nil, nil) };
-        ("machine preset loaded <- " ++ path.basename).postln;
-        vals
-    }
-};
-
-"0_lib — поле готово (~netDice, ~netSet, ~openMatrix, ~openMachines).".postln;
+"lib — поле готово (~netDice, ~netSet, ~openMatrix, ~openMachines).".postln;
 )

@@ -1,4 +1,4 @@
-// App/3_matrix.scd — the two pages of the field, drawn with the 0_ui kit.
+// App/matrix.scd — the two pages of the field, drawn with the ui kit.
 // ~openMatrix: every source (row) against every destination (column); a cell
 //   is a depth — filled = positive, hollow = negative. click = +0.3 (shift:
 //   −0.3), drag up/down = depth, right-click or alt-click = off. Click a
@@ -12,7 +12,7 @@
     cell:   9,
     labelW: 118,
     labelH: 104,
-    headH:  176,
+    headH:  146,
     rowH:   22,
     colW:   292
 );
@@ -29,7 +29,6 @@
     ~uiFmt.(v, case { a >= 100 } { 0 } { a >= 10 } { 1 } { a >= 0.1 } { 3 } { 4 })
 };
 
-~netPresetItems = { var items = ~listPresets.value; if(items.isEmpty) { ["—"] } { items } };
 
 
 // ----- the matrix page ----------------------------------------------
@@ -39,8 +38,8 @@
     var srcPos = (), dstPos = ();
     var cw = lw + (dsts.size * c) + 12, ch = lh + (srcs.size * c) + 12;
     var scr = Window.availableBounds;
-    var ww = (cw + 16).max(1180).min(scr.width - 40), wh = (ch + hh + 16).min(scr.height - 40);
-    var win, scroll, canvas, info, presetPop, nameField, driftBtn, hover, drag, x;
+    var ww = (cw + 16).max(1400).min(scr.width - 40), wh = (ch + hh + 16).min(scr.height - 40);
+    var win, scroll, canvas, info, driftBtn, hover, drag, x;
     var tag = { |p| (p[0] ++ "." ++ p[1]).asSymbol };
     var infoFor = { |a, b|
         var d = ~netDepth.(a[0], a[1], b[0], b[1]);
@@ -91,18 +90,7 @@
         x = x + 270;
     };
 
-    ~uiCap.(win, Rect(28, 146, 60, 14), "preset");
-    nameField = TextField(win, Rect(84, 142, 170, 24)).string_("").font_(~uiMono.(11))
-        .background_(pal.paper).stringColor_(pal.ink);
-    ~uiBtn.(win, Rect(262, 142, 64, 24), "save", {
-        ~savePreset.(nameField.string);
-        ~uiPopupItems.(presetPop, ~netPresetItems.value);
-    });
-    presetPop = ~uiPopup.(win, Rect(344, 142, 200, 24), ~netPresetItems.value, 0, { });
-    ~uiBtn.(win, Rect(552, 142, 64, 24), "load", {
-        var items = ~listPresets.value;
-        if(presetPop[\index] < items.size) { ~loadPreset.(items[presetPop[\index]]) };
-    });
+    ~preset.bar(win, ww - 28 - ((~cfg_presets.btnW * 3) + (~cfg_presets.gap * 2)), 78, \matrix);
     ~uiRule.(win, Rect(0, hh - 1, ww, 1));
 
     scroll = ScrollView(win, Rect(0, hh, ww, wh - hh)).hasBorder_(false).background_(pal.paper);
@@ -229,10 +217,10 @@
 ~netBuildMachines = {
     var cv = ~cfg_view, pal = ~uiPal, layers = ~netLayers.value, rowH = cv.rowH, colW = cv.colW;
     var maxN = layers.collect { |l| ~ungSpecOf.(l).params.size }.maxItem ? 1;
-    var top = 180, cw = 28 + (layers.size * colW), ch = top + (maxN * rowH) + 20;
+    var top = 210, cw = 28 + (layers.size * colW), ch = top + (maxN * rowH) + 20;
     var scr = Window.availableBounds;
     var ww = cw.min(scr.width - 40), wh = ch.min(scr.height - 40);
-    var win, scroll, view, rulers = (), names = ();
+    var win, scroll, view, rulers = ();
 
     ~macWin !? { |w| try { w.close } };
     win = Window("NET · machines", Rect(60, 60, ww, wh)).background_(pal.paper);
@@ -252,16 +240,7 @@
         ~uiBtn.(view, Rect(x0, 110, 84, 24), "defaults", { ~netDefaults.(l) });
         ~uiBtn.(view, Rect(x0 + 90, 110, 84, 24), "dice", { ~netDiceBase.(l, 1.0) });
         ~uiBtn.(view, Rect(x0 + 180, 110, 84, 24), "nudge", { ~netDiceBase.(l, 0.2) });
-        ~uiBtn.(view, Rect(x0, 140, 84, 24), "load…", {
-            Dialog.openPanel({ |path| ~loadMachinePreset.(l, path) }, nil, false, ~machinePresetDir.(l));
-        });
-        ~uiBtn.(view, Rect(x0 + 90, 140, 84, 24), "save…", {
-            Dialog.savePanel({ |path|
-                ~saveMachinePreset.(l, path);
-                names[l].string_(~machinePresetName[l]);
-            }, nil, ~machinePresetDir.(l));
-        });
-        names[l] = ~uiText.(view, Rect(x0 + 180, 144, 84, 16), ~machinePresetName[l] ? "", 9.5, pal.ink2);
+        ~preset.bar(view, x0, 140, l);
         params.do { |p, i|
             rulers[l][p.key] = ~uiRulerRow.(view, x0, top + (i * rowH), 88, 118,
                 p.key.asString, p.spec, ~netGet.(l, p.key),
@@ -275,7 +254,6 @@
                 rulers[l] !? { |rs|
                     if(key.isNil or: { layer.isNil }) {
                         rs.keysValuesDo { |k, r| ~uiRulerSet.(r, ~netGet.(l, k)) };
-                        { names[l].string_(~machinePresetName[l] ? "") }.defer;
                     } {
                         rs[key] !? { |r| ~uiRulerSet.(r, v) };
                     };
@@ -290,5 +268,5 @@
 };
 ~openMachines = { { ~netBuildMachines.value }.defer };
 
-"3_matrix — ~openMatrix / ~openMachines".postln;
+"matrix — ~openMatrix / ~openMachines".postln;
 )
