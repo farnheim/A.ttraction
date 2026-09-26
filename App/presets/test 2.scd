@@ -12,7 +12,6 @@
             n8: 54.2,
             n9: 58.14,
             n10: 16.69,
-            amp: 0.1589,
             density: 3.258,
             contact: 0.2785,
             decay: 0.541,
@@ -36,7 +35,6 @@
             f3: 42.4225,
             f4: 75.5493,
             f5: 47.493,
-            amp: 0.18,
             voiced: 0.5775,
             breath: 0.3,
             bright: 9.0,
@@ -77,8 +75,7 @@
             driftPeriod: 180.0,
             surfDepth: 1.7009,
             surfRate: 0.1469,
-            decorrWidth: 0.1918,
-            amp: 0.14
+            decorrWidth: 0.1918
         ),
         theta: (
             fragOct: -1.0,
@@ -91,8 +88,7 @@
             edgeWidth: 0.4395,
             edgeAmp: 0.0288,
             decayScale: 0.9616,
-            spread: 0.7943,
-            amp: 0.0637
+            spread: 0.7943
         ),
         zeta: (
             bedHpf: 354.9297,
@@ -102,7 +98,6 @@
             fineHpf: 2396.6376,
             popHpf: 845.2128,
             bodyFreq: 110.8729,
-            amp: 0.25,
             bedAmp: 0.3744,
             bedHumpRq: 1.0533,
             bedHumpAmt: 0.7299,

@@ -8,41 +8,37 @@
 (
 ~spec_theta = (
     name: \theta,
+    level: 0.0522,
+    fade: 0.5,
     params: [
-        ( key: \fragOct,    group: \freq, spec: ControlSpec(-2, 2, \lin, 1, 0) ),
-        ( key: \ioi0,       group: \tone, spec: ControlSpec(0.003, 0.5, \exp, 0, 0.018) ),
-        ( key: \decel,      group: \tone, spec: ControlSpec(1.02, 1.8, \lin, 0, 1.22) ),
-        ( key: \ioiMax,     group: \tone, spec: ControlSpec(0.05, 4.0, \exp, 0, 0.60) ),
-        ( key: \popScale,   group: \tone, spec: ControlSpec(0.25, 4.0, \exp, 0, 1.0) ),
-        ( key: \gapScale,   group: \tone, spec: ControlSpec(0.05, 6.0, \exp, 0, 1.0) ),
-        ( key: \density,    group: \tone, spec: ControlSpec(0, 1, \lin, 0, 0.5) ),
-        ( key: \edgeWidth,  group: \tone, spec: ControlSpec(0.05, 2.0, \exp, 0, 0.7) ),
-        ( key: \edgeAmp,    group: \tone, spec: ControlSpec(0.0, 1.0, \lin, 0, 0.45) ),
-        ( key: \decayScale, group: \tone, spec: ControlSpec(0.05, 1.0, \exp, 0, 0.68) ),
-        ( key: \spread,     group: \tone, spec: ControlSpec(0.0, 2.5, \lin, 0, 0.8) ),
-        ( key: \amp,        group: \tone, spec: ControlSpec(0.0, 0.6, \lin, 0, 0.09) )
+        fragOct:    [-2, 2, \lin, 1, 0],
+        ioi0:       [0.003, 0.5, \exp, 0, 0.018],
+        decel:      [1.02, 1.8, \lin, 0, 1.22],
+        ioiMax:     [0.05, 4.0, \exp, 0, 0.60],
+        popScale:   [0.25, 4.0, \exp, 0, 1.0],
+        gapScale:   [0.05, 6.0, \exp, 0, 1.0],
+        density:    [0, 1, \lin, 0, 0.5],
+        edgeWidth:  [0.05, 2.0, \exp, 0, 0.7],
+        edgeAmp:    [0.0, 1.0, \lin, 0, 0.45],
+        decayScale: [0.05, 1.0, \exp, 0, 0.68],
+        spread:     [0.0, 2.5, \lin, 0, 0.8]
     ],
     vars: [
-        ( key: \pulse, spec: ControlSpec(0.0, 1.0, \lin) ),
-        ( key: \casc,  spec: ControlSpec(-1.0, 1.0, \lin) ),
-        ( key: \ringT, spec: ControlSpec(0.005, 1.0, \exp) ),
-        ( key: \envT,  spec: ControlSpec(0.001, 10.0, \exp) ),
-        ( key: \rq,    spec: ControlSpec(0.005, 1.0, \exp) ),
-        ( key: \level, spec: ControlSpec(0.0, 1.0, \lin) ),
-        ( key: \pan,   spec: ControlSpec(-1.0, 1.0, \lin) )
+        pulse: [0.0, 1.0],
+        casc:  [-1.0, 1.0],
+        ringT: [0.005, 1.0, \exp],
+        envT:  [0.001, 10.0, \exp],
+        rq:    [0.005, 1.0, \exp],
+        level: [0.0, 1.0],
+        pan:   [-1.0, 1.0]
     ]
 );
 
 
 // ===== LOGIC =========================================================
-~netRegister.(~spec_theta, 0.5);
-Ndef(\theta, ~netMachine.(~spec_theta, { |io|
-    var fragOct = io.par(\fragOct), ioi0 = io.par(\ioi0), decel = io.par(\decel);
-    var ioiMax = io.par(\ioiMax), popScale = io.par(\popScale), gapScale = io.par(\gapScale);
-    var density = io.par(\density), edgeWidth = io.par(\edgeWidth), edgeAmp = io.par(\edgeAmp);
-    var decayScale = io.par(\decayScale), spread = io.par(\spread), amp = io.par(\amp);
+~netMachine.(~spec_theta, { |io|
     var feed = io.feed, feedEnv = feed.abs.lag(0.05).min(1);
-    var nyq = SampleRate.ir * 0.45, fund = 94, nVoices = 14;
+    var nyq = io.nyq, fund = 94, nVoices = 14;
     var rowR0 = #[27, 16, 64, 12, 48, 24, 81, 18, 96, 36, 32, 54, 12, 72, 24,
         16, 81, 27, 54, 12, 48, 48, 64, 18, 24, 32, 36, 12, 64, 16, 72, 48, 18,
         16, 54, 32, 12, 64, 36, 18, 72];
@@ -62,90 +58,69 @@ Ndef(\theta, ~netMachine.(~spec_theta, { |io|
     var popTable = #[18, 26, 11, 22, 8, 28, 14];
     var gapTable = #[2.6, 5.1, 1.2, 3.8, 0.8, 4.4, 2.1, 6.0, 1.5, 3.2, 0.9, 4.9,
         2.4, 1.8, 5.6, 1.1, 3.5, 2.8, 4.1, 1.4, 5.3, 2.0, 3.0];
-    var cascC0 = 0.00008, cascCl = 1.9, cascAcc = 0.0;
-    var cascTimes, cascLevels = #[1.0, 0.62, 0.85, 0.48, 0.71];
+    var cascC0 = 0.00008, cascCl = 1.9, cascLevels = #[1.0, 0.62, 0.85, 0.48, 0.71];
     var cascHP = 400, cascLP = 9024, cascGate = 0.0025;
-    var t60Ref = 0.045, edgeRqExp = 0.85, edgeFExp = 0.4, edgeRef = 280, makeup = 0.58;
+    var t60Ref = 0.045, edgeRqExp = 0.85, edgeFExp = 0.4, edgeRef = 280;
     var fragFund, ioi0K, decelK, ioiMaxK, popScaleK, gapScaleK, densK, gapMul, kMax;
-    var nEffA, nEffB, kStream, isFirst, geom, durs, tEvt, vals;
-    var wR0, wR1, wR2, wN, wRq, wLevel, wPan, casc, vIdx, sig;
+    var nEffA, nEffB, kStream, isFirst, geom, durs, tEvt;
+    var wR0, wR1, wR2, wN, wRq, wLevel, wPan, cascTimes, casc, vIdx;
 
-    fragFund = fund * (2 ** fragOct.round(1));
+    fragFund = fund * (2 ** io.par(\fragOct).round(1));
 
     // a Demand UGen polls its inputs on its own pull and cannot read ar: the
     // A2K bridge is the only kr in the machine, and it is not optional
-    ioi0K     = A2K.kr(ioi0);
-    decelK    = A2K.kr(decel);
-    ioiMaxK   = A2K.kr(ioiMax);
-    popScaleK = A2K.kr(popScale);
-    gapScaleK = A2K.kr(gapScale);
-    densK     = A2K.kr(density);
-    gapMul    = 6 ** (1 - (2 * densK));
-    kMax      = ((ioiMaxK / ioi0K).log / decelK.log).floor + 1;
+    #ioi0K, decelK, ioiMaxK, popScaleK, gapScaleK, densK =
+        A2K.kr([\ioi0, \decel, \ioiMax, \popScale, \gapScale, \density].collect { |k| io.par(k) });
+    gapMul = 6 ** (1 - (2 * densK));
+    kMax   = ((ioiMaxK / ioi0K).log / decelK.log).floor + 1;
 
-    nEffA   = (Dseq(popTable, inf) * popScaleK).min(kMax).round(1).clip(2, 64);
-    nEffB   = (Dseq(popTable, inf) * popScaleK).min(kMax).round(1).clip(2, 64);
+    #nEffA, nEffB = { (Dseq(popTable, inf) * popScaleK).min(kMax).round(1).clip(2, 64) } ! 2;
     kStream = Dseq([ Dseries(0, 1, nEffB) ], inf);
     isFirst = kStream < 0.5;
     geom    = Dseq([ Dgeom(ioi0K / decelK, decelK, nEffA) ], inf);
     durs    = (geom * Dseq(versatz, inf)) + (isFirst * Dseq(gapTable, inf) * gapScaleK * gapMul);
-    tEvt    = io.node(\pulse, TDuty.ar(durs) * (density > 0.02));
+    tEvt    = io.node(\pulse, TDuty.ar(durs) * (io.par(\density) > 0.02));
 
-    vals = Demand.ar(tEvt, 0, [
-        Dseq(rowR0, inf), Dseq(rowR1, inf), Dseq(rowR2, inf), Dseq(rowN, inf),
-        Dseq(rqTable, inf), Dseq(levelTable, inf), Dseq(panTable, inf)
-    ]);
-    wR0 = vals[0]; wR1 = vals[1]; wR2 = vals[2]; wN = vals[3];
-    wRq = vals[4]; wLevel = vals[5]; wPan = vals[6];
+    #wR0, wR1, wR2, wN, wRq, wLevel, wPan = Demand.ar(tEvt, 0,
+        [rowR0, rowR1, rowR2, rowN, rqTable, levelTable, panTable].collect { |row| Dseq(row, inf) });
 
-    cascTimes = [0.0] ++ (0..3).collect { |i| cascAcc = cascAcc + (cascC0 * (cascCl ** i)); cascAcc };
+    cascTimes = [0] ++ (cascC0 * (cascCl ** (0..3))).integrate;
     casc = Mix(cascTimes.collect { |t, i|
         if(t <= 0) { tEvt * cascLevels[i] } { DelayN.ar(tEvt, 0.002, t) * cascLevels[i] }
     });
     2.do { casc = HPF.ar(casc, cascHP) };
     2.do { casc = LPF.ar(casc, cascLP) };
-    casc = io.node(\casc, casc.clip2(1));
+    casc = io.node(\casc, casc);
 
     vIdx = Stepper.ar(tEvt, 0, 0, nVoices - 1, 1);
 
-    sig = Mix.fill(nVoices, { |v|
-        var trig, gate, excite, nMod, g1, g2, freqs, fLow, ringT, target, envT;
-        var modes, fTop, rqL, edgeNorm, kante, levelW, panW, voice;
+    Mix.fill(nVoices, { |v|
+        var trig, gate, excite, nMod, freqs, ringT, target, envT;
+        var modes, fTop, rqL, edgeNorm, kante, levelW, panW;
 
         trig   = tEvt * ((vIdx - v).abs < 0.5);
         gate   = Trig.ar(trig, cascGate);
         excite = (casc * gate) + (feed * (1 / nVoices.sqrt));
 
         nMod  = Latch.ar(wN, trig);
-        g1    = nMod > 1.5;
-        g2    = nMod > 2.5;
         freqs = [wR0, wR1, wR2].collect { |r| Latch.ar(r * fragFund, trig).clip(20, nyq) };
 
-        fLow   = freqs[0].min(freqs[1]).min(freqs[2]);
-        ringT  = io.node(\ringT, (3 * (45.1 / fLow).min(0.040)).clip(0.015, 0.120));
-        target = (ringT * decayScale).clip(0.005, 1.0);
-        envT   = io.node(\envT, (ringT * target / (ringT - target).max(0.0002)).clip(0.001, 10));
-        modes = Mix([
-            Ringz.ar(excite, freqs[0], ringT),
-            Ringz.ar(excite, freqs[1], ringT) * g1,
-            Ringz.ar(excite, freqs[2], ringT) * g2
-        ]) / nMod.max(1).sqrt
+        ringT  = io.node(\ringT, (3 * (45.1 / freqs.reduce(\min)).min(0.040)).clip(0.015, 0.120));
+        target = (ringT * io.par(\decayScale)).clip(0.005, 1.0);
+        envT   = io.node(\envT, ringT * target / (ringT - target).max(0.0002));
+        modes  = Mix(Ringz.ar(excite, freqs, ringT) * [1, nMod > 1.5, nMod > 2.5])
+            / nMod.max(1).sqrt
             * Decay2.ar(trig, 0.001, envT).max(feedEnv)
             * (t60Ref / ringT).sqrt;
 
-        fTop     = freqs[0].max(freqs[1]).max(freqs[2]);
-        rqL      = io.node(\rq, (Latch.ar(wRq, trig) * edgeWidth).clip(0.01, 1.0));
+        fTop     = freqs.reduce(\max);
+        rqL      = io.node(\rq, (Latch.ar(wRq, trig) * io.par(\edgeWidth)).clip(0.01, 1.0));
         edgeNorm = edgeRef / ((rqL ** edgeRqExp) * (fTop ** edgeFExp));
         kante    = BPF.ar(excite, fTop, rqL) * edgeNorm * Decay2.ar(trig, 0.0002, 0.0025);
 
         levelW = io.node(\level, Latch.ar(wLevel, trig));
-        panW   = io.node(\pan, Latch.ar(wPan, trig) * Latch.ar(spread, trig));
-        voice  = (modes + (kante * edgeAmp)) * levelW;
-        Pan2.ar(voice, panW)
-    });
-
-    io.emit(Limiter.ar(LeakDC.ar(sig * makeup * amp), 0.95))
-}));
-
-~netRewire.value;
+        panW   = io.node(\pan, Latch.ar(wPan, trig) * Latch.ar(io.par(\spread), trig));
+        Pan2.ar((modes + (kante * io.par(\edgeAmp))) * levelW, panW)
+    })
+});
 )

@@ -229,10 +229,10 @@
 ~netBuildMachines = {
     var cv = ~cfg_view, pal = ~uiPal, layers = ~netLayers.value, rowH = cv.rowH, colW = cv.colW;
     var maxN = layers.collect { |l| ~ungSpecOf.(l).params.size }.maxItem ? 1;
-    var top = 150, cw = 28 + (layers.size * colW), ch = top + (maxN * rowH) + 20;
+    var top = 180, cw = 28 + (layers.size * colW), ch = top + (maxN * rowH) + 20;
     var scr = Window.availableBounds;
     var ww = cw.min(scr.width - 40), wh = ch.min(scr.height - 40);
-    var win, scroll, view, rulers = ();
+    var win, scroll, view, rulers = (), names = ();
 
     ~macWin !? { |w| try { w.close } };
     win = Window("NET · machines", Rect(60, 60, ww, wh)).background_(pal.paper);
@@ -240,7 +240,6 @@
     scroll = ScrollView(win, Rect(0, 0, ww, wh)).hasBorder_(false).background_(pal.paper);
     view = CompositeView(scroll, Rect(0, 0, cw, ch)).background_(pal.paper);
 
-    ~uiCap.(view, Rect(28, 12, 700, 14), "net · machines · base values · the field rides on top");
     ~uiTitle.(view, Rect(28, 26, 300, 36), "Machines");
     ~uiRule.(view, Rect(0, 66, cw, 1));
 
@@ -250,11 +249,19 @@
         if(li > 0) { ~uiRule.(view, Rect(x0 - 14, 67, 1, ch - 67)) };
         ~uiText.(view, Rect(x0, 76, 30, 26), ~uiPhi[l] ? "", 18);
         ~uiText.(view, Rect(x0 + 30, 78, 200, 22), l.asString, 14, pal.ink, true);
-        ~uiText.(view, Rect(x0 + 150, 82, 120, 16),
-            params.size.asString ++ " params", 9.5, pal.ink2, false, \right);
         ~uiBtn.(view, Rect(x0, 110, 84, 24), "defaults", { ~netDefaults.(l) });
         ~uiBtn.(view, Rect(x0 + 90, 110, 84, 24), "dice", { ~netDiceBase.(l, 1.0) });
         ~uiBtn.(view, Rect(x0 + 180, 110, 84, 24), "nudge", { ~netDiceBase.(l, 0.2) });
+        ~uiBtn.(view, Rect(x0, 140, 84, 24), "load…", {
+            Dialog.openPanel({ |path| ~loadMachinePreset.(l, path) }, nil, false, ~machinePresetDir.(l));
+        });
+        ~uiBtn.(view, Rect(x0 + 90, 140, 84, 24), "save…", {
+            Dialog.savePanel({ |path|
+                ~saveMachinePreset.(l, path);
+                names[l].string_(~machinePresetName[l]);
+            }, nil, ~machinePresetDir.(l));
+        });
+        names[l] = ~uiText.(view, Rect(x0 + 180, 144, 84, 16), ~machinePresetName[l] ? "", 9.5, pal.ink2);
         params.do { |p, i|
             rulers[l][p.key] = ~uiRulerRow.(view, x0, top + (i * rowH), 88, 118,
                 p.key.asString, p.spec, ~netGet.(l, p.key),
@@ -268,6 +275,7 @@
                 rulers[l] !? { |rs|
                     if(key.isNil or: { layer.isNil }) {
                         rs.keysValuesDo { |k, r| ~uiRulerSet.(r, ~netGet.(l, k)) };
+                        { names[l].string_(~machinePresetName[l] ? "") }.defer;
                     } {
                         rs[key] !? { |r| ~uiRulerSet.(r, v) };
                     };

@@ -63,22 +63,38 @@
     b
 };
 
-// a machine body gets `io`:
+// a machine spec: `params` and `vars` are pairs `key: [ControlSpec args]`,
+// `level` is the fixed output trim, `fade` the Ndef crossfade. The body gets
+// `io` and returns its stereo signal:
 //   io.par(\key)          -> the parameter, live, in its own units
 //   io.node(\key, sig)    -> an inner variable made public: tapped and modulated
 //   io.feed               -> the audio that other machines pour into this one
-//   io.emit([l, r])       -> last line of the body
+//   io.nyq                -> the usable top of the band
+// level, LeakDC and Limiter belong to the field, not to the body.
 // everything the closure needs is captured here: the Ndef builds the graph
 // outside this environment
 ~netMachine = { |spec, body|
-    var name = spec.name, srcKeys = ~netSrcKeys.(spec), dstKeys = ~netDstKeys.(spec);
-    var n = srcKeys.size, bus = ~netAlloc.(name, n);
-    var tapIdx = bus[\tap].index, modIdx = bus[\mod].index;
+    var entries = { |pairs| pairs.clump(2).collect { |kv| (key: kv[0], spec: kv[1].asSpec) } };
+    var name, level, srcKeys, dstKeys, n, bus, tapIdx, modIdx;
     var map = ~netMap, unmap = ~netUnmap;
     var specs = (), vspecs = ();
+    spec = spec.copy.putAll((params: entries.(spec.params), vars: entries.(spec[\vars] ? [])));
+    name = spec.name;
+    level = spec[\level] ? 1;
+    srcKeys = ~netSrcKeys.(spec);
+    dstKeys = ~netDstKeys.(spec);
+    n = srcKeys.size;
+    bus = ~netAlloc.(name, n);
+    tapIdx = bus[\tap].index;
+    modIdx = bus[\mod].index;
     spec.params.do { |p| specs[p.key] = p.spec };
-    (spec[\vars] ? []).do { |v| vspecs[v.key] = v.spec };
-    {
+    spec[\vars].do { |v| vspecs[v.key] = v.spec };
+
+    ~ungSpecs[name] = spec;
+    ~ungVals[name]  = ~ungVals[name] ? ();
+    spec.params.do { |p| ~setParam.(name, p.key, ~ungVals[name][p.key] ? p.spec.default) };
+    Ndef(name).fadeTime = spec[\fade] ? 2;
+    Ndef(name, {
         var mods = InFeedback.ar(modIdx, n);
         var taps = Array.fill(n, { List.new });
         var cache = ();
@@ -88,6 +104,7 @@
             i
         };
         var io = (
+            nyq: SampleRate.ir * 0.45,
             par: { |self, key|
                 var i, sp, u;
                 if(cache[key].isNil) {
@@ -108,28 +125,15 @@
             feed: { |self|
                 if(cache[\in].isNil) { cache[\in] = LeakDC.ar(mods[port.(\in)]).clip2(1) };
                 cache[\in]
-            },
-            emit: { |self, sig|
-                sig = Sanitize.ar(sig);
-                taps[n - 1].add(sig.asArray.sum * (1 / sig.asArray.size));
-                Out.ar(tapIdx, Sanitize.ar(taps.collect { |l|
-                    if(l.isEmpty) { DC.ar(0) } { l.asArray.sum * (1 / l.size) }
-                }));
-                sig
             }
         );
-        body.(io)
-    }
-};
-
-~netRegister = { |spec, fade = 2|
-    var name = spec.name;
-    ~ungSpecs[name] = spec;
-    ~ungVals[name]  = ~ungVals[name] ? ();
-    spec.params.do { |p| ~setParam.(name, p.key, ~ungVals[name][p.key] ? p.spec.default) };
-    Ndef(name).fadeTime = fade;
-    ("net · " ++ name ++ " · " ++ ~netSrcKeys.(spec).size ++ " sources · "
-        ++ ~netDstKeys.(spec).size ++ " destinations").postln;
+        var sig = Sanitize.ar(Limiter.ar(LeakDC.ar(body.(io) * level), 0.95));
+        taps[n - 1].add(sig.asArray.mean);
+        Out.ar(tapIdx, Sanitize.ar(taps.collect { |l| if(l.isEmpty) { DC.ar(0) } { l.asArray.mean } }));
+        sig
+    });
+    ("net · " ++ name ++ " · " ++ n ++ " sources · " ++ dstKeys.size ++ " destinations").postln;
+    ~netRewire.value;
 };
 
 
@@ -375,6 +379,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, rmu
         e = path.load;
         if(e.isKindOf(Event).not) { ("preset повреждён: " ++ path).warn; nil } {
             e[\layers] !? { |ls|
+                ~machinePresetName = ();
                 ls.keysValuesDo { |l, vals|
                     if(~ungSpecOf.(l).notNil) {
                         vals.keysValuesDo { |k, v| if(~netParam.(l, k).notNil) { ~setParam.(l, k, v) } };
@@ -433,6 +438,47 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, rmu
             ("preset loaded <- " ++ path.basename).postln;
             e
         }
+    }
+};
+
+// ----- machine presets: one machine's base values, one file -----
+~machinePresetName = ~machinePresetName ? ();
+~machinePresetDir = { |layer|
+    var dir = ~ungPresetDir.value +/+ "machines" +/+ layer.asString;
+    if(File.exists(dir).not) { File.mkdir(dir) };
+    dir
+};
+~saveMachinePreset = { |layer, path|
+    var d = ();
+    layer = layer.asSymbol;
+    if(PathName(path).extension != "scd") { path = path ++ ".scd" };
+    ~ungSpecOf.(layer).params.do { |p| d[p.key] = ~netGet.(layer, p.key) };
+    File.use(path, "w", { |f|
+        f.write("// machine preset · " ++ layer ++ " · " ++ Date.getDate.stamp ++ "\n"
+            ++ (machine: layer, params: d).asCompileString ++ "\n");
+    });
+    ~machinePresetName[layer] = PathName(path).fileNameWithoutExtension;
+    ("machine preset saved -> " ++ path).postln;
+    path
+};
+// a project preset is accepted too: its layers section holds this machine
+~loadMachinePreset = { |layer, path|
+    var e, vals;
+    layer = layer.asSymbol;
+    e = if(File.exists(path)) { path.load };
+    vals = if(e.isKindOf(Event)) {
+        if(e[\machine].isNil or: { e[\machine].asSymbol == layer }) {
+            e[\params] ?? { e[\layers] !? { |ls| ls[layer] } }
+        }
+    };
+    if(vals.isKindOf(Event).not) {
+        ("не пресет машины " ++ layer ++ ": " ++ path).warn; nil
+    } {
+        vals.keysValuesDo { |k, v| if(~netParam.(layer, k).notNil) { ~setParam.(layer, k, v) } };
+        ~machinePresetName[layer] = PathName(path).fileNameWithoutExtension;
+        ~netHooks.do { |f| f.(layer, nil, nil) };
+        ("machine preset loaded <- " ++ path.basename).postln;
+        vals
     }
 };
 
