@@ -242,9 +242,11 @@
     view = CompositeView(scroll, Rect(0, 0, cw, ch)).background_(pal.paper);
     // the canvas never shrinks below its content (the scroll bars stay) but grows
     // with a larger window, so the rules on it reach the window edge
+    // Qt still sends a resize while the window is tearing down, when the scroll
+    // view has no inner bounds left
     scroll.onResize_({ |sv|
         var ib = sv.innerBounds;
-        view.resizeTo(ib.width.max(cw), ib.height.max(ch));
+        if(ib.notNil and: { view.isClosed.not }) { view.resizeTo(ib.width.max(cw), ib.height.max(ch)) };
     });
 
     ~uiRule.(view, Rect(0, 66, cw, 1)).resize_(2);

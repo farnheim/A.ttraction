@@ -88,13 +88,17 @@
 // a page's content is one column of contentW centred in its host, with a
 // margin on both sides; the header's left and right items sit on the column's
 // edges (margin, margin + contentW). The host re-centres it when it resizes;
-// height nil = the host's height, followed on resize
+// height nil = the host's height, followed on resize. Qt still sends a resize
+// while the window is tearing down, with no bounds left
 ~uiPage = { |host, contentW, height, onMove, margin = 28|
     var pw = contentW + (margin * 2), page = CompositeView(host, Rect(0, 0, pw, height ? 1));
     var center = {
-        var b = host.bounds, x = ((b.width - pw) / 2).max(0).round;
-        page.bounds = Rect(x, 0, pw, height ? b.height);
-        onMove.value(x + margin);
+        var b = host.bounds, x;
+        if(b.notNil and: { page.isClosed.not }) {
+            x = ((b.width - pw) / 2).max(0).round;
+            page.bounds = Rect(x, 0, pw, height ? b.height);
+            onMove.value(x + margin);
+        };
     };
     host.onResize_(center);
     center.value;
