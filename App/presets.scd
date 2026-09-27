@@ -8,8 +8,8 @@
 ~cfg_presets = (
     root:    ((~appDir ? (thisProcess.nowExecutingPath !? (_.dirname))) ? "") +/+ "presets",
     kinds:   (
-        project: [\layers, \mixer, \fx, \wander, \cells],
-        mixer:   [\mixer, \fx],
+        project: [\layers, \mixer, \fx, \tape, \wander, \cells],
+        mixer:   [\mixer, \fx, \tape],
         matrix:  [\wander, \cells]
     ),
     machine: [\layers],
@@ -158,6 +158,14 @@
                         wid[\treble]  !? { |r| ~uiRulerSet.(r, ~cfg_effects.rev_treble) };
                         { wid[\dlyGlyph] !? (_.refresh); wid[\revGlyph] !? (_.refresh) }.defer;
                     };
+                };
+            }
+        ),
+        tape: (
+            get: { if(~busTape.notNil) { ~cfg_tape.copy } },
+            set: { |t|
+                if(~busTape.notNil) {
+                    (~tapeKeys ? []).do { |k| t[k] !? { |v| ~tapeSet.(k, v) } };
                 };
             }
         ),

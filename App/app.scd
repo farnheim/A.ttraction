@@ -11,6 +11,7 @@
     openMachines: true,
     openMixer:    true,
     enableEffects: true,   // effects.scd — two Space Echo instances on the sends
+    enableTape:   true,    // tape.scd — the master tape stage (§K.6) before the Limiter
     enableMixer:  true,    // mixer.scd — vol/sends/mute/solo/rec + master
     dice:         false    // throw a random matrix at start
 );
@@ -37,8 +38,9 @@ s.options.maxNodes = 2 ** 14;
     ~netBus = ();
     if(~mixRecOn == true) { s.stopRecording; ~mixRecOn = false };
     ~mixerWin !? { |w| { try { w.close } }.defer; ~mixerWin = nil };
-    [~busDry, ~busFxSendRev, ~busFxSendDly, ~busFxReturn].do { |b| b !? { b.free } };
-    ~busDry = nil; ~busFxSendRev = nil; ~busFxSendDly = nil; ~busFxReturn = nil;
+    [~busDry, ~busFxSendRev, ~busFxSendDly, ~busFxReturn, ~busTape].do { |b| b !? { b.free } };
+    ~busDry = nil; ~busFxSendRev = nil; ~busFxSendDly = nil; ~busFxReturn = nil; ~busTape = nil;
+    ~tapeStage = nil; ~tapeGui = nil; ~mixerRebuildMaster = nil;
     ~netGroup = nil;
     ~ungSpecs = ();
     s.freeAll;
@@ -69,6 +71,7 @@ s.waitForBoot({
     ~busFxReturn  = Bus.audio(s, 2);
     s.sync;
     if(~cfg_app.enableEffects) { (~appDir +/+ "effects.scd").load; s.sync };
+    if(~cfg_app.enableTape) { (~appDir +/+ "tape.scd").load; s.sync };
     (~appDir +/+ "matrix.scd").load;
     if(~cfg_app.enableMixer) { (~appDir +/+ "mixer.scd").load; s.sync };
     ~netRewire.value;
