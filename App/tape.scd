@@ -288,7 +288,7 @@ if(s.serverRunning and: { Ndef(\tapeClock).source.isNil }) {
 ~tapeGui = { |win, x, y|
     var fmt2 = { |v| ~uiFmt.(v, 2) };
     ~tapeWid = ();
-    ~tapeWid[\on] = ~uiBtn.(win, Rect(x, y, 84, 24), ["tape off", "tape on"],
+    ~tapeWid[\on] = ~uiBtn.(win, Rect(x + 246, y, 70, 24), ["tape off", "tape on"],
         { ~tapeSet.(\on, if(~cfg_tape[\on] > 0.5) { 0 } { 1 }) }, ~cfg_tape[\on] > 0.5);
     ~tapeGuiRows.do { |row, i|
         var key = row[0];

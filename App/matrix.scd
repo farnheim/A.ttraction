@@ -10,11 +10,11 @@
 (
 ~cfg_view = (
     cell:   9,
-    labelW: 118,
-    labelH: 104,
-    headH:  146,
+    labelH: 30,
+    headH:  132,
     rowH:   22,
-    colW:   292
+    colW:   292,
+    idSeed: 9401
 );
 
 
@@ -22,6 +22,16 @@
 ~netCloseViews = {
     [~matWin, ~macWin].do { |w| w !? { |x| { try { x.close } }.defer } };
     ~matWin = nil; ~macWin = nil;
+};
+
+~netIds = { |n|
+    var gen = Routine { loop { 0x10000.rand.yield } }, seen = Set[], ids = Array(n);
+    gen.randSeed = ~cfg_view.idSeed;
+    while { ids.size < n } {
+        var id = gen.next;
+        if(seen.includes(id).not) { seen.add(id); ids.add(id.asHexString(4)) };
+    };
+    ids
 };
 
 ~netFmt = { |v|
@@ -33,13 +43,19 @@
 
 // ----- the matrix page ----------------------------------------------
 ~netBuildMatrix = {
-    var cv = ~cfg_view, pal = ~uiPal, c = cv.cell, lw = cv.labelW, lh = cv.labelH, hh = cv.headH;
+    var cv = ~cfg_view, pal = ~uiPal, c = cv.cell, lh = cv.labelH, hh = cv.headH;
+    var lw = ("0000".bounds(~uiMono.(7, true)).width + 4).ceil;
     var srcs = ~netAllSrc.value, dsts = ~netAllDst.value;
     var srcPos = (), dstPos = ();
+    var ids = ~netIds.(srcs.size + dsts.size), srcId = ids.keep(srcs.size), dstId = ids.drop(srcs.size);
     var cw = lw + (dsts.size * c) + 12, ch = lh + (srcs.size * c) + 12;
+    var presetW = (~cfg_presets.btnW * 3) + (~cfg_presets.gap * 2);
+    var gw = dsts.size * c, gh = srcs.size * c, frameW = lw + gw + 1;
+    var headW = (3 * 258) + 58 + 120 + 6 + 64 + 16 + presetW;
     var scr = Window.availableBounds;
-    var ww = (cw + 16).max(1400).min(scr.width - 40), wh = (ch + hh + 16).min(scr.height - 40);
-    var win, scroll, canvas, info, driftBtn, hover, drag, x;
+    var ww = (frameW.max(headW) + 56).min(scr.width - 40), wh = (ch + hh + 16).min(scr.height - 40);
+    var contentW = frameW.max(headW).min(ww - 56), right = 28 + contentW, ox = 28;
+    var win, page, scroll, canvas, info, driftBtn, hover, drag, x;
     var tag = { |p| (p[0] ++ "." ++ p[1]).asSymbol };
     var infoFor = { |a, b|
         var d = ~netDepth.(a[0], a[1], b[0], b[1]);
@@ -59,25 +75,32 @@
     win.acceptsMouseOver = true;
     ~matWin = win;
 
-    ~uiCap.(win, Rect(28, 12, 700, 14), "net · matrix · " ++ srcs.size ++ " sources × "
-        ++ dsts.size ++ " destinations · audio rate");
-    ~uiTitle.(win, Rect(28, 26, 300, 36), "Matrix");
-    info = ~uiText.(win, Rect(ww - 548, 32, 520, 16), status.value, 10.5, pal.ink2, false, \right);
-    ~uiRule.(win, Rect(0, 66, ww, 1)).resize_(2);
+    ~uiRule.(win, Rect(0, 52, ww, 1)).resize_(2);
+    ~uiRule.(win, Rect(0, hh - 1, ww, 1)).resize_(2);
+    scroll = ScrollView(win, Rect(0, hh, ww, wh - hh)).hasBorder_(false).background_(pal.paper).resize_(5);
+    canvas = UserView(scroll, Rect(0, 0, ox + cw + 28, ch)).background_(pal.paper);
+    // the page covers the header only: over the grid it would swallow the mouse
+    page = ~uiPage.(win.view, contentW, hh - 1, { |left|
+        ox = left;
+        canvas.resizeTo(ox + cw + 28, ch);
+        canvas.refresh;
+    });
+
+    ~uiTitle.(page, Rect(28, 12, 300, 36), "Matrix");
+    x = ~uiNav.(page, right, 18, [["deck", { ~openMixer }], ["machines", { ~openMachines }]]);
+    info = ~uiText.(page, Rect(x - 536, 22, 520, 16), status.value, nil, pal.grey, false, \right);
 
     x = 28;
-    ~uiBtn.(win, Rect(x, 78, 64, 26), "dice", { ~netDice.value }); x = x + 72;
-    ~uiBtn.(win, Rect(x, 78, 74, 26), "mutate", { ~netMutate.value }); x = x + 82;
-    ~uiBtn.(win, Rect(x, 78, 68, 26), "shake", { ~netShake.value }); x = x + 76;
-    ~uiBtn.(win, Rect(x, 78, 64, 26), "clear", { ~netClear.value }); x = x + 72;
-    driftBtn = ~uiBtn.(win, Rect(x, 78, 68, 26), "drift", { |b|
+    ~uiBtn.(page, Rect(x, 64, 64, 24), "dice", { ~netDice.value }); x = x + 70;
+    ~uiBtn.(page, Rect(x, 64, 74, 24), "mutate", { ~netMutate.value }); x = x + 80;
+    ~uiBtn.(page, Rect(x, 64, 68, 24), "shake", { ~netShake.value }); x = x + 74;
+    ~uiBtn.(page, Rect(x, 64, 64, 24), "clear", { ~netClear.value }); x = x + 70;
+    driftBtn = ~uiBtn.(page, Rect(x, 64, 68, 24), "drift", { |b|
         ~uiBtnSet.(b, ~netDrift.(b[\on].not));
-    }, ~netDriftTask.notNil); x = x + 76;
-    ~uiBtn.(win, Rect(x, 78, 104, 26), "dice bases", {
+    }, ~netDriftTask.notNil); x = x + 74;
+    ~uiBtn.(page, Rect(x, 64, 104, 24), "dice bases", {
         ~netLayers.value.do { |l| ~netDiceBase.(l, 0.35) };
-    }); x = x + 132;
-    ~uiBtn.(win, Rect(x, 78, 64, 26), "ungrund", { ~openMixer !? { |f| f.value } }); x = x + 72;
-    ~uiBtn.(win, Rect(x, 78, 92, 26), "machines", { ~openMachines.value });
+    });
 
     x = 28;
     [
@@ -86,77 +109,64 @@
         ["wander",  ControlSpec(0, 1),             ~cfg_net.wander,      { |v| ~netWander.(v, nil) }],
         ["wander Hz", ControlSpec(0.01, 400, \exp), ~cfg_net.wanderRate, { |v| ~netWander.(nil, v) }]
     ].do { |row|
-        ~uiRulerRow.(win, x, 112, 70, 120, row[0], row[1], row[2], row[3], ~netFmt);
-        x = x + 270;
+        ~uiRulerRow.(page, x, 96, 58, 120, row[0], row[1], row[2], row[3], ~netFmt);
+        x = x + 258;
     };
 
-    ~preset.bar(win, ww - 28 - ((~cfg_presets.btnW * 3) + (~cfg_presets.gap * 2)), 78, \matrix);
-    ~uiRule.(win, Rect(0, hh - 1, ww, 1)).resize_(2);
-
-    scroll = ScrollView(win, Rect(0, hh, ww, wh - hh)).hasBorder_(false).background_(pal.paper).resize_(5);
-    canvas = UserView(scroll, Rect(0, 0, cw, ch)).background_(pal.paper);
+    ~preset.bar(page, right - presetW, 64, \matrix);
 
     canvas.drawFunc_({ |u|
-        var f = ~uiMono.(7), fb = ~uiMono.(7, true), gw = dsts.size * c, gh = srcs.size * c;
-        var prevL;
+        var f = ~uiMono.(7), fb = ~uiMono.(7, true);
 
+        Pen.translate(ox, 0);
         hover !? { |h|
-            Pen.fillColor = pal.hi;
-            Pen.fillRect(Rect(0, lh + (h[0] * c), lw + gw, c));
-            Pen.fillRect(Rect(lw + (h[1] * c), 0, c, lh + gh));
+            var cy = lh + (h[0] * c) + (c / 2).floor + 0.5, cx = lw + (h[1] * c) + (c / 2).floor + 0.5;
+            Pen.strokeColor = pal.grey; Pen.width = 1;
+            Pen.line(0 @ cy, (lw + gw) @ cy);
+            Pen.line(cx @ 0, cx @ (lh + gh));
+            Pen.stroke;
         };
 
-        Pen.strokeColor = pal.paper2; Pen.width = 1;
-        (0, 4 .. dsts.size).do { |i| Pen.line((lw + (i * c) + 0.5)@lh, (lw + (i * c) + 0.5)@(lh + gh)) };
-        (0, 4 .. srcs.size).do { |i| Pen.line(lw@(lh + (i * c) + 0.5), (lw + gw)@(lh + (i * c) + 0.5)) };
-        Pen.stroke;
+        Pen.fillColor = pal.grey;
+        (0, 4 .. dsts.size).do { |i|
+            (0, 4 .. srcs.size).do { |j| Pen.addRect(Rect(lw + (i * c), lh + (j * c), 1, 1)) };
+        };
+        Pen.fill;
         Pen.strokeColor = pal.ink;
         Pen.strokeRect(Rect(lw + 0.5, lh + 0.5, gw, gh));
 
-        prevL = nil;
         srcs.do { |p, i|
             var y = lh + (i * c), on = hover.notNil and: { hover[0] == i };
-            if(p[0] != prevL) {
-                Pen.strokeColor = pal.ink; Pen.width = 1;
-                Pen.line(0@(y + 0.5), (lw + gw)@(y + 0.5)); Pen.stroke;
-                ~uiPenText.((~uiPhi[p[0]] ? "") ++ " " ++ p[0], 2, y + 1, ~uiMono.(8, true), pal.ink);
-                prevL = p[0];
-            };
-            ~uiPenText.(p[1].asString, lw - 4, y - 1, if(on) { fb } { f },
-                if(on) { pal.ink } { pal.ink2 }, \right);
+            ~uiPenText.(srcId[i], 0, y - 1, if(on) { fb } { f }, if(on) { pal.ink } { pal.grey });
         };
-        prevL = nil;
         dsts.do { |p, i|
             var xx = lw + (i * c), on = hover.notNil and: { hover[1] == i };
-            if(p[0] != prevL) {
-                Pen.strokeColor = pal.ink; Pen.width = 1;
-                Pen.line((xx + 0.5)@0, (xx + 0.5)@(lh + gh)); Pen.stroke;
-                prevL = p[0];
-            };
             Pen.use {
                 Pen.translate(xx, lh - 4);
                 Pen.rotate(-0.5pi);
-                Pen.stringAtPoint(p[1].asString, 0@0, if(on) { fb } { f }, if(on) { pal.ink } { pal.ink2 });
+                Pen.stringAtPoint(dstId[i], 0@0, if(on) { fb } { f }, if(on) { pal.ink } { pal.grey });
             };
         };
 
         ~netCells.do { |cell|
             var r = srcPos[tag.(cell[\src])], k = dstPos[tag.(cell[\dst])], d = cell[\depth];
-            var rect, col;
+            var side, rect;
             if(r.notNil and: { k.notNil }) {
-                rect = Rect(lw + (k * c) + 1.5, lh + (r * c) + 1.5, c - 2, c - 2);
-                col = pal.ink.copy.alpha_(0.3 + (d.abs.sqrt * 0.7));
+                side = ((c - 2) * (0.35 + (d.abs.sqrt * 0.65))).round.max(2);
+                rect = Rect(lw + (k * c) + ((c - side) / 2), lh + (r * c) + ((c - side) / 2), side, side);
                 if(d > 0) {
-                    Pen.fillColor = col; Pen.fillRect(rect);
+                    Pen.fillColor = pal.ink; Pen.fillRect(rect);
                 } {
-                    Pen.strokeColor = col; Pen.width = 1.2; Pen.strokeRect(rect);
+                    Pen.strokeColor = pal.ink; Pen.width = 1; Pen.strokeRect(rect.insetBy(0.5, 0.5));
                 };
             };
         };
     });
 
     canvas.mouseDownAction_({ |u, mx, my, mod, btn|
-        var h = rowAt.(mx, my), off = (btn == 1) or: { mod.isAlt }, a, b, d0;
+        var h, off = (btn == 1) or: { mod.isAlt }, a, b, d0;
+        mx = mx - ox;
+        h = rowAt.(mx, my);
         case
         { h[2] and: { h[3] } and: { mx >= lw } and: { my >= lh } } {
             a = srcs[h[0]]; b = dsts[h[1]];
@@ -187,8 +197,10 @@
     });
     canvas.mouseUpAction_({ drag = nil });
     canvas.mouseOverAction_({ |u, mx, my|
-        var r = rowAt.(mx, my);
-        var h = if(r[2] and: { r[3] } and: { mx >= lw } and: { my >= lh }) { r.keep(2) } { nil };
+        var r, h;
+        mx = mx - ox;
+        r = rowAt.(mx, my);
+        h = if(r[2] and: { r[3] } and: { mx >= lw } and: { my >= lh }) { r.keep(2) } { nil };
         if(h != hover) {
             hover = h;
             info.string_(if(h.isNil) { status.value } { infoFor.(srcs[h[0]], dsts[h[1]]) });
@@ -217,10 +229,11 @@
 ~netBuildMachines = {
     var cv = ~cfg_view, pal = ~uiPal, layers = ~netLayers.value, rowH = cv.rowH, colW = cv.colW;
     var maxN = layers.collect { |l| ~ungSpecOf.(l).params.size }.maxItem ? 1;
-    var top = 210, cw = 28 + (layers.size * colW), ch = top + (maxN * rowH) + 20;
+    var top = 210, contentW = ((layers.size - 1) * colW) + 264, right = 28 + contentW;
+    var cw = contentW + 56, ch = top + (maxN * rowH) + 20;
     var scr = Window.availableBounds;
     var ww = cw.min(scr.width - 40), wh = ch.min(scr.height - 40);
-    var win, scroll, view, rulers = ();
+    var win, scroll, view, page, rulers = ();
 
     ~macWin !? { |w| try { w.close } };
     win = Window("NET · machines", Rect(60, 60, ww, wh)).background_(pal.paper);
@@ -234,21 +247,23 @@
         view.resizeTo(ib.width.max(cw), ib.height.max(ch));
     });
 
-    ~uiTitle.(view, Rect(28, 26, 300, 36), "Machines");
     ~uiRule.(view, Rect(0, 66, cw, 1)).resize_(2);
+    page = ~uiPage.(view, contentW);
+    ~uiTitle.(page, Rect(28, 26, 300, 36), "Machines");
+    ~uiNav.(page, right, 32, [["deck", { ~openMixer }], ["matrix", { ~openMatrix }]]);
 
     layers.do { |l, li|
         var x0 = 28 + (li * colW), params = ~ungSpecOf.(l).params;
         rulers[l] = ();
-        if(li > 0) { ~uiRule.(view, Rect(x0 - 14, 67, 1, ch - 67)).resize_(4) };
-        ~uiText.(view, Rect(x0, 76, 30, 26), ~uiPhi[l] ? "", 18);
-        ~uiText.(view, Rect(x0 + 30, 78, 200, 22), l.asString, 14, pal.ink, true);
-        ~uiBtn.(view, Rect(x0, 110, 84, 24), "defaults", { ~netDefaults.(l) });
-        ~uiBtn.(view, Rect(x0 + 90, 110, 84, 24), "dice", { ~netDiceBase.(l, 1.0) });
-        ~uiBtn.(view, Rect(x0 + 180, 110, 84, 24), "nudge", { ~netDiceBase.(l, 0.2) });
-        ~preset.bar(view, x0, 140, l);
+        if(li > 0) { ~uiRule.(page, Rect(x0 - 14, 67, 1, ch - 67)).resize_(4) };
+        ~uiGlyph.(page, Rect(x0, 80, ~uiGlyphSize.x, ~uiGlyphSize.y), l);
+        ~uiText.(page, Rect(x0 + 24, 79, 200, 20), l.asString, ~uiType.label, pal.ink, true);
+        ~uiBtn.(page, Rect(x0, 110, 84, 24), "defaults", { ~netDefaults.(l) });
+        ~uiBtn.(page, Rect(x0 + 90, 110, 84, 24), "dice", { ~netDiceBase.(l, 1.0) });
+        ~uiBtn.(page, Rect(x0 + 180, 110, 84, 24), "nudge", { ~netDiceBase.(l, 0.2) });
+        ~preset.bar(page, x0, 140, l);
         params.do { |p, i|
-            rulers[l][p.key] = ~uiRulerRow.(view, x0, top + (i * rowH), 88, 118,
+            rulers[l][p.key] = ~uiRulerRow.(page, x0, top + (i * rowH), 88, 118,
                 p.key.asString, p.spec, ~netGet.(l, p.key),
                 { |v| ~setParam.(l, p.key, v) }, ~netFmt);
         };

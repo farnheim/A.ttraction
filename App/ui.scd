@@ -4,25 +4,101 @@
 
 (
 ~uiPal = (
-    paper:  Color.new255(241, 236, 226),
-    paper2: Color.new255(231, 224, 209),
-    ink:    Color.new255(27, 25, 21),
-    ink2:   Color.new255(91, 86, 77),
-    rule:   Color.new255(185, 176, 159),
-    hi:     Color.new255(221, 215, 201)
+    paper:  Color.new255(237, 240, 235),
+    ink:    Color.new255(38, 35, 36),
+    grey:   Color.new255(109, 108, 106)
 );
-~uiMono  = { |size = 11, bold = false| Font("Menlo", size, bold) };
-~uiSerif = { |size = 26| Font("Georgia", size) };
-// a machine's glyph: one block character per layer, read by every window
-~uiPhi = ( alpha: "█", delta: "▄", epsilon: "▓", zeta: "░", theta: "▒" );
+// type after splav.cc: text 14 · label 14 semibold · title 20 semibold, all × 10/14
+~uiType  = ( text: 10, label: 10, title: 14 );
+~uiMono  = { |size, bold = false| Font("IBM Plex Mono", size ? ~uiType.text, bold) };
+// a machine's glyph: a 30 × 36 pixel card cut into vertical bands, each solid
+// or a 1-px checker (lit where x + y is even) — drawn in device-sized pixels at
+// any scale, because a scaled checker smears into grey
+~uiGlyphs = (
+    alpha:   [[0, 30, \solid]],
+    delta:   [[0, 24, \solid], [24, 30, \dither]],
+    epsilon: [[0, 18, \solid], [18, 24, \dither], [24, 30, \solid]],
+    zeta:    [[0, 18, \solid], [18, 30, \dither]],
+    theta:   [[0, 24, \dither], [24, 30, \solid]]
+);
+~uiGlyphSize = 15 @ 18;
+~uiGlyph = { |parent, rect, layer|
+    UserView(parent, rect).background_(~uiPal.paper).drawFunc_({ |u|
+        var h = u.bounds.height.min(u.bounds.width * 6 / 5).asInteger, w = (h * 5 / 6).round.asInteger;
+        Pen.fillColor = ~uiPal.ink;
+        (~uiGlyphs[layer] ? []).do { |band|
+            var xa = (band[0] * w / 30).round.asInteger, xb = (band[1] * w / 30).round.asInteger;
+            if(band[2] == \solid) { Pen.addRect(Rect(xa, 0, xb - xa, h)) } {
+                h.do { |y| (xa .. xb - 1).do { |x| if((x + y).even) { Pen.addRect(Rect(x, y, 1, 1)) } } };
+            };
+        };
+        Pen.fill;
+    })
+};
 
-~uiText = { |parent, rect, string, size = 11, color, bold = false, align = \left|
+~uiText = { |parent, rect, string, size, color, bold = false, align = \left|
     StaticText(parent, rect).string_(string).font_(~uiMono.(size, bold))
         .stringColor_(color ? ~uiPal.ink).align_(align);
 };
-~uiCap   = { |parent, rect, string| ~uiText.(parent, rect, string.toUpper, 9, ~uiPal.ink2) };
+~uiCap   = { |parent, rect, string| ~uiText.(parent, rect, string.toUpper, ~uiType.label, ~uiPal.grey) };
+// the mark: an S under a bar, 175 × 272 units (Fill 1.svg)
+~uiLogo = [
+    [\m, 88.87, 236.15], [\c, 111.14, 236.15, 133.79, 231.54, 133.79, 213.49],
+    [\c, 133.79, 196.21, 94.24, 191.99, 64.29, 184.31], [\c, 38.56, 177.78, 5.92, 166.65, 5.92, 134.01],
+    [\c, 5.92, 91.39, 41.64, 73.72, 86.56, 73.72], [\c, 124.19, 73.72, 167.97, 89.08, 169.12, 133.62],
+    [\l, 125.34, 133.62], [\c, 122.66, 113.66, 106.91, 109.05, 85.03, 109.05],
+    [\c, 68.13, 109.05, 48.16, 113.28, 48.16, 127.1], [\c, 48.16, 142.84, 70.82, 143.99, 93.47, 148.98],
+    [\c, 128.03, 156.66, 174.88, 165.88, 174.88, 210.04], [\c, 174.88, 258.42, 130.72, 271.48, 88.87, 271.48],
+    [\c, 48.16, 271.48, -3.29, 253.81, 0.17, 205.81], [\l, 45.48, 205.81],
+    [\c, 45.48, 220.79, 54.69, 236.15, 88.87, 236.15],
+    [\m, 8.61, 36.1], [\l, 165.28, 36.1], [\l, 165.28, 0], [\l, 8.61, 0]
+];
+// the mark stands on the title's baseline, as tall as a machine's glyph.
+// Qt centres the line box (ascent 1.025 + descent 0.275 em) in the rect, so the
+// baseline sits 0.375 em below its middle (IBM Plex Mono metrics)
 ~uiTitle = { |parent, rect, string|
-    StaticText(parent, rect).string_(string).font_(~uiSerif.(26)).stringColor_(~uiPal.ink);
+    var size = ~uiType.title, markH = ~uiGlyphSize.y, k = markH / 272, w = (175 * k).ceil;
+    var base = (rect.height / 2) + (size * 0.375), gap = (size * 0.6).round;
+    UserView(parent, Rect(rect.left, rect.top, w + 1, rect.height)).background_(~uiPal.paper).drawFunc_({
+        Pen.translate(0, base - markH);
+        Pen.scale(k, k);
+        ~uiLogo.do { |op|
+            switch(op[0],
+                \m, { Pen.moveTo(op[1] @ op[2]) },
+                \l, { Pen.lineTo(op[1] @ op[2]) },
+                \c, { Pen.curveTo(op[5] @ op[6], op[1] @ op[2], op[3] @ op[4]) }
+            );
+        };
+        Pen.fillColor = ~uiPal.ink;
+        Pen.fill;
+    });
+    // Font knows only regular and bold; a style sheet reaches the SemiBold face
+    StaticText(parent, Rect(rect.left + w + gap, rect.top, rect.width - w - gap, rect.height))
+        .string_(string).stringColor_(~uiPal.ink)
+        .setProperty(\styleSheet, "font-family: 'IBM Plex Mono'; font-size: %px; font-weight: 600;".format(size));
+};
+~uiNav = { |parent, right, y, items|
+    var w = 90, gap = 8, x0 = right - (items.size * w) - ((items.size - 1) * gap);
+    items.do { |it, i|
+        ~uiBtn.(parent, Rect(x0 + (i * (w + gap)), y, w, 24), it[0], { it[1].value !? { |f| f.value } })
+            .at(\view).resize_(3);
+    };
+    x0
+};
+// a page's content is one column of contentW centred in its host, with a
+// margin on both sides; the header's left and right items sit on the column's
+// edges (margin, margin + contentW). The host re-centres it when it resizes;
+// height nil = the host's height, followed on resize
+~uiPage = { |host, contentW, height, onMove, margin = 28|
+    var pw = contentW + (margin * 2), page = CompositeView(host, Rect(0, 0, pw, height ? 1));
+    var center = {
+        var b = host.bounds, x = ((b.width - pw) / 2).max(0).round;
+        page.bounds = Rect(x, 0, pw, height ? b.height);
+        onMove.value(x + margin);
+    };
+    host.onResize_(center);
+    center.value;
+    page
 };
 ~uiRule  = { |parent, rect| UserView(parent, rect).background_(~uiPal.ink) };
 // fixed number of decimals (round(0.01).asString drops trailing zeros)
@@ -40,9 +116,9 @@
     b[\view] = uv;
     uv.drawFunc_({ |u|
         var w = u.bounds.width, h = u.bounds.height;
-        var font = ~uiMono.(11), str = b[\labels][if(b[\on]) { 1 } { 0 }];
+        var font = ~uiMono.value, str = b[\labels][if(b[\on]) { 1 } { 0 }];
         var inv  = b[\enabled] and: { b[\on] or: { b[\pressed] } };
-        var line = if(b[\enabled]) { ~uiPal.ink } { ~uiPal.rule };
+        var line = if(b[\enabled]) { ~uiPal.ink } { ~uiPal.grey };
         Pen.fillColor = if(inv) { ~uiPal.ink } { ~uiPal.paper };
         Pen.fillRect(Rect(0, 0, w, h));
         Pen.strokeColor = line; Pen.width = 1;
@@ -73,9 +149,9 @@
     p[\view] = uv;
     p[\parent] = parent;
     uv.drawFunc_({ |u|
-        var w = u.bounds.width, h = u.bounds.height, font = ~uiMono.(11);
+        var w = u.bounds.width, h = u.bounds.height, font = ~uiMono.value;
         var str = ((p[\items] ? [])[p[\index]] ? "—").asString;
-        var col = if(p[\enabled]) { ~uiPal.ink } { ~uiPal.rule };
+        var col = if(p[\enabled]) { ~uiPal.ink } { ~uiPal.grey };
         var cy = h / 2;
         Pen.strokeColor = col; Pen.width = 1;
         Pen.strokeRect(Rect(0.5, 0.5, w - 1, h - 1));
@@ -89,7 +165,7 @@
 };
 ~uiPopupOpen = { |p|
     var rect = p[\view].bounds, items = p[\items] ? [], n = items.size.max(1);
-    var rowH = 22, listH = (n * rowH) + 2, font = ~uiMono.(11);
+    var rowH = 22, listH = (n * rowH) + 2, font = ~uiMono.value;
     var host = if(p[\parent].isKindOf(Window)) { p[\parent].view } { p[\parent] };
     var top = rect.top + rect.height, scrim, list;
     if(p[\close].notNil) { p[\close].value };
@@ -109,11 +185,11 @@
             items.do { |it, i|
                 var y = 1 + (i * rowH), sel = (i == p[\index]), hov = (i == p[\hover]);
                 if(sel or: hov) {
-                    Pen.fillColor = if(sel) { ~uiPal.ink } { ~uiPal.hi };
+                    Pen.fillColor = if(sel) { ~uiPal.ink } { ~uiPal.grey };
                     Pen.fillRect(Rect(1, y, w - 2, rowH));
                 };
                 ~uiPenText.(it.asString, 9, y + ((rowH - it.asString.bounds(font).height) / 2),
-                    font, if(sel) { ~uiPal.paper } { ~uiPal.ink });
+                    font, if(sel or: hov) { ~uiPal.paper } { ~uiPal.ink });
             };
         });
         list.mouseMoveAction_({ |u, x, y|
@@ -161,16 +237,16 @@
     };
     uv.drawFunc_({ |u|
         var w = u.bounds.width, y = (u.bounds.height * 0.5).round, x = 4 + (r[\norm] * (w - 8));
-        var col = if(r[\enabled]) { ~uiPal.ink } { ~uiPal.rule };
+        var col = if(r[\enabled]) { ~uiPal.ink } { ~uiPal.grey };
         Pen.width = 1; Pen.strokeColor = col;
         Pen.line(4@y, (w - 4)@y); Pen.stroke;
-        Pen.strokeColor = ~uiPal.rule;
+        Pen.strokeColor = ~uiPal.grey;
         11.do { |i|
             var tx = 4 + (i * (w - 8) / 10);
             Pen.line(tx@(y - if(i % 5 == 0, 6, 3)), tx@y);
         };
         Pen.stroke;
-        Pen.strokeColor = col; Pen.width = 2.5;
+        Pen.strokeColor = col; Pen.width = 2;
         Pen.line(4@y, x@y); Pen.stroke;
         Pen.fillColor = col;
         Pen.moveTo((x - 4.5)@(y + 7)); Pen.lineTo(x@(y + 1)); Pen.lineTo((x + 4.5)@(y + 7));
@@ -183,9 +259,9 @@
 ~uiRulerRow = { |parent, x, y, labelW, rulerW, label, spec, v0, action, fmt|
     var r, txt;
     fmt = fmt ? { |v| ~uiFmt.(v, 3) };
-    if(labelW > 0) { ~uiText.(parent, Rect(x, y, labelW, 20), label, 10.5, ~uiPal.ink2) };
+    if(labelW > 0) { ~uiText.(parent, Rect(x, y, labelW, 20), label, nil, ~uiPal.grey) };
     r = ~uiRuler.(parent, Rect(x + labelW, y, rulerW, 20), spec, v0, action);
-    txt = ~uiText.(parent, Rect(x + labelW + rulerW + 6, y, 64, 20), fmt.(v0 ? spec.default), 10.5);
+    txt = ~uiText.(parent, Rect(x + labelW + rulerW + 6, y, 64, 20), fmt.(v0 ? spec.default));
     r[\valTxt] = txt; r[\fmt] = fmt;
     r;
 };

@@ -210,89 +210,89 @@ Ndef(\master).play(out: 0, numChannels: 2);
     var footY = tableY + (layers.size * rowH) + 6, presetY = footY + 44;
     var fxX = 1010, fxY = 84, tapeY = fxY + if(~cfg_effects.notNil) { 158 } { 0 };
     var masterY = tapeY + (~tapeGui !? { (~tapeGuiHeight ? 0) + 42 } ? 0);
-    var w = 1440, h = (presetY + 88).max(masterY + 78).max(440);
+    var right = fxX + 316, w = right + 28, h = (presetY + 88).max(masterY + 78).max(440);
     var fmt2 = { |v| ~uiFmt.(v, 2) };
     var fxModeItems = [
         "1 · 1 tap", "2 · 2 tap", "3 · 1+2 tap", "4 · 1+2+3 echo",
         "5 · 1 +rev", "6 · 2 +rev", "7 · 3 +rev", "8 · 1+2 +rev",
         "9 · 2+3 +rev", "10 · 1+3 +rev", "11 · all +rev", "12 · rev only"
     ];
-    var scr = Window.availableBounds, win, mkGlyph;
+    var scr = Window.availableBounds, win, page, mkGlyph;
 
     ~mixerWin !? { |x| try { x.close } };
     w = w.min(scr.width); h = h.min(scr.height);
-    win = Window("UNGRUND", Rect(scr.left + ((scr.width - w) / 2).max(0), scr.top + 40, w, h))
+    win = Window("NET · deck", Rect(scr.left + ((scr.width - w) / 2).max(0), scr.top + 40, w, h))
         .background_(pal.paper);
     ~mixerWin = win;
     ~mixerEz = (); ~mixerSoloBtn = (); ~mixerMuteBtn = (); ~mixerFx = ();
 
-    ~uiTitle.(win, Rect(28, 20, 300, 36), "Ungrund");
     ~uiRule.(win, Rect(0, 66, w, 1)).resize_(2);
-    ~uiRule.(win, Rect(fxX - 24, 67, 1, h - 67)).resize_(4);
+    page = ~uiPage.(win.view, right - 28);
+    ~uiTitle.(page, Rect(28, 20, 300, 36), "Deck");
+    ~uiNav.(page, right, 26, [["matrix", { ~openMatrix }], ["machines", { ~openMachines }]]);
+    ~uiRule.(page, Rect(fxX - 24, 67, 1, h - 67)).resize_(4);
 
-    ~uiCap.(win, Rect(28, tableY - 26, 100, 14), "machine");
-    ~uiCap.(win, Rect(172, tableY - 26, 100, 14), "vol");
-    ~uiCap.(win, Rect(372, tableY - 26, 100, 14), "rev");
-    ~uiCap.(win, Rect(572, tableY - 26, 100, 14), "dly");
-    ~uiCap.(win, Rect(776, tableY - 26, 44, 14), "mute");
-    ~uiCap.(win, Rect(832, tableY - 26, 44, 14), "solo");
+    ~uiCap.(page, Rect(28, tableY - 26, 100, 14), "machine");
+    ~uiCap.(page, Rect(172, tableY - 26, 100, 14), "vol");
+    ~uiCap.(page, Rect(372, tableY - 26, 100, 14), "rev");
+    ~uiCap.(page, Rect(572, tableY - 26, 100, 14), "dly");
+    ~uiCap.(page, Rect(776, tableY - 26, 44, 14), "mute");
+    ~uiCap.(page, Rect(832, tableY - 26, 44, 14), "solo");
     layers.do { |layer, i|
         var y = tableY + (i * rowH);
         var lv = ~cfg_mixer.levels[layer] ? ~mixerDefaultLevel;
-        ~uiText.(win, Rect(28, y, 22, 20), ~uiPhi[layer] ? "", 14);
-        ~uiText.(win, Rect(52, y, 110, 20), layer.asString, 12, pal.ink, true);
+        ~uiGlyph.(page, Rect(28, y + 1, ~uiGlyphSize.x, ~uiGlyphSize.y), layer);
+        ~uiText.(page, Rect(52, y, 110, 20), layer.asString, ~uiType.label, pal.ink, true);
         ~mixerEz[layer] = (
-            vol: ~uiRulerRow.(win, 172, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.vol), lv.vol,
+            vol: ~uiRulerRow.(page, 172, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.vol), lv.vol,
                 { |v| ~mixSet.(layer, \vol, v) }, fmt2),
-            sendRev: ~uiRulerRow.(win, 372, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.sendRev), lv.sendRev,
+            sendRev: ~uiRulerRow.(page, 372, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.sendRev), lv.sendRev,
                 { |v| ~mixSet.(layer, \sendRev, v) }, fmt2),
-            sendDly: ~uiRulerRow.(win, 572, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.sendDly), lv.sendDly,
+            sendDly: ~uiRulerRow.(page, 572, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.sendDly), lv.sendDly,
                 { |v| ~mixSet.(layer, \sendDly, v) }, fmt2)
         );
-        ~mixerMuteBtn[layer] = ~uiBtn.(win, Rect(776, y - 2, 44, 24), "⊘",
+        ~mixerMuteBtn[layer] = ~uiBtn.(page, Rect(776, y - 2, 44, 24), "⊘",
             { ~mixMuteToggle.(layer) }, ~mixMuted[layer] == true);
-        ~mixerSoloBtn[layer] = ~uiBtn.(win, Rect(832, y - 2, 44, 24), "◎",
+        ~mixerSoloBtn[layer] = ~uiBtn.(page, Rect(832, y - 2, 44, 24), "◎",
             { ~mixSoloToggle.(layer) }, ~mixSoloCur == layer);
     };
-    ~uiBtn.(win, Rect(28, footY, 90, 24), "matrix", { ~openMatrix !? { |f| f.value } });
-    ~uiBtn.(win, Rect(126, footY, 90, 24), "machines", { ~openMachines !? { |f| f.value } });
-    ~mixerMuteAllBtn = ~uiBtn.(win, Rect(776, footY, 44, 24), "⊘", { ~mixMuteAllToggle.value }, ~mixAllMuted.value);
-    ~mixerSoloAllBtn = ~uiBtn.(win, Rect(832, footY, 44, 24), "◎", { ~mixUnsolo.value }, ~mixSoloCur.notNil);
-    ~uiCap.(win, Rect(28, presetY, 260, 14), "mixer preset");
-    ~preset.bar(win, 28, presetY + 20, \mixer);
-    ~uiCap.(win, Rect(372, presetY, 380, 14), "project · machines + mixer + matrix");
-    ~preset.bar(win, 372, presetY + 20, \project);
+    ~mixerMuteAllBtn = ~uiBtn.(page, Rect(776, footY, 44, 24), "⊘", { ~mixMuteAllToggle.value }, ~mixAllMuted.value);
+    ~mixerSoloAllBtn = ~uiBtn.(page, Rect(832, footY, 44, 24), "◎", { ~mixUnsolo.value }, ~mixSoloCur.notNil);
+    ~uiCap.(page, Rect(28, presetY, 260, 14), "mixer preset");
+    ~preset.bar(page, 28, presetY + 20, \mixer);
+    ~uiCap.(page, Rect(372, presetY, 380, 14), "project · machines + mixer + matrix");
+    ~preset.bar(page, 372, presetY + 20, \project);
 
     mkGlyph = { |x, y, modeFn|
-        var uv = UserView(win, Rect(x, y, 76, 24)).background_(pal.paper);
+        var uv = UserView(page, Rect(x, y, 76, 24)).background_(pal.paper);
         uv.drawFunc_({ |u| ~uiDrawEcho.(u, modeFn.value) });
         uv
     };
     if(~cfg_effects.notNil) {
         var dlyGl, revGl;
-        ~uiCap.(win, Rect(fxX, fxY, 380, 14), "echo");
-        ~uiText.(win, Rect(fxX, fxY + 22, 40, 20), "echo", 10.5);
+        ~uiCap.(page, Rect(fxX, fxY, 380, 14), "echo");
+        ~uiText.(page, Rect(fxX, fxY + 22, 40, 20), "echo");
         dlyGl = mkGlyph.(fxX + 42, fxY + 20, { ~cfg_effects.dly_mode });
-        ~mixerFx[\dlyMode] = ~uiPopup.(win, Rect(fxX + 126, fxY + 20, 190, 24), fxModeItems,
+        ~mixerFx[\dlyMode] = ~uiPopup.(page, Rect(fxX + 126, fxY + 20, 190, 24), fxModeItems,
             (~cfg_effects.dly_mode - 1).clip(0, 11), { |idx|
                 Ndef(\space_echo_dly).set(\mode, idx + 1);
                 ~cfg_effects.dly_mode = idx + 1;
                 dlyGl.refresh;
             });
-        ~uiText.(win, Rect(fxX, fxY + 54, 40, 20), "rev", 10.5);
+        ~uiText.(page, Rect(fxX, fxY + 54, 40, 20), "rev");
         revGl = mkGlyph.(fxX + 42, fxY + 52, { ~cfg_effects.rev_mode });
-        ~mixerFx[\revMode] = ~uiPopup.(win, Rect(fxX + 126, fxY + 52, 190, 24), fxModeItems,
+        ~mixerFx[\revMode] = ~uiPopup.(page, Rect(fxX + 126, fxY + 52, 190, 24), fxModeItems,
             (~cfg_effects.rev_mode - 1).clip(0, 11), { |idx|
                 Ndef(\space_echo_rev).set(\mode, idx + 1);
                 ~cfg_effects.rev_mode = idx + 1;
                 revGl.refresh;
             });
-        ~mixerFx[\bass] = ~uiRulerRow.(win, fxX, fxY + 86, 42, 190, "bass",
+        ~mixerFx[\bass] = ~uiRulerRow.(page, fxX, fxY + 86, 42, 190, "bass",
             ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_bass), ~cfg_effects.rev_bass, { |v|
                 [\space_echo_rev, \space_echo_dly].do { |n| Ndef(n).set(\bass, v) };
                 ~cfg_effects.rev_bass = v; ~cfg_effects.dly_bass = v;
             }, fmt2);
-        ~mixerFx[\treble] = ~uiRulerRow.(win, fxX, fxY + 114, 42, 190, "treble",
+        ~mixerFx[\treble] = ~uiRulerRow.(page, fxX, fxY + 114, 42, 190, "treble",
             ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_treble), ~cfg_effects.rev_treble, { |v|
                 [\space_echo_rev, \space_echo_dly].do { |n| Ndef(n).set(\treble, v) };
                 ~cfg_effects.rev_treble = v; ~cfg_effects.dly_treble = v;
@@ -300,13 +300,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
         ~mixerFx[\dlyGlyph] = dlyGl; ~mixerFx[\revGlyph] = revGl;
     };
     ~tapeGui !? { |gui|
-        ~uiCap.(win, Rect(fxX, tapeY, 380, 14), "tape · master stage (§K.6)");
-        gui.(win, fxX, tapeY + 20);
+        ~uiCap.(page, Rect(fxX, tapeY, 380, 14), "tape");
+        gui.(page, fxX, tapeY + 20);
     };
-    ~uiCap.(win, Rect(fxX, masterY, 380, 14), "master");
-    ~mixerEz[\master] = ~uiRulerRow.(win, fxX, masterY + 22, 42, 130, "vol",
+    ~uiCap.(page, Rect(fxX, masterY, 380, 14), "master");
+    ~mixerEz[\master] = ~uiRulerRow.(page, fxX, masterY + 22, 42, 130, "vol",
         ControlSpec(0, 1, \lin, 0, ~cfg_mixer.master), ~cfg_mixer.master, { |v| ~masterSet.(v) }, fmt2);
-    ~mixerRecBtn = ~uiBtn.(win, Rect(fxX + 246, masterY + 20, 70, 24), ["● rec", "■ rec"],
+    ~mixerRecBtn = ~uiBtn.(page, Rect(fxX + 246, masterY + 20, 70, 24), ["● rec", "■ rec"],
         { ~mixRecToggle.value }, ~mixRecOn);
 
     win.onClose_({

@@ -186,8 +186,13 @@
     bar: { |self, parent, x, y, kind|
         var c = ~cfg_presets, fw = (c.btnW * 2) + c.gap, bx = x + fw + c.gap, y2 = y + c.btnH + c.gap;
         var b = (kind: kind.asSymbol), field;
-        field = TextField(parent, Rect(x, y, fw, c.btnH)).string_("").font_(~uiMono.(11))
-            .background_(~uiPal.paper).stringColor_(~uiPal.ink);
+        field = TextField(parent, Rect(x, y, fw, c.btnH)).string_("").font_(~uiMono.value);
+        // the OS style draws a rounded frame the palette cannot reach; a style
+        // sheet replaces it with the square one every drawn button has, and then
+        // owns the colours too (it paints white over .background_)
+        field.setProperty(\styleSheet, ("QLineEdit { border: 1px solid %; border-radius: 0; padding: 0 6px;"
+            + "background: %; color: %; selection-background-color: %; selection-color: %; }")
+            .format(*[~uiPal.ink, ~uiPal.paper, ~uiPal.ink, ~uiPal.ink, ~uiPal.paper].collect(_.hexString)));
         b[\field] = field;
         b[\save] = ~uiBtn.(parent, Rect(bx, y, c.btnW, c.btnH), "save", {
             ~preset.save(b[\kind], field.string);
