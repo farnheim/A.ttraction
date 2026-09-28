@@ -103,22 +103,9 @@ share = { |col, n|
     share.(col, n)
 };
 
-~linesFit = { |col, n|
-    var gaps;
-    col = sorted.(col);
-    gaps = gapsOf.(col, n);
-    col.do { |e, i|
-        var down = e[\len] > 0;
-        var own = gaps[i][if(down) { 1 } { 0 }], back = gaps[i][if(down) { 0 } { 1 }];
-        if(own == 0) { e[\len] = if(back > 0) { e[\len].neg } { 0 } };
-    };
-    share.(col, n)
-};
-
-// a larger lineRows makes every stored depth longer in rows: the live field is
-// fitted again, or its lines would run through their neighbours
-~netFit !? { |fit| fit.value; ~netChanged.value };
+// the Matrix draws its lines in lineRows
+~netChanged !? { |f| f.value };
 
 
-"lines — геометрия столбца (~linesRange, ~linesAccept, ~linesDeal, ~linesFit).".postln;
+"lines — геометрия столбца (~linesRange, ~linesAccept, ~linesDeal).".postln;
 )

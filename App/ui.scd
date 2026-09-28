@@ -6,7 +6,7 @@
 ~uiPal = (
     paper:  Color.new255(237, 240, 235),
     ink:    Color.new255(38, 35, 36),
-    grey:   Color.new255(109, 108, 106)
+    grey:   Color.new255(161, 161, 159)
 );
 // type after splav.cc: text 14 · label 14 semibold · title 20 semibold, all × 10/14
 ~uiType  = ( text: 10, label: 10, title: 14 );
@@ -215,10 +215,13 @@
 ~uiPopupItems  = { |p, items| p !? { p[\items] = items; p[\index] = p[\index].clip(0, items.size - 1); { p[\view].refresh }.defer } };
 ~uiPopupEnable = { |p, flag| p !? { p[\enabled] = flag; { p[\view].refresh }.defer } };
 
+// Pen.stringAtPoint places a string by its own ink box rounded to pixels: at
+// small sizes a monospaced column wobbles by the first letter. stringInRect
+// places it by the font's metrics, the same for every string
 ~uiPenText = { |str, x, y, font, color, anchor = \left|
     var bw = str.bounds(font).width;
     var ax = switch(anchor, \right, { x - bw }, \middle, { x - (bw / 2) }, { x });
-    Pen.stringAtPoint(str, ax@y, font, color);
+    Pen.stringInRect(str, Rect(ax, y, 4000, 4000), font, color, \topLeft);
 };
 
 ~uiRuler = { |parent, rect, spec, v0, action|

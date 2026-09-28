@@ -176,8 +176,6 @@
                 ~netDrift.((w[2] ? 0) > 0);
             }
         ),
-        // ONE fit over the whole list (~netLoad): through ~netPut one by one
-        // the result would depend on the order of the file
         cells: (
             get: { ~netTriples.value.collect { |t| t[0] ++ t[1] ++ [t[2]] } },
             set: { |cs| ~netLoad.(cs.collect { |c| [c.keep(2), c.copyRange(2, 3), c[4]] }) }

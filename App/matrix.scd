@@ -149,7 +149,7 @@
             Pen.use {
                 Pen.translate(xx, lh - 4);
                 Pen.rotate(-0.5pi);
-                Pen.stringAtPoint(dstId[i], 0@0, if(on) { fb } { f }, if(on) { pal.ink } { pal.grey });
+                ~uiPenText.(dstId[i], 0, 0, if(on) { fb } { f }, if(on) { pal.ink } { pal.grey });
             };
         };
 
@@ -226,18 +226,12 @@
         };
     });
 
-    // clicks, drags and hover are computed on the live rows: a window drawn
-    // over other rows would do something else than it shows
-    ~netViews[\matrix] = { |what|
+    ~netViews[\matrix] = {
         {
             if(win.isClosed.not) {
-                if((what == \rows) and: { (~netAllPorts.(\src) != srcs) or: { ~netAllPorts.(\dst) != dsts } }) {
-                    ~netBuildMatrix.value;
-                } {
-                    canvas.refresh;
-                    ~uiBtnSet.(driftBtn, ~netLive.drift > 0);
-                    if(hover.isNil and: { drag.isNil }) { info.string_(status.value) };
-                };
+                canvas.refresh;
+                ~uiBtnSet.(driftBtn, ~netLive.drift > 0);
+                if(hover.isNil and: { drag.isNil }) { info.string_(status.value) };
             };
         }.defer
     };

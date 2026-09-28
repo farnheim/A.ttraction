@@ -97,19 +97,15 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     ~netCells.values.select { |c| ~netTag.(c[side]) == tag }
 };
 
-// `what` \rows: the rows or columns themselves may have changed
-~netChanged = { |what| ~netViews.do { |f| f.value(what) } };
+~netChanged = { ~netViews.do { |f| f.value } };
 
 ~netClear = { |notify = true|
     ~netCells.values.do { |c| ~netWrite.(c[\src], c[\dst], 0) };
     if(notify) { ~netChanged.value };
 };
 
-// after any layer (re)load: a bus may have moved, and a cell holds indices;
-// the rows may have moved too, so the geometry is fitted first
+// after any layer (re)load: a bus may have moved, and a cell holds indices
 ~netRewire = {
-    ~netFit.value;
-    ~netChanged.(\rows);
     if(s.serverRunning) {
         ~netGroup !? { |g| if(g.isPlaying) { g.free } };
         ~netGroup = nil;
@@ -127,39 +123,16 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 };
 
 ~netColumns = { |frame, triples, fixed|
-    var lr = ~cfg_lines.lineRows, order = List.new, groups = IdentityDictionary.new, outside = List.new;
+    var lr = ~cfg_lines.lineRows, order = List.new, groups = IdentityDictionary.new;
     triples.do { |t|
         var r = frame[\rows][~netTag.(t[0])], k = ~netTag.(t[1]);
         if(r.notNil and: { frame[\cols].includes(k) }) {
             if(groups[k].isNil) { groups[k] = List.new; order.add(k) };
-            groups[k].add((row: r, len: t[2] * lr, depth0: t[2], fixed: fixed, src: t[0], dst: t[1]));
-        } { outside.add(t) };
+            groups[k].add((row: r, len: t[2] * lr, fixed: fixed, src: t[0], dst: t[1]));
+        };
     };
     groups.do { |g| g.sort { |x, y| x[\row] < y[\row] } };
-    [order, groups, outside]
-};
-
-// an untouched line keeps its depth to the last bit, so a valid matrix passes
-// a fit — and a preset round-trip — unchanged
-~netDepthOf = { |e|
-    if(e[\len] == (e[\depth0] * ~cfg_lines.lineRows)) { e[\depth0] } { e[\len] / ~cfg_lines.lineRows }
-};
-
-~netFitted = { |triples|
-    var f = ~netFrame.value, cg = ~netColumns.(f, triples, false), out = cg[2].copy;
-    cg[1].do { |col|
-        ~linesFit.(col.asArray, f[\n]).do { |e| out.add([e[\src], e[\dst], ~netDepthOf.(e)]) };
-    };
-    out
-};
-
-~netFit = {
-    var changed = 0;
-    ~netFitted.(~netTriples.value).do { |t|
-        var c = ~netCells[~netCellKey.(t[0], t[1])];
-        if(c.notNil and: { c[\depth] != t[2] }) { changed = changed + 1; ~netWrite.(t[0], t[1], t[2]) };
-    };
-    changed
+    [order, groups]
 };
 
 ~netPlan = { |cands, lenFn, skip|
@@ -208,17 +181,11 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     ~netCells[~netCellKey.([sl, sk], [dl, dk])] !? { |c| c[\depth] } ? 0
 };
 
-// what a hand-written or merged file may hold beyond what the store does: the
-// same cell twice (the last one counts) and depths too short to exist
+// straight to the store, not through the hand: a preset is the state it
+// records, and ~netPut would clip each cell against the ones read before it
 ~netLoad = { |triples|
-    var last = IdentityDictionary.new, order = List.new;
-    triples.do { |t|
-        var src = ~netPort.(*t[0]), dst = ~netPort.(*t[1]), key = ~netCellKey.(src, dst);
-        if(last[key].isNil) { order.add(key) };
-        last[key] = [src, dst, t[2].clip(-1, 1)];
-    };
     ~netClear.(false);
-    ~netApply.(~netFitted.(order.collect { |k| last[k] }.select { |t| t[2].abs >= ~cfg_net.minDepth }));
+    ~netApply.(triples.collect { |t| [~netPort.(*t[0]), ~netPort.(*t[1]), t[2]] });
 };
 
 
