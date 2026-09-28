@@ -1,6 +1,7 @@
 // App/mixer.scd — MIXER: per-machine vol + two fx sends, one aggregator per
 // bus, master (LeakDC + Limiter), solo/mute, recorder, mixer window (~openMixer).
-// The output stage only: nothing here touches the field.
+// The output stage only: nothing here touches the field. The Deck also hosts
+// the fingerprint block (fingerprint.scd), which only sets the law of dice.
 
 
 // ===== CONFIG — edit here ============================================
@@ -26,6 +27,11 @@
 
 // master-sum recorder: file format and dir (relative to project root)
 ~cfg_recorder = ( header: "wav", sample: "int24", dir: "recordings" );
+
+// the fingerprint canvas of the deck: a cell holds one whole glyph card (5:6,
+// so a line meets the glyph edge to edge); line width and the gap of a double
+// line in px
+~cfg_fpView = ( cell: 18 @ 22, line: 2, gap: 3 );
 
 
 // ===== LOGIC — routers + master + GUI ================================
@@ -203,14 +209,79 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
 // ===== GUI — Ungrund window (ui kit) ================================
 ~mixerEz = ~mixerEz ? (); ~mixerSoloBtn = ~mixerSoloBtn ? (); ~mixerMuteBtn = ~mixerMuteBtn ? ();
-~mixerFx = ~mixerFx ? ();
+~mixerFx = ~mixerFx ? (); ~mixerFp = ~mixerFp ? ();
+
+// the fingerprint: its field on a canvas of cells, the three knobs of the
+// next generation, generate, the switch of the law, a status line
+~mixerFpHeight = { (~cfg_fp.rows * ~cfg_fpView.cell.y) + 20 };
+// the model stands in the middle of the canvas, whatever corner it grew in
+// and whatever field it was drawn on (a preset keeps its own text)
+~mixerFpCentre = { |cells, rows, cols|
+    var r0 = inf, r1 = -inf, c0 = inf, c1 = -inf;
+    cells.do { |row, r| row.do { |sym, c|
+        if(sym != " ") { r0 = r0.min(r); r1 = r1.max(r); c0 = c0.min(c); c1 = c1.max(c) };
+    } };
+    if(r1 < 0) { [0, 0] } {
+        [((rows - (r1 - r0 + 1)) div: 2) - r0, ((cols - (c1 - c0 + 1)) div: 2) - c0]
+    }
+};
+~mixerFpStatus = {
+    ~fpCurrent !? { |fp|
+        var c = fp[\counts];
+        "% strands · % nodes · % links · σ % · seed %".format(c[\strands], c[\nodes], c[\edges], ~uiFmt.(c[\sigma], 2), fp[\seed])
+    } ? "no fingerprint — generate one"
+};
+~mixerFpBuild = { |page, x, y|
+    var cw = ~cfg_fpView.cell.x, ch = ~cfg_fpView.cell.y, cols = ~cfg_fp.cols, rows = ~cfg_fp.rows;
+    var cx = x + (cols * cw) + 28, fmt2 = { |v| ~uiFmt.(v, 2) }, wid = ();
+    ~uiCap.(page, Rect(x, y, 400, 14), "fingerprint · the law of dice");
+    wid[\canvas] = UserView(page, Rect(x, y + 20, cols * cw, rows * ch)).background_(~uiPal.paper).drawFunc_({ |u|
+        var live = ~netLayers.value;
+        Pen.strokeColor = ~uiPal.grey; Pen.width = 1;
+        Pen.strokeRect(Rect(0.5, 0.5, u.bounds.width - 1, u.bounds.height - 1));
+        ~fpCurrent !? { |fp|
+            var dim = if(~fpLive[\on] == true) { ~uiPal.ink } { ~uiPal.grey };
+            var cells = fp[\text].collect { |row| ~fpCellsOf.(row) }, off = ~mixerFpCentre.(cells, rows, cols);
+            cells.do { |row, r|
+                row.do { |sym, c|
+                    var l = ~fpLayerOf[sym], x = (c + off[1]) * cw, y = (r + off[0]) * ch;
+                    if(l.notNil) {
+                        ~uiGlyphPen.(x, y, ch, l, if(live.includes(l)) { ~uiPal.ink } { ~uiPal.grey });
+                    } { ~uiBoxPen.(x, y, cw, ch, sym, dim, ~cfg_fpView.line, ~cfg_fpView.gap) };
+                };
+            };
+        };
+    });
+    [\complexity, \links, \symmetry].do { |k, i|
+        wid[k] = ~uiRulerRow.(page, cx, y + 20 + (i * 28), 90, 190, k.asString, ControlSpec(0, 1), ~fpLive[k],
+            { |v| ~fpLive[k] = v }, fmt2);
+    };
+    wid[\generate] = ~uiBtn.(page, Rect(cx, y + 116, 84, 24), "generate", { ~fpGenerate.(nil, nil, nil, Date.seed) });
+    wid[\dice] = ~uiBtn.(page, Rect(cx + 90, y + 116, 84, 24), "→ dice", { ~fpSet.((~fpLive[\on] == true).not) },
+        ~fpLive[\on] == true);
+    wid[\dice][\enabled] = ~fpCurrent.notNil;
+    wid[\status] = ~uiText.(page, Rect(cx, y + 152, 560, 20), ~mixerFpStatus.value, nil, ~uiPal.grey);
+    ~mixerFp = wid;
+    ~fpViews[\deck] = {
+        {
+            if(wid[\canvas].isClosed.not) {
+                wid[\canvas].refresh;
+                wid[\status].string_(~mixerFpStatus.value);
+                ~uiBtnSet.(wid[\dice], ~fpLive[\on] == true);
+                ~uiBtnEnable.(wid[\dice], ~fpCurrent.notNil);
+                [\complexity, \links, \symmetry].do { |k| ~uiRulerSet.(wid[k], ~fpLive[k]) };
+            };
+        }.defer
+    };
+};
 
 ~mixerBuild = {
     var pal = ~uiPal, layers = ~mixerLayers, rowH = 28, tableY = 110;
-    var footY = tableY + (layers.size * rowH) + 6, presetY = footY + 44;
+    var footY = tableY + (layers.size * rowH) + 6, presetY = footY + 44, fpY = presetY + 88;
     var fxX = 1010, fxY = 84, tapeY = fxY + if(~cfg_effects.notNil) { 158 } { 0 };
     var masterY = tapeY + (~tapeGui !? { (~tapeGuiHeight ? 0) + 42 } ? 0);
-    var right = fxX + 316, w = right + 28, h = (presetY + 88).max(masterY + 78).max(440);
+    var leftH = if(~fpLive.notNil) { fpY + ~mixerFpHeight.value + 28 } { presetY + 88 };
+    var right = fxX + 316, w = right + 28, h = leftH.max(masterY + 78).max(440);
     var fmt2 = { |v| ~uiFmt.(v, 2) };
     var fxModeItems = [
         "1 · 1 tap", "2 · 2 tap", "3 · 1+2 tap", "4 · 1+2+3 echo",
@@ -262,6 +333,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~preset.bar(page, 28, presetY + 20, \mixer);
     ~uiCap.(page, Rect(372, presetY, 380, 14), "project · machines + mixer + matrix");
     ~preset.bar(page, 372, presetY + 20, \project);
+    if(~fpLive.notNil) { ~mixerFpBuild.(page, 28, fpY) };
 
     mkGlyph = { |x, y, modeFn|
         var uv = UserView(page, Rect(x, y, 76, 24)).background_(pal.paper);
@@ -314,6 +386,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
             ~mixerWin = nil; ~mixerEz = (); ~mixerSoloBtn = (); ~mixerMuteBtn = ();
             ~mixerRecBtn = nil; ~mixerMuteAllBtn = nil; ~mixerSoloAllBtn = nil; ~mixerFx = ();
             ~tapeWid = ();
+            ~mixerFp = (); ~fpViews !? { |v| v.removeAt(\deck) };
         };
     });
     { if(win.isClosed.not) { win.front } }.defer(0.3);

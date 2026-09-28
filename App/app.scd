@@ -43,6 +43,7 @@ s.options.maxNodes = 2 ** 14;
     ~tapeStage = nil; ~tapeGui = nil; ~mixerRebuildMaster = nil;
     ~netGroup = nil;
     ~netLive = nil;
+    ~fpCurrent = nil; ~fpLive = nil; ~fpViews = ();
     ~ungSpecs = ();
     s.freeAll;
     if(verbose) { "NET — очистка выполнена.".postln };
@@ -54,6 +55,7 @@ s.waitForBoot({
     ~appCleanup.value(false);
     (~appDir +/+ "lib.scd").load;
     (~appDir +/+ "lines.scd").load;
+    (~appDir +/+ "fingerprint.scd").load;
     (~appDir +/+ "cells.scd").load;
     (~appDir +/+ "ui.scd").load;
     (~appDir +/+ "presets.scd").load;

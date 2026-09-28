@@ -95,11 +95,12 @@ share = { |col, n|
     }
 };
 
-// the rooms are taken before any new line exists, so the deal is order-free
+// the rooms are taken before any new line exists, so the deal is order-free;
+// lenFn gets the entry too, for whatever payload it carries
 ~linesDeal = { |col, n, lenFn|
     var fresh = col.reject { |e| e[\fixed] };
     var rooms = fresh.collect { |e| roomOf.(col, e[\row], n) };
-    fresh.do { |e, i| e[\len] = lenFn.(rooms[i][0], rooms[i][1]) };
+    fresh.do { |e, i| e[\len] = lenFn.(rooms[i][0], rooms[i][1], e) };
     share.(col, n)
 };
 

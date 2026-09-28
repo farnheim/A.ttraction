@@ -8,8 +8,8 @@
 ~cfg_presets = (
     root:    ((~appDir ? (thisProcess.nowExecutingPath !? (_.dirname))) ? "") +/+ "presets",
     kinds:   (
-        project: [\layers, \mixer, \fx, \tape, \wander, \cells],
-        mixer:   [\mixer, \fx, \tape],
+        project: [\layers, \mixer, \fx, \tape, \fingerprint, \wander, \cells],
+        mixer:   [\mixer, \fx, \tape, \fingerprint],
         matrix:  [\wander, \cells]
     ),
     machine: [\layers],
@@ -168,6 +168,12 @@
                     (~tapeKeys ? []).do { |k| t[k] !? { |v| ~tapeSet.(k, v) } };
                 };
             }
+        ),
+        // the structure itself, not its seed: an edit of ~cfg_fp must not
+        // silently redraw a saved fingerprint
+        fingerprint: (
+            get: { ~fpLive !? { |live| (on: live[\on] == true, fp: ~fpCurrent) } },
+            set: { |f| ~fpLoad !? { |load| load.(f[\fp], f[\on]) } }
         ),
         wander: (
             get: { [~netLive.wander, ~netLive.wanderRate, ~netLive.drift] },

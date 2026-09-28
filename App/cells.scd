@@ -149,13 +149,14 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     plan
 };
 
-~netDealRandom = { |depth|
+// capOf: entry -> the share of `depth` its pair may reach (nil = all of it)
+~netDealRandom = { |depth, capOf|
     var cap = (depth ? ~cfg_net.diceDepth).abs.min(1) * ~cfg_lines.lineRows;
     var least = ~cfg_net.minDepth * ~cfg_lines.lineRows;
-    { |up, down|
+    { |up, down, e|
         var sg = case { (up > least) and: { down > least } } { [-1, 1].choose }
             { down > least } { 1 } { up > least } { -1 } { 0 };
-        sg * cap.min(if(sg > 0) { down } { up }) * (1.0 - 1.0.rand).squared
+        sg * (cap * (capOf !? { |f| f.(e) } ? 1)).min(if(sg > 0) { down } { up }) * (1.0 - 1.0.rand).squared
     }
 };
 
@@ -190,14 +191,68 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 
 
 // ----- chance ---------------------------------------------------------
+// the law of chance is the fingerprint's (fingerprint.scd) when it is on; with
+// no law every path below is the plain one, draw for draw, so a seed thrown
+// before the fingerprint existed throws the same matrix
+~netLaw = { ~fpLaw !? (_.value) };
+
+// the ports grouped by layer, one block per pair of layers the law lets talk
+~netBlocks = { |srcs, dsts, law|
+    var group = { |ports|
+        var d = IdentityDictionary.new, order = List.new;
+        ports.do { |p| if(d[p[0]].isNil) { d[p[0]] = List.new; order.add(p[0]) }; d[p[0]].add(p) };
+        order.collect { |l| [l, d[l]] }
+    };
+    var out = List.new;
+    group.(srcs).do { |ga| group.(dsts).do { |gb|
+        var w = (law[\W][ga[0]] !? { |r| r[gb[0]] }) ? 0;
+        if(w > 0) { out.add([ga[1], gb[1], w]) };
+    } };
+    out
+};
+
+// under a law the expected count stays density · |srcs| · |dsts|, shared out
+// by weight — not by how many ports a layer has
+~netCandidates = { |srcs, dsts, density, law|
+    var cands = List.new, blocks, sum, n;
+    if(law.isNil) {
+        srcs.do { |a| dsts.do { |b| if(density.coin) { cands.add([a, b]) } } };
+    } {
+        blocks = ~netBlocks.(srcs, dsts, law);
+        sum = blocks.sum { |x| x[2] };
+        n = density * srcs.size * dsts.size;
+        blocks.do { |x|
+            var p = (n * x[2] / sum / (x[0].size * x[1].size)).min(1);
+            x[0].do { |a| x[1].do { |b| if(p.coin) { cands.add([a, b]) } } };
+        };
+    };
+    cands
+};
+
+~netPickPair = { |srcs, dsts, blocks|
+    var x;
+    case
+    { blocks.isNil } { [srcs.choose, dsts.choose] }
+    { blocks.isEmpty } { nil }
+    { x = blocks[blocks.collect(_[2]).normalizeSum.windex]; [x[0].choose, x[1].choose] }
+};
+
+// a pair the law says nothing of keeps the whole depth: only shake meets one,
+// a cell the hand or a preset put there
+~netCapOf = { |law|
+    law !? { |w| { |e|
+        var a = e[\src][0], b = e[\dst][0];
+        if(((w[\n][a] !? { |r| r[b] }) ? 0) > 0) { w[\M][a][b] } { 1 }
+    } }
+};
+
 ~netDice = { |density, depth, clear = true|
-    var srcs = ~netAllPorts.(\src), dsts = ~netAllPorts.(\dst), cands = List.new;
+    var srcs = ~netAllPorts.(\src), dsts = ~netAllPorts.(\dst), law = ~netLaw.value;
     density = density ? ~cfg_net.diceDensity;
     if(clear) { ~netClear.(false) };
-    srcs.do { |a| dsts.do { |b| if(density.coin) { cands.add([a, b]) } } };
-    ~netApply.(~netPlan.(cands, ~netDealRandom.(depth)));
+    ~netApply.(~netPlan.(~netCandidates.(srcs, dsts, density, law), ~netDealRandom.(depth, ~netCapOf.(law))));
     ~netChanged.value;
-    ("net · dice · " ++ ~netCells.size ++ " cells").postln;
+    ("net · dice · " ++ ~netCells.size ++ " cells" ++ if(law.notNil) { " · fingerprint" } { "" }).postln;
 };
 
 ~netClearLine = { |side, port, notify = true|
@@ -205,13 +260,14 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     if(notify) { ~netChanged.value };
 };
 ~netDiceLine = { |side, port, density, depth|
-    var other = if(side == \src) { \dst } { \src };
+    var others = ~netAllPorts.(if(side == \src) { \dst } { \src }), law = ~netLaw.value;
     density = (density ? ~cfg_net.diceDensity) * 4;
     ~netClearLine.(side, port, false);
     ~netApply.(~netPlan.(
-        ~netAllPorts.(other).select { density.coin }
-            .collect { |q| if(side == \src) { [port, q] } { [q, port] } },
-        ~netDealRandom.(depth)));
+        if(side == \src) { ~netCandidates.([port], others, density, law) } {
+            ~netCandidates.(others, [port], density, law)
+        },
+        ~netDealRandom.(depth, ~netCapOf.(law))));
     ~netChanged.value;
 };
 
@@ -219,22 +275,27 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 // or the lines of its column would run through it
 ~netShake = { |depth|
     var cells = ~netCells.values.asArray.reject { |c| c[\src] == c[\dst] };
-    ~netApply.(~netPlan.(cells.collect { |c| [c[\src], c[\dst]] }, ~netDealRandom.(depth), IdentitySet.newFrom(cells)));
+    ~netApply.(~netPlan.(cells.collect { |c| [c[\src], c[\dst]] },
+        ~netDealRandom.(depth, ~netCapOf.(~netLaw.value)), IdentitySet.newFrom(cells)));
     ~netChanged.value;
 };
 ~netMutate = { |n, depth|
     var cells = ~netCells.values.asArray, srcs = ~netAllPorts.(\src), dsts = ~netAllPorts.(\dst);
-    var made = 0, tries = 0, plan;
+    var law = ~netLaw.value, blocks = law !? { |w| ~netBlocks.(srcs, dsts, w) }, made = 0, tries = 0, plan;
     n = n ? (cells.size * 0.1).ceil.asInteger.max(1);
-    cells.scramble.keep(n.min(cells.size)).do { |c| ~netWrite.(c[\src], c[\dst], 0) };
-    while { (made < n) and: { tries < 20 } } {
-        plan = ~netPlan.(Array.fill(n - made, { [srcs.choose, dsts.choose] }), ~netDealRandom.(depth))
-            .select { |t| t[2].abs >= ~cfg_net.minDepth };
-        ~netApply.(plan);
-        made = made + plan.size;
-        tries = tries + 1;
+    // a law that lets no pair talk could only remove: the matrix would shrink unseen
+    if(blocks.isNil or: { blocks.notEmpty }) {
+        cells.scramble.keep(n.min(cells.size)).do { |c| ~netWrite.(c[\src], c[\dst], 0) };
+        while { (made < n) and: { tries < 20 } } {
+            plan = ~netPlan.(Array.fill(n - made, { ~netPickPair.(srcs, dsts, blocks) }).reject(_.isNil),
+                ~netDealRandom.(depth, ~netCapOf.(law)))
+                .select { |t| t[2].abs >= ~cfg_net.minDepth };
+            ~netApply.(plan);
+            made = made + plan.size;
+            tries = tries + 1;
+        };
+        ~netChanged.value;
     };
-    ~netChanged.value;
 };
 
 

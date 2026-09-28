@@ -22,18 +22,71 @@
     theta:   [[0, 24, \dither], [24, 30, \solid]]
 );
 ~uiGlyphSize = 15 @ 18;
+~uiGlyphPen = { |x0, y0, h, layer, color|
+    var w = (h * 5 / 6).round.asInteger;
+    Pen.fillColor = color ? ~uiPal.ink;
+    (~uiGlyphs[layer] ? []).do { |band|
+        var xa = (band[0] * w / 30).round.asInteger, xb = (band[1] * w / 30).round.asInteger;
+        if(band[2] == \solid) { Pen.addRect(Rect(x0 + xa, y0, xb - xa, h)) } {
+            h.do { |y| (xa .. xb - 1).do { |x| if((x + y).even) { Pen.addRect(Rect(x0 + x, y0 + y, 1, 1)) } } };
+        };
+    };
+    Pen.fill;
+};
 ~uiGlyph = { |parent, rect, layer|
     UserView(parent, rect).background_(~uiPal.paper).drawFunc_({ |u|
-        var h = u.bounds.height.min(u.bounds.width * 6 / 5).asInteger, w = (h * 5 / 6).round.asInteger;
-        Pen.fillColor = ~uiPal.ink;
-        (~uiGlyphs[layer] ? []).do { |band|
-            var xa = (band[0] * w / 30).round.asInteger, xb = (band[1] * w / 30).round.asInteger;
-            if(band[2] == \solid) { Pen.addRect(Rect(xa, 0, xb - xa, h)) } {
-                h.do { |y| (xa .. xb - 1).do { |x| if((x + y).even) { Pen.addRect(Rect(x, y, 1, 1)) } } };
+        ~uiGlyphPen.(0, 0, u.bounds.height.min(u.bounds.width * 6 / 5).asInteger, layer)
+    })
+};
+
+// a box-drawing character as four arms [up, down, left, right], each 0, single
+// or double — drawn, not typeset: IBM Plex Mono is not sure to carry them
+~uiBoxArms = Dictionary.newFrom([
+    "│", [1, 1, 0, 0], "─", [0, 0, 1, 1], "┌", [0, 1, 0, 1], "┐", [0, 1, 1, 0], "└", [1, 0, 0, 1], "┘", [1, 0, 1, 0],
+    "║", [2, 2, 0, 0], "═", [0, 0, 2, 2], "╔", [0, 2, 0, 2], "╗", [0, 2, 2, 0], "╚", [2, 0, 0, 2], "╝", [2, 0, 2, 0],
+    "╒", [0, 1, 0, 2], "╓", [0, 2, 0, 1], "╕", [0, 1, 2, 0], "╖", [0, 2, 1, 0],
+    "╘", [1, 0, 0, 2], "╙", [2, 0, 0, 1], "╛", [1, 0, 2, 0], "╜", [2, 0, 1, 0],
+    "┼", [1, 1, 1, 1], "╬", [2, 2, 2, 2], "╪", [1, 1, 2, 2], "╫", [2, 2, 1, 1]
+]);
+// filled bands, not strokes: a stroke of width 2 straddles the pixel grid.
+// In a corner each line of a double arm stops on the edge of the matching
+// line of the other arm (outer on outer, inner on inner), so ╔ closes instead
+// of crossing itself; straight arms and crosses run through the centre
+~uiBoxPen = { |x0, y0, w, h, sym, color, sw = 2, gap = 3|
+    var arms = ~uiBoxArms[sym], cx = w div: 2, cy = h div: 2, corner;
+    var bands = { |v, c|
+        var a = c - ((if(v == 2) { (2 * sw) + gap } { sw }) div: 2);
+        if(v == 2) { [[a, a + sw], [a + sw + gap, a + (2 * sw) + gap]] } { [[a, a + sw]] }
+    };
+    arms !? {
+        corner = (arms.count { |v| v > 0 } == 2) and: { (arms[0] + arms[1]) > 0 } and: { (arms[2] + arms[3]) > 0 };
+        Pen.fillColor = color ? ~uiPal.ink;
+        arms.do { |v, i|
+            var vert = i < 2, sa = if(i.even) { -1 } { 1 }, size = if(vert) { h } { w };
+            var along = if(vert) { cy } { cx }, across, p, sp, perp;
+            if(v > 0) {
+                across = bands.(v, if(vert) { cx } { cy });
+                if(corner) {
+                    p = if(vert) { if(arms[2] > 0) { 2 } { 3 } } { if(arms[0] > 0) { 0 } { 1 } };
+                    sp = if(p.even) { -1 } { 1 };
+                    perp = bands.(arms[p], along);
+                };
+                across.do { |ab, k|
+                    var inner, line, start, lo, hi;
+                    start = if(corner) {
+                        inner = (across.size == 2) and: { (k == 1) == (sp > 0) };
+                        line = if((sa > 0) == inner) { perp.last } { perp.first };
+                        if(sa > 0) { line[0] } { line[1] }
+                    } { along };
+                    lo = if(sa > 0) { start } { 0 };
+                    hi = if(sa > 0) { size } { start };
+                    if(vert) { Pen.addRect(Rect(x0 + ab[0], y0 + lo, sw, hi - lo)) }
+                        { Pen.addRect(Rect(x0 + lo, y0 + ab[0], hi - lo, sw)) };
+                };
             };
         };
         Pen.fill;
-    })
+    };
 };
 
 ~uiText = { |parent, rect, string, size, color, bold = false, align = \left|
