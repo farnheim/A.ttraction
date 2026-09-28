@@ -170,15 +170,17 @@
             }
         ),
         wander: (
-            get: { [~cfg_net.wander, ~cfg_net.wanderRate] },
-            set: { |w| ~netWander.(w[0], w[1]) }
-        ),
-        cells: (
-            get: { ~netCells.values.asArray.collect { |c| c[\src] ++ c[\dst] ++ [c[\depth]] } },
-            set: { |cs|
-                ~netClear.(false);
-                cs.do { |c| ~netPut.(c[0], c[1], c[2], c[3], c[4]) };
+            get: { [~netLive.wander, ~netLive.wanderRate, ~netLive.drift] },
+            set: { |w|
+                ~netWander.(w[0], w[1]);
+                ~netDrift.((w[2] ? 0) > 0);
             }
+        ),
+        // ONE fit over the whole list (~netLoad): through ~netPut one by one
+        // the result would depend on the order of the file
+        cells: (
+            get: { ~netTriples.value.collect { |t| t[0] ++ t[1] ++ [t[2]] } },
+            set: { |cs| ~netLoad.(cs.collect { |c| [c.keep(2), c.copyRange(2, 3), c[4]] }) }
         )
     ),
 

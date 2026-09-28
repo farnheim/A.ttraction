@@ -1,41 +1,37 @@
-// App/lib.scd — NET · the one field. Every machine publishes its parameters,
-// its inner variables and its output as audio-rate sources, and takes audio-rate
-// modulation into the same parameters, variables and one audio input. A cell of
-// the matrix is one synth: source bus -> depth -> destination bus. Nothing else.
+// App/lib.scd — NET · the machines. Every machine publishes its parameters,
+// its inner variables and its output as audio-rate sources (\src ports, the
+// `tap` bus), and takes audio-rate modulation into the same parameters,
+// variables and one audio input (\dst ports, the `mod` bus). What connects a
+// source to a destination is cells.scd; the geometry of a column is lines.scd.
+// No CONFIG: a machine's settings are its own ~spec_<class>.
 
 (
-// ===== CONFIG — edit here ============================================
-~cfg_net = (
-    diceDensity: 0.03,
-    diceDepth:   0.5,
-    wander:      0.0,
-    wanderRate:  0.3,
-    cellLag:     0.08,
-    driftPeriod: 3.0,
-    driftAmt:    0.08
-);
-
-
-// ===== LOGIC =========================================================
 ~ungSpecs  = ~ungSpecs  ? ();
 ~ungVals   = ~ungVals   ? ();
 ~netBus    = ~netBus    ? ();
-~netCells  = ~netCells  ? Dictionary.new;
 ~netHooks  = ~netHooks  ? ();
-~netViews  = ~netViews  ? ();
 
 ~ungSpecOf = { |layer| ~ungSpecs[layer.asSymbol] };
 ~netLayers = {
     (~activeLayers ? ~ungSpecs.keys.asArray.sort).select { |l| ~ungSpecs[l].notNil }
 };
-~netSrcKeys = { |spec|
-    spec.params.collect(_.key) ++ (spec[\vars] ? []).collect(_.key) ++ [\out]
+// a port is [layer, key]; `side` is \src or \dst. Both sides list the same
+// parameters and variables in the same order — only the last port differs
+~netPorts = { |spec, side|
+    spec.params.collect(_.key) ++ (spec[\vars] ? []).collect(_.key) ++ [if(side == \src) { \out } { \in }]
 };
-~netDstKeys = { |spec|
-    spec.params.collect(_.key) ++ (spec[\vars] ? []).collect(_.key) ++ [\in]
+~netAllPorts = { |side|
+    ~netLayers.value.collect { |l| ~netPorts.(~ungSpecs[l], side).collect { |k| [l, k] } }.flatten(1)
 };
-~netAllSrc = { ~netLayers.value.collect { |l| ~netSrcKeys.(~ungSpecs[l]).collect { |k| [l, k] } }.flatten(1) };
-~netAllDst = { ~netLayers.value.collect { |l| ~netDstKeys.(~ungSpecs[l]).collect { |k| [l, k] } }.flatten(1) };
+~netTag = { |port| (port[0] ++ "." ++ port[1]).asSymbol };
+// a machine outside ~netLayers has no row and no column: its cells take no
+// part in the geometry, so they must not sound either
+~netPortIndex = { |l, k, side|
+    var sp = ~ungSpecs[l], b = ~netBus[l];
+    if(sp.isNil or: { b.isNil } or: { ~netLayers.value.includes(l).not }) { nil } {
+        ~netPorts.(sp, side).indexOf(k) !? { |i| b[if(side == \src) { \tap } { \mod }].index + i }
+    }
+};
 
 // the same arithmetic on numbers and on UGens: ControlSpec:map rounds and
 // clips in the language and is not safe to hand a UGen
@@ -78,8 +74,8 @@
     spec = spec.copy.putAll((params: entries.(spec.params), vars: entries.(spec[\vars] ? [])));
     name = spec.name;
     level = spec[\level] ? 1;
-    srcKeys = ~netSrcKeys.(spec);
-    dstKeys = ~netDstKeys.(spec);
+    srcKeys = ~netPorts.(spec, \src);
+    dstKeys = ~netPorts.(spec, \dst);
     n = srcKeys.size;
     bus = ~netAlloc.(name, n);
     tapIdx = bus[\tap].index;
@@ -165,169 +161,5 @@
 };
 
 
-// ----- cells ---------------------------------------------------------
-SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, rmul = 1, lagT = 0.08|
-    var d = depth.lag(lagT);
-    var w = LFNoise2.ar((wrate * rmul).clip(0.001, 400));
-    d = d * ((1 - wander.lag(0.1)) + (w * wander.lag(0.1)));
-    Out.ar(dst, InFeedback.ar(src) * d);
-}).add;
-
-~netSrcIndex = { |l, k|
-    var sp = ~ungSpecs[l], b = ~netBus[l];
-    if(sp.isNil or: { b.isNil }) { nil } {
-        ~netSrcKeys.(sp).indexOf(k) !? { |i| b[\tap].index + i }
-    }
-};
-~netDstIndex = { |l, k|
-    var sp = ~ungSpecs[l], b = ~netBus[l];
-    if(sp.isNil or: { b.isNil }) { nil } {
-        ~netDstKeys.(sp).indexOf(k) !? { |i| b[\mod].index + i }
-    }
-};
-~netCellKey = { |sl, sk, dl, dk| (sl ++ "." ++ sk ++ ">" ++ dl ++ "." ++ dk).asSymbol };
-
-~netEnsureGroup = {
-    if(~netGroup.isNil or: { ~netGroup.isPlaying.not }) {
-        ~netGroup = Group.tail(s);
-        NodeWatcher.register(~netGroup, true);
-    };
-    ~netGroup
-};
-
-~netSpawn = { |c|
-    var si = ~netSrcIndex.(c[\src][0], c[\src][1]);
-    var di = ~netDstIndex.(c[\dst][0], c[\dst][1]);
-    c[\node] !? { |nd| nd.free; c[\node] = nil };
-    if(si.notNil and: { di.notNil } and: { s.serverRunning }) {
-        c[\node] = Synth(\net_cell, [
-            src: si, dst: di, depth: c[\depth], rmul: c[\rmul],
-            wander: ~cfg_net.wander, wrate: ~cfg_net.wanderRate, lagT: ~cfg_net.cellLag
-        ], ~netEnsureGroup.value);
-    };
-};
-
-// after any layer (re)load: a bus may have moved, and a cell holds indices
-~netRewire = {
-    if(s.serverRunning) {
-        ~netGroup !? { |g| if(g.isPlaying) { g.free } };
-        ~netGroup = nil;
-        ~netCells.do { |c| c[\node] = nil; ~netSpawn.(c) };
-    };
-};
-
-~netPut = { |sl, sk, dl, dk, depth|
-    var key = ~netCellKey.(sl, sk, dl, dk), c = ~netCells[key];
-    depth = depth.clip(-1, 1);
-    if(depth.abs < 0.0005) {
-        c !? { c[\node] !? { |nd| nd.free }; ~netCells.removeAt(key) };
-    } {
-        if(c.isNil) {
-            c = ( src: [sl, sk], dst: [dl, dk], depth: depth, rmul: exprand(0.25, 4.0) );
-            ~netCells[key] = c;
-            ~netSpawn.(c);
-        } {
-            c[\depth] = depth;
-            if(c[\node].notNil) { c[\node].set(\depth, depth) } { ~netSpawn.(c) };
-        };
-    };
-};
-~netSet = { |sl, sk, dl, dk, depth| ~netPut.(sl, sk, dl, dk, depth); ~netChanged.value };
-~netDepth = { |sl, sk, dl, dk|
-    ~netCells[~netCellKey.(sl, sk, dl, dk)] !? { |c| c[\depth] } ? 0
-};
-~netChanged = { ~netViews.do { |f| f.value } };
-
-~netClear = { |notify = true|
-    ~netCells.do { |c| c[\node] !? { |nd| nd.free } };
-    ~netCells = Dictionary.new;
-    if(notify) { ~netChanged.value };
-};
-
-~netRandDepth = { |depth| depth * (1.0.rand ** 2) * [-1, 1].choose };
-
-~netDice = { |density, depth, clear = true|
-    var srcs = ~netAllSrc.value, dsts = ~netAllDst.value;
-    density = density ? ~cfg_net.diceDensity;
-    depth   = depth   ? ~cfg_net.diceDepth;
-    if(clear) { ~netClear.(false) };
-    srcs.do { |a|
-        dsts.do { |b|
-            if((a != b) and: { density.coin }) {
-                ~netPut.(a[0], a[1], b[0], b[1], ~netRandDepth.(depth));
-            };
-        };
-    };
-    ~netChanged.value;
-    ("net · dice · " ++ ~netCells.size ++ " cells").postln;
-};
-~netDiceRow = { |sl, sk, density, depth|
-    density = (density ? ~cfg_net.diceDensity) * 4;
-    ~netAllDst.value.do { |b|
-        ~netPut.(sl, sk, b[0], b[1], if(density.coin) { ~netRandDepth.(depth ? ~cfg_net.diceDepth) } { 0 });
-    };
-    ~netChanged.value;
-};
-~netDiceCol = { |dl, dk, density, depth|
-    density = (density ? ~cfg_net.diceDensity) * 4;
-    ~netAllSrc.value.do { |a|
-        ~netPut.(a[0], a[1], dl, dk, if(density.coin) { ~netRandDepth.(depth ? ~cfg_net.diceDepth) } { 0 });
-    };
-    ~netChanged.value;
-};
-~netClearRow = { |sl, sk|
-    ~netCells.values.select { |c| c[\src] == [sl, sk] }
-        .do { |c| ~netPut.(sl, sk, c[\dst][0], c[\dst][1], 0) };
-    ~netChanged.value;
-};
-~netClearCol = { |dl, dk|
-    ~netCells.values.select { |c| c[\dst] == [dl, dk] }
-        .do { |c| ~netPut.(c[\src][0], c[\src][1], dl, dk, 0) };
-    ~netChanged.value;
-};
-
-~netShake = { |amt|
-    amt = amt ? ~cfg_net.driftAmt;
-    ~netCells.values.do { |c|
-        ~netPut.(c[\src][0], c[\src][1], c[\dst][0], c[\dst][1],
-            c[\depth] + (amt * rrand(-1.0, 1.0)));
-    };
-    ~netChanged.value;
-};
-~netMutate = { |n, depth|
-    var cells = ~netCells.values.asArray, srcs = ~netAllSrc.value, dsts = ~netAllDst.value;
-    n = n ? (cells.size * 0.1).ceil.asInteger.max(1);
-    cells.scramble.keep(n.min(cells.size)).do { |c|
-        ~netPut.(c[\src][0], c[\src][1], c[\dst][0], c[\dst][1], 0);
-    };
-    n.do {
-        var a = srcs.choose, b = dsts.choose;
-        if(a != b) { ~netPut.(a[0], a[1], b[0], b[1], ~netRandDepth.(depth ? ~cfg_net.diceDepth)) };
-    };
-    ~netChanged.value;
-};
-
-~netWander = { |amt, rate|
-    amt  !? { ~cfg_net.wander = amt.clip(0, 1) };
-    rate !? { ~cfg_net.wanderRate = rate.clip(0.001, 400) };
-    ~netGroup !? { |g| g.set(\wander, ~cfg_net.wander, \wrate, ~cfg_net.wanderRate) };
-};
-
-~netDrift = { |on = true|
-    ~netDriftTask !? { |t| t.stop };
-    ~netDriftTask = nil;
-    if(on) {
-        ~netDriftTask = Routine({
-            loop {
-                ~netShake.(~cfg_net.driftAmt);
-                if(0.3.coin) { ~netMutate.(1) };
-                (~cfg_net.driftPeriod * exprand(0.5, 2.0)).wait;
-            }
-        }).play(AppClock);
-    };
-    ~netDriftTask.notNil
-};
-
-
-"lib — поле готово (~netDice, ~netSet, ~openMatrix, ~openMachines).".postln;
+"lib — машины готовы (~netMachine, ~setParam, ~netAllPorts).".postln;
 )

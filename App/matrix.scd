@@ -1,8 +1,11 @@
 // App/matrix.scd — the two pages of the field, drawn with the ui kit.
 // ~openMatrix: every source (row) against every destination (column); a cell
-//   is a depth — filled = positive, hollow = negative. click = +0.3 (shift:
-//   −0.3), drag up/down = depth, right-click or alt-click = off. Click a
-//   row/column label = dice it, right-click = clear it.
+//   is a bar across its row with a line — down = positive, up = negative, one
+//   row per 1 / lineRows of depth. The lines are the geometry of the field
+//   (lines.scd, cells.scd): a depth never leaves the cell's range. click = +0.3 (shift: −0.3), turned
+//   round or cut to the room there is; drag = the line's end follows the
+//   cursor; right-click or alt-click = off. Click a row/column label = dice
+//   it, right-click = clear it.
 // ~openMachines: the base value of every parameter of every machine.
 
 
@@ -10,6 +13,7 @@
 (
 ~cfg_view = (
     cell:   9,
+    bar:    3,
     labelH: 30,
     headH:  132,
     rowH:   22,
@@ -45,7 +49,7 @@
 ~netBuildMatrix = {
     var cv = ~cfg_view, pal = ~uiPal, c = cv.cell, lh = cv.labelH, hh = cv.headH;
     var lw = ("0000".bounds(~uiMono.(7, true)).width + 4).ceil;
-    var srcs = ~netAllSrc.value, dsts = ~netAllDst.value;
+    var srcs = ~netAllPorts.(\src), dsts = ~netAllPorts.(\dst);
     var srcPos = (), dstPos = ();
     var ids = ~netIds.(srcs.size + dsts.size), srcId = ids.keep(srcs.size), dstId = ids.drop(srcs.size);
     var cw = lw + (dsts.size * c) + 12, ch = lh + (srcs.size * c) + 12;
@@ -56,10 +60,11 @@
     var ww = (frameW.max(headW) + 56).min(scr.width - 40), wh = (ch + hh + 16).min(scr.height - 40);
     var contentW = frameW.max(headW).min(ww - 56), right = 28 + contentW, ox = 28;
     var win, page, scroll, canvas, info, driftBtn, hover, drag, x;
-    var tag = { |p| (p[0] ++ "." ++ p[1]).asSymbol };
-    var infoFor = { |a, b|
-        var d = ~netDepth.(a[0], a[1], b[0], b[1]);
-        tag.(a) ++ "  →  " ++ tag.(b) ++ "   " ++ if(d == 0) { "·" } { ~uiFmt.(d, 3) }
+    var signed = { |v| (if(v > 0) { "+" } { "" }) ++ ~uiFmt.(v, 3) };
+    var infoFor = { |a, b, range|
+        var d = ~netDepth.(a[0], a[1], b[0], b[1]), rg = range ?? { ~netRange.(a[0], a[1], b[0], b[1]) };
+        ~netTag.(a) ++ "  →  " ++ ~netTag.(b) ++ "   " ++ (if(d == 0) { "·" } { ~uiFmt.(d, 3) })
+            ++ (rg !? { "   [" ++ signed.(rg[0]) ++ " … " ++ signed.(rg[1]) ++ "]" } ? "")
     };
     var status = { ~netCells.size.asString ++ " cells" };
     var rowAt = { |mx, my|
@@ -67,8 +72,8 @@
         [row, col, (row >= 0) and: { row < srcs.size }, (col >= 0) and: { col < dsts.size }]
     };
 
-    srcs.do { |p, i| srcPos[tag.(p)] = i };
-    dsts.do { |p, i| dstPos[tag.(p)] = i };
+    srcs.do { |p, i| srcPos[~netTag.(p)] = i };
+    dsts.do { |p, i| dstPos[~netTag.(p)] = i };
 
     ~matWin !? { |w| try { w.close } };
     win = Window("NET · matrix", Rect(30, 30, ww, wh)).background_(pal.paper);
@@ -97,7 +102,7 @@
     ~uiBtn.(page, Rect(x, 64, 64, 24), "clear", { ~netClear.value }); x = x + 70;
     driftBtn = ~uiBtn.(page, Rect(x, 64, 68, 24), "drift", { |b|
         ~uiBtnSet.(b, ~netDrift.(b[\on].not));
-    }, ~netDriftTask.notNil); x = x + 74;
+    }, ~netLive.drift > 0); x = x + 74;
     ~uiBtn.(page, Rect(x, 64, 104, 24), "dice bases", {
         ~netLayers.value.do { |l| ~netDiceBase.(l, 0.35) };
     });
@@ -106,8 +111,8 @@
     [
         ["density", ControlSpec(0.001, 0.5, \exp), ~cfg_net.diceDensity, { |v| ~cfg_net.diceDensity = v }],
         ["depth",   ControlSpec(0.01, 1, \exp),    ~cfg_net.diceDepth,   { |v| ~cfg_net.diceDepth = v }],
-        ["wander",  ControlSpec(0, 1),             ~cfg_net.wander,      { |v| ~netWander.(v, nil) }],
-        ["wander Hz", ControlSpec(0.01, 400, \exp), ~cfg_net.wanderRate, { |v| ~netWander.(nil, v) }]
+        ["wander",  ControlSpec(0, 1),             ~netLive.wander,      { |v| ~netWander.(v, nil) }],
+        ["wander Hz", ControlSpec(0.01, 400, \exp), ~netLive.wanderRate, { |v| ~netWander.(nil, v) }]
     ].do { |row|
         ~uiRulerRow.(page, x, 96, 58, 120, row[0], row[1], row[2], row[3], ~netFmt);
         x = x + 258;
@@ -148,23 +153,27 @@
             };
         };
 
+        Pen.fillColor = pal.ink;
         ~netCells.do { |cell|
-            var r = srcPos[tag.(cell[\src])], k = dstPos[tag.(cell[\dst])], d = cell[\depth];
-            var side, rect;
+            var r = srcPos[~netTag.(cell[\src])], k = dstPos[~netTag.(cell[\dst])], d = cell[\depth];
+            var x0, y0, top, bottom, len;
             if(r.notNil and: { k.notNil }) {
-                side = ((c - 2) * (0.35 + (d.abs.sqrt * 0.65))).round.max(2);
-                rect = Rect(lw + (k * c) + ((c - side) / 2), lh + (r * c) + ((c - side) / 2), side, side);
+                x0 = lw + (k * c); y0 = lh + (r * c);
+                top = y0 + ((c - cv.bar) / 2).floor; bottom = top + cv.bar;
+                len = d.abs * ~cfg_lines.lineRows * c;
+                Pen.addRect(Rect(x0, top, c, cv.bar));
                 if(d > 0) {
-                    Pen.fillColor = pal.ink; Pen.fillRect(rect);
+                    Pen.addRect(Rect(x0 + (c / 2).floor, bottom, 1, (y0 + c + len) - bottom));
                 } {
-                    Pen.strokeColor = pal.ink; Pen.width = 1; Pen.strokeRect(rect.insetBy(0.5, 0.5));
+                    Pen.addRect(Rect(x0 + (c / 2).floor, y0 - len, 1, top - (y0 - len)));
                 };
             };
         };
+        Pen.fill;
     });
 
     canvas.mouseDownAction_({ |u, mx, my, mod, btn|
-        var h, off = (btn == 1) or: { mod.isAlt }, a, b, d0;
+        var h, off = (btn == 1) or: { mod.isAlt }, a, b, d0, rg, least = ~cfg_net.minDepth;
         mx = mx - ox;
         h = rowAt.(mx, my);
         case
@@ -173,26 +182,35 @@
             if(off) { ~netSet.(a[0], a[1], b[0], b[1], 0) } {
                 d0 = ~netDepth.(a[0], a[1], b[0], b[1]);
                 if(d0 == 0) {
-                    d0 = if(mod.isShift) { -0.3 } { 0.3 };
-                    ~netSet.(a[0], a[1], b[0], b[1], d0);
+                    rg = ~netRange.(a[0], a[1], b[0], b[1]);
+                    if(rg.notNil and: { rg.any { |x| x.abs > least } }) {
+                        d0 = case
+                            { mod.isShift and: { rg[0] < least.neg } } { rg[0] }
+                            { mod.isShift.not and: { rg[1] <= least } } { rg[0] }
+                            { rg[1] };
+                        ~netSet.(a[0], a[1], b[0], b[1], d0.clip(-0.3, 0.3));
+                        d0 = ~netDepth.(a[0], a[1], b[0], b[1]);
+                    };
                 };
-                drag = ( a: a, b: b, y0: my, d0: d0 );
+                if(d0 != 0) {
+                    drag = ( a: a, b: b, y0: my, d0: d0, rg: ~netRange.(a[0], a[1], b[0], b[1]) );
+                };
             };
         }
         { h[2] and: { mx < lw } and: { my >= lh } } {
             a = srcs[h[0]];
-            if(off) { ~netClearRow.(a[0], a[1]) } { ~netDiceRow.(a[0], a[1]) };
+            if(off) { ~netClearLine.(\src, a) } { ~netDiceLine.(\src, a) };
         }
         { h[3] and: { my < lh } and: { mx >= lw } } {
             b = dsts[h[1]];
-            if(off) { ~netClearCol.(b[0], b[1]) } { ~netDiceCol.(b[0], b[1]) };
+            if(off) { ~netClearLine.(\dst, b) } { ~netDiceLine.(\dst, b) };
         };
     });
     canvas.mouseMoveAction_({ |u, mx, my|
         drag !? { |dr|
             ~netSet.(dr[\a][0], dr[\a][1], dr[\b][0], dr[\b][1],
-                (dr[\d0] + ((dr[\y0] - my) / 120)).clip(-1, 1));
-            info.string_(infoFor.(dr[\a], dr[\b]));
+                dr[\d0] + ((my - dr[\y0]) / (~cfg_lines.lineRows * c)), dr[\rg]);
+            info.string_(infoFor.(dr[\a], dr[\b], dr[\rg]));
         };
     });
     canvas.mouseUpAction_({ drag = nil });
@@ -208,12 +226,18 @@
         };
     });
 
-    ~netViews[\matrix] = {
+    // clicks, drags and hover are computed on the live rows: a window drawn
+    // over other rows would do something else than it shows
+    ~netViews[\matrix] = { |what|
         {
             if(win.isClosed.not) {
-                canvas.refresh;
-                ~uiBtnSet.(driftBtn, ~netDriftTask.notNil);
-                if(hover.isNil and: { drag.isNil }) { info.string_(status.value) };
+                if((what == \rows) and: { (~netAllPorts.(\src) != srcs) or: { ~netAllPorts.(\dst) != dsts } }) {
+                    ~netBuildMatrix.value;
+                } {
+                    canvas.refresh;
+                    ~uiBtnSet.(driftBtn, ~netLive.drift > 0);
+                    if(hover.isNil and: { drag.isNil }) { info.string_(status.value) };
+                };
             };
         }.defer
     };
