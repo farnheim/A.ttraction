@@ -226,19 +226,19 @@ Ndef(\master).play(out: 0, numChannels: 2);
     }
 };
 ~mixerFpStatus = {
-    ~fpCurrent !? { |fp|
-        var c = fp[\counts];
-        "% strands · % nodes · % links · σ % · seed %".format(c[\strands], c[\nodes], c[\edges], ~uiFmt.(c[\sigma], 2), fp[\seed])
-    } ? "no fingerprint — generate one"
+    ~fpCurrent !? { |fp| "seed " ++ fp[\seed] } ? "no fingerprint — generate one"
 };
 ~mixerFpBuild = { |page, x, y|
     var cw = ~cfg_fpView.cell.x, ch = ~cfg_fpView.cell.y, cols = ~cfg_fp.cols, rows = ~cfg_fp.rows;
     var cx = x + (cols * cw) + 28, fmt2 = { |v| ~uiFmt.(v, 2) }, wid = ();
-    ~uiCap.(page, Rect(x, y, 400, 14), "fingerprint · the law of dice");
+    ~uiCap.(page, Rect(x, y, 400, 14), "fingerprint");
     wid[\canvas] = UserView(page, Rect(x, y + 20, cols * cw, rows * ch)).background_(~uiPal.paper).drawFunc_({ |u|
         var live = ~netLayers.value;
         Pen.strokeColor = ~uiPal.grey; Pen.width = 1;
         Pen.strokeRect(Rect(0.5, 0.5, u.bounds.width - 1, u.bounds.height - 1));
+        Pen.fillColor = ~uiPal.grey;
+        (0 .. cols).do { |i| (0 .. rows).do { |j| Pen.addRect(Rect(i * cw, j * ch, 1, 1)) } };
+        Pen.fill;
         ~fpCurrent !? { |fp|
             var dim = if(~fpLive[\on] == true) { ~uiPal.ink } { ~uiPal.grey };
             var cells = fp[\text].collect { |row| ~fpCellsOf.(row) }, off = ~mixerFpCentre.(cells, rows, cols);
@@ -277,10 +277,19 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
 ~mixerBuild = {
     var pal = ~uiPal, layers = ~mixerLayers, rowH = 28, tableY = 110;
-    var footY = tableY + (layers.size * rowH) + 6, presetY = footY + 44, fpY = presetY + 88;
-    var fxX = 1010, fxY = 84, tapeY = fxY + if(~cfg_effects.notNil) { 158 } { 0 };
-    var masterY = tapeY + (~tapeGui !? { (~tapeGuiHeight ? 0) + 42 } ? 0);
-    var leftH = if(~fpLive.notNil) { fpY + ~mixerFpHeight.value + 28 } { presetY + 88 };
+    var footY = tableY + (layers.size * rowH) + 6, fpY = footY + 44;
+    var fpBottom = if(~fpLive.notNil) { fpY + 20 + (~cfg_fp.rows * ~cfg_fpView.cell.y) };
+    var barH = (~cfg_presets.btnH * 2) + ~cfg_presets.gap;
+    // the presets stand in a column beside the fingerprint, the master and the
+    // tape stage over it on the right: both end on the canvas's lower edge.
+    // Without a fingerprint they stand in its place and under the echo
+    var presetX = if(fpBottom.notNil) { 28 + (~cfg_fp.cols * ~cfg_fpView.cell.x) + 28 } { 28 };
+    var presetY = fpBottom !? { |b| b - (108 + barH) } ? fpY;
+    var fxX = 1010, fxY = 84, echoEnd = fxY + if(~cfg_effects.notNil) { 158 } { 0 };
+    var tapeH = ~tapeGui !? { (~tapeGuiHeight ? 0) + 42 } ? 0;
+    var masterY = fpBottom !? { |b| (b - 44).max(echoEnd + tapeH) } ? (echoEnd + tapeH);
+    var tapeY = masterY - tapeH;
+    var leftH = fpBottom !? { |b| b + 28 } ? (presetY + 108 + barH + 28);
     var right = fxX + 316, w = right + 28, h = leftH.max(masterY + 78).max(440);
     var fmt2 = { |v| ~uiFmt.(v, 2) };
     var fxModeItems = [
@@ -329,11 +338,11 @@ Ndef(\master).play(out: 0, numChannels: 2);
     };
     ~mixerMuteAllBtn = ~uiBtn.(page, Rect(776, footY, 44, 24), "⊘", { ~mixMuteAllToggle.value }, ~mixAllMuted.value);
     ~mixerSoloAllBtn = ~uiBtn.(page, Rect(832, footY, 44, 24), "◎", { ~mixUnsolo.value }, ~mixSoloCur.notNil);
-    ~uiCap.(page, Rect(28, presetY, 260, 14), "mixer preset");
-    ~preset.bar(page, 28, presetY + 20, \mixer);
-    ~uiCap.(page, Rect(372, presetY, 380, 14), "project · machines + mixer + matrix");
-    ~preset.bar(page, 372, presetY + 20, \project);
     if(~fpLive.notNil) { ~mixerFpBuild.(page, 28, fpY) };
+    ~uiCap.(page, Rect(presetX, presetY, 260, 14), "mixer preset");
+    ~preset.bar(page, presetX, presetY + 20, \mixer);
+    ~uiCap.(page, Rect(presetX, presetY + 88, 380, 14), "project · machines + mixer + matrix");
+    ~preset.bar(page, presetX, presetY + 108, \project);
 
     mkGlyph = { |x, y, modeFn|
         var uv = UserView(page, Rect(x, y, 76, 24)).background_(pal.paper);

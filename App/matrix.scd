@@ -5,7 +5,10 @@
 //   (lines.scd, cells.scd): a depth never leaves the cell's range. click = +0.3 (shift: −0.3), turned
 //   round or cut to the room there is; drag = the line's end follows the
 //   cursor; right-click or alt-click = off. Click a row/column label = dice
-//   it, right-click = clear it.
+//   it, right-click = clear it. Under the fingerprint the graph of the layers
+//   stands on the grid (graph.scd): its glyphs, and between them the arrows of
+//   the law, a dash for a weak pair; a line
+//   is drawn at its effective depth. The mouse does nothing to the graph.
 // ~openMachines: the base value of every parameter of every machine.
 
 
@@ -36,6 +39,41 @@
         if(seen.includes(id).not) { seen.add(id); ids.add(id.asHexString(4)) };
     };
     ids
+};
+
+// a vertex in pixels of the grid: its glyph cell and its centre
+~netDrawGraph = { |lw, lh, c|
+    var span = ~graphSpan.value, vs = ~graphVerts.value, law = ~fpLaw.value, pal = ~uiPal;
+    var at = IdentityDictionary.new, gs = ~uiGlyphSize;
+    var mid = (~cfg_fp.strongW + ~cfg_fp.weakW) / 2, reach = (span.maxItem * c / 2) + 3;
+    vs.do { |v| at[v[\layer]] = (lw + ((v[\col] + (span[1] / 2)) * c)) @ (lh + ((v[\row] + (span[0] / 2)) * c)) };
+    law !? { vs.do { |va| vs.do { |vb|
+        var a = va[\layer], b = vb[\layer], n = (law[\n][a] !? { |r| r[b] }) ? 0, weak = law[\M][a][b] < mid;
+        var p = at[a], q = at[b], d, ux, uy, px, py, sx, sy, ex, ey;
+        if((n > 0) and: { a != b }) {
+            Pen.use {
+                Pen.strokeColor = pal.ink; Pen.fillColor = pal.ink; Pen.width = 1;
+                if(weak) { Pen.lineDash = FloatArray[3, 3] };
+                d = (q.x - p.x).hypot(q.y - p.y).max(1);
+                ux = (q.x - p.x) / d; uy = (q.y - p.y) / d; px = uy.neg * 3; py = ux * 3;
+                sx = p.x + (ux * reach) + px; sy = p.y + (uy * reach) + py;
+                ex = q.x - (ux * reach) + px; ey = q.y - (uy * reach) + py;
+                Pen.line(sx @ sy, ex @ ey); Pen.stroke;
+                Pen.lineDash = FloatArray[1, 0];
+                Pen.moveTo(ex @ ey);
+                Pen.lineTo((ex - (ux * 7) + px) @ (ey - (uy * 7) + py));
+                Pen.lineTo((ex - (ux * 7) - px) @ (ey - (uy * 7) - py));
+                Pen.fill;
+            };
+        };
+    } } };
+    vs.do { |v|
+        var x0 = lw + (v[\col] * c), y0 = lh + (v[\row] * c), w = span[1] * c, h = span[0] * c;
+        Pen.fillColor = pal.paper;
+        Pen.addRect(Rect(x0, y0, w, h));
+        Pen.fill;
+        ~uiGlyphPen.(x0 + ((w - gs.x) / 2).floor, y0 + ((h - gs.y) / 2).floor, gs.y, v[\layer]);
+    };
 };
 
 ~netFmt = { |v|
@@ -155,7 +193,7 @@
 
         Pen.fillColor = pal.ink;
         ~netCells.do { |cell|
-            var r = srcPos[~netTag.(cell[\src])], k = dstPos[~netTag.(cell[\dst])], d = cell[\depth];
+            var r = srcPos[~netTag.(cell[\src])], k = dstPos[~netTag.(cell[\dst])], d = cell[\eff] ? cell[\depth];
             var x0, y0, top, bottom, len;
             if(r.notNil and: { k.notNil }) {
                 x0 = lw + (k * c); y0 = lh + (r * c);
@@ -170,6 +208,7 @@
             };
         };
         Pen.fill;
+        if(~graphActive.value) { ~netDrawGraph.(lw, lh, c) };
     });
 
     canvas.mouseDownAction_({ |u, mx, my, mod, btn|

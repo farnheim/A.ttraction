@@ -8,9 +8,9 @@
 ~cfg_presets = (
     root:    ((~appDir ? (thisProcess.nowExecutingPath !? (_.dirname))) ? "") +/+ "presets",
     kinds:   (
-        project: [\layers, \mixer, \fx, \tape, \fingerprint, \wander, \cells],
+        project: [\layers, \mixer, \fx, \tape, \fingerprint, \wander, \graph, \cells],
         mixer:   [\mixer, \fx, \tape, \fingerprint],
-        matrix:  [\wander, \cells]
+        matrix:  [\wander, \graph, \cells]
     ),
     machine: [\layers],
     btnW:    84,
@@ -181,6 +181,11 @@
                 ~netWander.(w[0], w[1]);
                 ~netDrift.((w[2] ? 0) > 0);
             }
+        ),
+        // before the cells: its glyphs are the walls they are read against
+        graph: (
+            get: { ~graphState !? (_.value) },
+            set: { |gs| ~graphLoad !? { |load| load.(gs) } }
         ),
         cells: (
             get: { ~netTriples.value.collect { |t| t[0] ++ t[1] ++ [t[2]] } },

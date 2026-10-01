@@ -44,6 +44,7 @@ s.options.maxNodes = 2 ** 14;
     ~netGroup = nil;
     ~netLive = nil;
     ~fpCurrent = nil; ~fpLive = nil; ~fpViews = ();
+    ~graphLive = nil;
     ~ungSpecs = ();
     s.freeAll;
     if(verbose) { "NET — очистка выполнена.".postln };
@@ -57,6 +58,7 @@ s.waitForBoot({
     (~appDir +/+ "lines.scd").load;
     (~appDir +/+ "fingerprint.scd").load;
     (~appDir +/+ "cells.scd").load;
+    (~appDir +/+ "graph.scd").load;
     (~appDir +/+ "ui.scd").load;
     (~appDir +/+ "presets.scd").load;
     s.sync;

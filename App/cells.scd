@@ -2,7 +2,9 @@
 // port -> depth -> destination port. A row is a source, a column a
 // destination; the geometry of a column (lines.scd) bounds every depth, from
 // a hand, a throw of the dice or a preset alike. ~netWrite is the one door to
-// the store and its nodes; everything else plans and passes through it.
+// the store and its nodes; everything else plans and passes through it. A cell
+// holds its depth x; its node plays the effective depth, x unless the cell
+// lies in a cloud of the graph (graph.scd).
 // Reference: docs/features/matrix-ru.md.
 
 // ===== CONFIG — edit here ============================================
@@ -64,26 +66,30 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     var di = ~netPortIndex.(c[\dst][0], c[\dst][1], \dst);
     c[\node] !? { |nd| nd.free; c[\node] = nil };
     if(si.notNil and: { di.notNil } and: { s.serverRunning }) {
-        c[\node] = Synth(\net_cell, [src: si, dst: di, depth: c[\depth], rmul: c[\rmul]] ++ ~netHands.value,
+        c[\node] = Synth(\net_cell, [src: si, dst: di, depth: c[\eff], rmul: c[\rmul]] ++ ~netHands.value,
             ~netEnsureGroup.value);
     };
 };
 
-~netWrite = { |src, dst, depth|
+// `eff` is the effective depth (nil = the depth itself): only the graph's
+// refresh hands one in
+~netWrite = { |src, dst, depth, eff|
     var key = ~netCellKey.(src, dst), c = ~netCells[key];
     depth = depth.clip(-1, 1);
+    eff = (eff ? depth).clip(-1, 1);
     case
     { depth.abs < ~cfg_net.minDepth } {
         ~netCells.removeAt(key) !? { |x| x[\node] !? { |nd| nd.free } };
     }
     { c.isNil } {
-        c = ( src: src, dst: dst, depth: depth, rmul: exprand(0.25, 4.0) );
+        c = ( src: src, dst: dst, depth: depth, eff: eff, rmul: exprand(0.25, 4.0) );
         ~netCells[key] = c;
         ~netSpawn.(c);
     }
     {
         c[\depth] = depth;
-        if(c[\node].notNil) { c[\node].set(\depth, depth) } { ~netSpawn.(c) };
+        c[\eff] = eff;
+        if(c[\node].notNil) { c[\node].set(\depth, eff) } { ~netSpawn.(c) };
     };
 };
 ~netApply = { |triples| triples.do { |t| ~netWrite.(t[0], t[1], t[2]) } };
@@ -97,7 +103,14 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     ~netCells.values.select { |c| ~netTag.(c[side]) == tag }
 };
 
-~netChanged = { ~netViews.do { |f| f.value } };
+// every change of the field ends here: the graph re-deals its clouds first,
+// so a view never draws a depth the nodes do not play
+~netChanged = {
+    ~graphRefresh !? (_.value);
+    ~netViews.do { |f| f.value };
+};
+// after a throw the glyphs come to the new clouds (graph.scd)
+~netThrown = { ~graphPlace !? (_.value) };
 
 ~netClear = { |notify = true|
     ~netCells.values.do { |c| ~netWrite.(c[\src], c[\dst], 0) };
@@ -115,11 +128,12 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 
 
 // ----- cells <-> columns of lines.scd ---------------------------------
+// walls: destination tag -> the rows its glyphs close, [[r0, r1], …]
 ~netFrame = {
     var rows = IdentityDictionary.new, cols = IdentitySet.new;
     ~netAllPorts.(\src).do { |p, i| rows[~netTag.(p)] = i };
     ~netAllPorts.(\dst).do { |p| cols.add(~netTag.(p)) };
-    ( rows: rows, cols: cols, n: rows.size )
+    ( rows: rows, cols: cols, n: rows.size, walls: (~graphWalls !? (_.value)) ?? { IdentityDictionary.new } )
 };
 
 ~netColumns = { |frame, triples, fixed|
@@ -140,7 +154,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     var fresh = ~netColumns.(f, cands.reject { |ab| ab[0] == ab[1] }.collect { |ab| ab ++ [0] }, false);
     var least = ~cfg_net.minDepth * ~cfg_lines.lineRows, plan = List.new;
     fresh[0].do { |k|
-        var col = (fixed[k] ? []).asArray;
+        var col = ~linesWall.((fixed[k] ? []).asArray, f[\walls][k]);
         fresh[1][k].do { |e| col = ~linesAccept.(col, e, f[\n], least) };
         ~linesDeal.(col, f[\n], lenFn).do { |e|
             if(e[\fixed].not) { plan.add([e[\src], e[\dst], e[\len] / ~cfg_lines.lineRows]) };
@@ -165,7 +179,8 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     var r = f[\rows][~netTag.(src)], col;
     if(r.isNil or: { f[\cols].includes(~netTag.(dst)).not }) { nil } {
         col = ~netColumns.(f, ~netTriples.value.select { |t| (t[1] == dst) and: { t[0] != src } }, true)[1];
-        ~linesRange.((col[~netTag.(dst)] ? []).asArray, r, f[\n]) / ~cfg_lines.lineRows
+        ~linesRange.(~linesWall.((col[~netTag.(dst)] ? []).asArray, f[\walls][~netTag.(dst)]), r, f[\n])
+            / ~cfg_lines.lineRows
     }
 };
 
@@ -251,6 +266,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     density = density ? ~cfg_net.diceDensity;
     if(clear) { ~netClear.(false) };
     ~netApply.(~netPlan.(~netCandidates.(srcs, dsts, density, law), ~netDealRandom.(depth, ~netCapOf.(law))));
+    ~netThrown.value;
     ~netChanged.value;
     ("net · dice · " ++ ~netCells.size ++ " cells" ++ if(law.notNil) { " · fingerprint" } { "" }).postln;
 };
@@ -268,6 +284,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
             ~netCandidates.(others, [port], density, law)
         },
         ~netDealRandom.(depth, ~netCapOf.(law))));
+    ~netThrown.value;
     ~netChanged.value;
 };
 
@@ -294,6 +311,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
             made = made + plan.size;
             tries = tries + 1;
         };
+        ~netThrown.value;
         ~netChanged.value;
     };
 };

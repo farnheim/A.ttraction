@@ -3,8 +3,11 @@
 // `len` is a signed line length in rows: + runs down, − runs up. A line stops
 // at the frame and at the next entry and shares a gap with the line coming the
 // other way; a row under a line takes no entry. `fixed` lengths are never
-// moved, the others are being placed. No cells, no server, no chance: entries
-// are the caller's scratch copies and may carry any payload.
+// moved, the others are being placed. A wall (a glyph of the graph) is a run of
+// rows that stops a line as the frame does and takes no entry: it enters the
+// column as fixed entries of length 0 (~linesWall), so every path below meets
+// it as a neighbour. No cells, no server, no chance: entries are the caller's
+// scratch copies and may carry any payload.
 // Reference: docs/features/matrix-ru.md.
 
 // ===== CONFIG — edit here ============================================
@@ -78,8 +81,19 @@ share = { |col, n|
 };
 
 
+~linesWall = { |col, walls|
+    if(walls.isNil or: { walls.isEmpty }) { col } {
+        sorted.(col ++ walls.collect { |w|
+            (w[0] .. w[1]).collect { |r| (row: r, len: 0, fixed: true, wall: true) }
+        }.flatten)
+    }
+};
+
 ~linesRange = { |col, r, n|
-    if(coveredIn.(col, r)) { [0, 0] } { roomOf.(col, r, n) * [-1, 1] }
+    var i = lower.(col, r);
+    if(((i < col.size) and: { col[i][\row] == r }) or: { coveredIn.(col, r) }) { [0, 0] } {
+        roomOf.(col, r, n) * [-1, 1]
+    }
 };
 
 // `least` in rows: a neighbour being placed with no more room than that
@@ -104,9 +118,21 @@ share = { |col, n|
     share.(col, n)
 };
 
+// a layout the field may hold: no two entries on one row, none under a line,
+// every line inside the room its neighbours leave it
+~linesValid = { |col, n|
+    col = sorted.(col.copy);
+    col.every { |e, i|
+        var room = roomOf.(col, e[\row], n);
+        ((i + 1 >= col.size) or: { col[i + 1][\row] != e[\row] })
+            and: { coveredIn.(col, e[\row]).not }
+            and: { e[\len].abs <= ((if(e[\len] > 0) { room[1] } { room[0] }) + eps) }
+    }
+};
+
 // the Matrix draws its lines in lineRows
 ~netChanged !? { |f| f.value };
 
 
-"lines — геометрия столбца (~linesRange, ~linesAccept, ~linesDeal).".postln;
+"lines — геометрия столбца (~linesRange, ~linesAccept, ~linesDeal, ~linesWall).".postln;
 )
