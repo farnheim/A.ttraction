@@ -1,6 +1,4 @@
-// App/synths/zeta.scd — machine `zeta`: a filtered noise bed with a resonant
-// hump, a sub floor, dense fine ticks and rare pops with a ringing body.
-
+// App/synths/zeta.scd — machine `zeta`: vinyl/tape surface (§C.6 redesign); docs: docs/features/zeta/texture-reference.md
 
 // ===== CONFIG — edit here ============================================
 (
@@ -43,7 +41,6 @@
         pan:     [-1.0, 1.0]
     ]
 );
-
 
 // ===== LOGIC =========================================================
 ~netMachine.(~spec_zeta, { |io|

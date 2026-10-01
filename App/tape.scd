@@ -1,23 +1,13 @@
-// App/tape.scd — TAPE: the master tape stage `kennlinie` (§K.6) between LeakDC
-// and the Limiter of Ndef(\master). A port of the measured FerricTDS-type model
-// as shipped in our VST3 "Spl Tape" v0.3 (Plugin/Source/TapeModel.cpp): program-
-// dependent compressor, 2× oversampled track saturator with stereo crosstalk,
-// COLOR (emphasis, flux, LF resonance, dispersion), W&F as one swept allpass.
-// Model, findings, validation: docs/features/master/ferric-model/README.md.
-// Loads before mixer.scd; re-executing this file rebuilds the master live.
-
+// App/tape.scd — master tape stage `kennlinie` (§K.6), port of Spl Tape v0.3; docs: docs/features/master/ferric-model/README.md
 
 // ===== CONFIG — edit here ============================================
 (
-// the knobs are the plugin's, all 0…1: hr = operating level (±12 dB drive,
-// output-compensated), dyn = compression, rec = recovery, sat = saturation
-// drive, lim = limiter curve blend, color = head/transformer colour, wf = W&F,
-// trim = output ±6 dB. `? ()`: the knobs are STATE and survive a hot reload
+
+// the plugin's knobs, all 0…1; `? ()`: they are state and survive a hot reload
 ~cfg_tape = ~cfg_tape ? (
     on: 1,
     hr: 0.5, color: 0.0, wf: 0.0, dyn: 0.0, rec: 0.0, sat: 0.0, lim: 0.0, trim: 0.5
 );
-
 
 // ===== LOGIC — the model =============================================
 ~tapeKeys = [\on, \hr, \color, \wf, \dyn, \rec, \sat, \lim, \trim];
@@ -83,16 +73,17 @@
     if(kind == \hp) { FOS.ar(x, a, a.neg, a) } { FOS.ar(x, 1 - a, 0, a) }
 };
 
-// RBJ biquads through BEQSuite, never SOS: SOS takes its coefficients as
-// float32 inputs, which leaves a 25 Hz COLOR allpass only −71 dB clean against
-// double precision (measured 2026-09-27); BEQSuite derives them in double, −152 dB
+// BEQSuite, never SOS: SOS takes float32 coefficients, a 25 Hz allpass only −71 dB clean
 ~tapeRbj = { |x, kind, f0, q, gainDb = 0|
     var rq = q.reciprocal;
     switch(kind,
         \hp, { BHiPass.ar(x, f0, rq) },
         \ap, { BAllPass.ar(x, f0, rq) },
         \pk, { BPeakEQ.ar(x, f0, rq, gainDb) },
-        \bp, { var w0 = 2pi * f0 * SampleDur.ir; BBandPass.ar(x, f0, log((0.5 / q) + ((0.25 / q.squared) + 1).sqrt) * sin(w0) / (0.34657359 * w0)) }
+        \bp, {
+            var w0 = 2pi * f0 * SampleDur.ir, halfLn2 = 2.log / 2;
+            BBandPass.ar(x, f0, log((0.5 / q) + ((0.25 / q.squared) + 1).sqrt) * sin(w0) / (halfLn2 * w0))
+        }
     )
 };
 
@@ -145,9 +136,7 @@
     k.k * u.sign * (a.min(k.t) + ((1 - k.t) * r / ((1 + (r ** k.n)) ** (1 / k.n))))
 };
 
-// first-order ADAA of u/√(1+u²) with the difference quotient rationalised:
-// (F(c) − F(p))/(c − p) = (c + p)/(√(1+c²) + √(1+p²)). No division by c − p,
-// so no ill-conditioned branch — in float32 the plain quotient loses ~−76 dB
+// ADAA with the quotient rationalised: no division by c − p (code-notes)
 ~tapeShape = { |cur, prev, lim|
     var soft = ((cur + prev) / ((1 + cur.squared).sqrt + (1 + prev.squared).sqrt))
         + (0.5 * (cur - prev));
@@ -166,12 +155,10 @@
 
 ~tapeWfRate = { |wf| ~tapeModel.wf.rateScale * sinh(~tapeModel.wf.rateCurve * wf) };
 
-// Phasor, not SinOsc: its phase accumulates in double; the wavetable SinOsc
-// leaves 1e-4 of error in the W&F allpass coefficient (measured 2026-09-27)
+// Phasor, not SinOsc: phase in double; SinOsc leaves 1e-4 error in the W&F coefficient
 ~tapeWfCos = { |wf| (Phasor.ar(0, ~tapeWfRate.(wf) * SampleDur.ir) * 2pi).cos };
 
-// sig: stereo; knobs: an Event of the ~tapeKeys (control UGens or numbers);
-// wfCos: the W&F cosine from a shared clock, nil = the body runs its own
+// wfCos nil = the body runs its own W&F clock
 ~tapeBody = { |sig, knobs, wfCos|
     var m = ~tapeModel, x = m.xfmr, lf = m.colorLf, sr = SampleRate.ir, beta = m.crosstalk;
     var kv = ~tapeKeys.collect { |k| var v = knobs[k]; if(v.isNumber) { DC.kr(v) } { v } };
@@ -208,8 +195,7 @@
     gdb = ~tapeCompressor.(in[0], in[1], compDrive, color, rec, sr);
     pre = [0, 1].collect { |i| ~tapeShelf.(in[i] * gdb[i].dbamp, fz, fp, sr) };
 
-    // two tape tracks with crosstalk β: mono passes as one track, anti-phase
-    // distorts most; the output matrix is the exact inverse of the input one
+    // crosstalk β: the output matrix is the exact inverse of the input one
     kx = satDrive * m.satScale / (1 + beta);
     tracks = [0, 1].collect { |i| ~tapeOversampled.(kx * (pre[i] + (beta * pre[1 - i])), lim) };
 
@@ -226,9 +212,7 @@
             \pk, lt.pkHz, lt.pkQ, lt.pkDb);
         var y = post + (colorOn * (colored - post));
         y = ~tapeRbj.(y, \ap, m.hfAllpass[0].min(sr * 0.45), m.hfAllpass[1]);
-        // direct form I (y = c·x + x₁ − c·y₁) as the model defines it: FOS alone is
-        // direct form II, which differs once c moves; every FOS input audio-rate,
-        // or it falls back to per-block ramps
+        // direct form I as the model defines it, every FOS input ar (code-notes)
         y = y + (wfOn * (FOS.ar((wfCoef * y) + Delay1.ar(y), DC.ar(1), DC.ar(0), wfCoef.neg) - y));
         y * outGain
     };
@@ -238,10 +222,9 @@
     dry + (on * (wet - dry))
 };
 
-
 // ===== LOGIC — live state ============================================
-// the knobs live on ONE control bus: every stage that reads it (Ndef(\master),
-// render_master's no-limiter probe) hears the same settings by construction
+
+// ONE control bus: the master and render_master's probe hear the same knobs
 ~busTape = ~busTape ?? { Bus.control(s, ~tapeKeys.size) };
 
 ~tapeKnobs = {
@@ -249,11 +232,7 @@
     ().putPairs([~tapeKeys, v].flop.flatten)
 };
 
-// ONE W&F oscillator for every stage: two nodes started at different moments
-// would each run their own phase, and render_master's probe would then differ
-// from the master wherever wf > 0 (measured: guard median 0.056 dB). Built once
-// — a hot reload keeps its phase instead of crossfading two oscillators. The
-// NRT tools load this file with no server: their body runs its own oscillator
+// ONE W&F oscillator for every stage, or the probe drifts from the master (code-notes)
 if(s.serverRunning and: { Ndef(\tapeClock).source.isNil }) {
     Ndef(\tapeClock, { ~tapeWfCos.(In.kr(~busTape.index + ~tapeKeys.indexOf(\wf))) });
 };
@@ -273,11 +252,10 @@ if(s.serverRunning and: { Ndef(\tapeClock).source.isNil }) {
 ~tapePush.value;
 
 // hot reload: a master built before this file ran still carries the old body
-// (the hook exists only while mixer.scd is loaded — ~appCleanup clears it)
 ~mixerRebuildMaster !? (_.value);
 
 
-// ===== GUI — the tape block of the Ungrund window ===================
+// ===== GUI — the tape block of the Deck ===============================
 ~tapeGuiRows = [
     [\hr, "headrm"], [\trim, "trim"], [\sat, "sat"], [\lim, "limit"],
     [\dyn, "dyn"], [\rec, "recov"], [\color, "color"], [\wf, "w&f"]
@@ -286,14 +264,13 @@ if(s.serverRunning and: { Ndef(\tapeClock).source.isNil }) {
 ~tapeWid = ~tapeWid ? ();
 
 ~tapeGui = { |win, x, y|
-    var fmt2 = { |v| ~uiFmt.(v, 2) };
     ~tapeWid = ();
     ~tapeWid[\on] = ~uiBtn.(win, Rect(x + 246, y, 70, 24), ["tape off", "tape on"],
         { ~tapeSet.(\on, if(~cfg_tape[\on] > 0.5) { 0 } { 1 }) }, ~cfg_tape[\on] > 0.5);
     ~tapeGuiRows.do { |row, i|
         var key = row[0];
         ~tapeWid[key] = ~uiRulerRow.(win, x, y + 34 + (i * 28), 42, 190, row[1],
-            ControlSpec(0, 1, \lin, 0, ~cfg_tape[key]), ~cfg_tape[key], { |v| ~tapeSet.(key, v) }, fmt2);
+            ControlSpec(0, 1, \lin, 0, ~cfg_tape[key]), ~cfg_tape[key], { |v| ~tapeSet.(key, v) }, ~uiFmt);
     };
 };
 

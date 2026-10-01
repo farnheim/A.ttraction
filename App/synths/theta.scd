@@ -1,8 +1,4 @@
-// App/synths/theta.scd — machine `theta`: a demand-rate clock of decelerating
-// populations drives a five-impulse cascade into fourteen round-robin voices of
-// one to three ringing modes plus an edge band. The clock is a port too: any
-// signal of the field poured into `pulse` fires fragments.
-
+// App/synths/theta.scd — machine `theta`: splitter fragments (§C.8); docs: docs/features/theta/dsp-spec.md
 
 // ===== CONFIG — edit here ============================================
 (
@@ -33,7 +29,6 @@
         pan:   [-1.0, 1.0]
     ]
 );
-
 
 // ===== LOGIC =========================================================
 ~netMachine.(~spec_theta, { |io|
@@ -67,8 +62,7 @@
 
     fragFund = fund * (2 ** io.par(\fragOct).round(1));
 
-    // a Demand UGen polls its inputs on its own pull and cannot read ar: the
-    // A2K bridge is the only kr in the machine, and it is not optional
+    // A2K is not optional: a Demand UGen polls its inputs on its own pull and cannot read ar
     #ioi0K, decelK, ioiMaxK, popScaleK, gapScaleK, densK =
         A2K.kr([\ioi0, \decel, \ioiMax, \popScale, \gapScale, \density].collect { |k| io.par(k) });
     gapMul = 6 ** (1 - (2 * densK));

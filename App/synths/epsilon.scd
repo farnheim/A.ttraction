@@ -1,7 +1,4 @@
-// App/synths/epsilon.scd — machine `epsilon`: brown noise through a chain of
-// moving allpasses, four narrow mode bands, a flow above them and one drifting
-// band; surface AM and L/R decorrelation.
-
+// App/synths/epsilon.scd — machine `epsilon`: cave bed of lattice modes (§C.5); docs: docs/features/epsilon/cave-reference.md
 
 // ===== CONFIG — edit here ============================================
 (
@@ -39,7 +36,6 @@
     ]
 );
 
-
 // ===== LOGIC =========================================================
 ~netMachine.(~spec_epsilon, { |io|
     var nyq = io.nyq;
@@ -51,6 +47,7 @@
     var flowFloor = 250, modeCeilRatio = 2.2, streakCeilRatio = 2.5, modeTilt = 0.5;
     var flowTrim = 0.7, streakTrim = 0.5;
     var diff, drift, sweepHz, mFreqs, mCeil, modes, flow, streak, sum, ap;
+    var bwComp = { |f, w, hi| (150 / (f * w)).sqrt.clip(0.2, hi) };
 
     diff = HPF.ar(BrownNoise.ar, 40) + io.feed;
     diffCentres.do { |c, i|
@@ -63,7 +60,7 @@
     modes = Mix(mFreqs.collect { |f, i|
         var breath = io.node(\breath, LFNoise2.ar(io.par(\mBreath) * breathMults[i]).range(0.45, 1.0));
         var band = BPF.ar(BPF.ar(diff, f, mWidth), f, mWidth);
-        band * (150 / (f * mWidth)).sqrt.clip(0.2, 8) * (f / 47).pow(modeTilt) * breath
+        band * bwComp.(f, mWidth, 8) * (f / 47).pow(modeTilt) * breath
     }) * io.par(\mLevel);
     mCeil = (mFreqs.reduce(\max) * modeCeilRatio).clip(80, nyq);
     modes = LPF.ar(LPF.ar(modes, mCeil), mCeil);
@@ -73,7 +70,7 @@
     drift = io.node(\drift, LFNoise2.ar(driftPeriod.reciprocal)
         + (LFNoise2.ar((driftPeriod * 1.37).reciprocal) * 0.5));
     sweepHz = io.node(\sweep, drift.linlin(-1.5, 1.5, io.par(\freqLo), io.par(\freqHi)).midicps);
-    streak = BPF.ar(diff, sweepHz, streakWidth) * (150 / (sweepHz * streakWidth)).sqrt.clip(0.2, 5);
+    streak = BPF.ar(diff, sweepHz, streakWidth) * bwComp.(sweepHz, streakWidth, 5);
     streak = LPF.ar(streak, (sweepHz * streakCeilRatio).clip(80, nyq)) * io.par(\streakLevel) * streakTrim;
 
     sum = modes + flow + streak;

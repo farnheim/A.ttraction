@@ -1,23 +1,20 @@
-// App/presets.scd — the preset manager: ONE object for every preset of the
-// project. presets/<kind>/<name>.scd, kind = project | mixer | matrix | <machine>.
-// Every file is the same event literal; a kind only picks its sections (and a
-// machine kind only its own entry of `layers`). Loads after lib + ui.
+// App/presets.scd — the preset manager ~preset, one object for every kind; docs: docs/architecture/app/code-notes.md
 
 (
 // ===== CONFIG — edit here ============================================
 ~cfg_presets = (
-    root:    ((~appDir ? (thisProcess.nowExecutingPath !? (_.dirname))) ? "") +/+ "presets",
+    root:    ~appDir +/+ "presets",
     kinds:   (
         project: [\layers, \mixer, \fx, \tape, \fingerprint, \wander, \graph, \cells],
         mixer:   [\mixer, \fx, \tape, \fingerprint],
         matrix:  [\wander, \graph, \cells]
     ),
     machine: [\layers],
+    fxKeys:  [\rev_mode, \dly_mode, \bass, \treble],
     btnW:    84,
     btnH:    24,
     gap:     6
 );
-
 
 // ===== LOGIC =========================================================
 ~preset = (
@@ -133,31 +130,11 @@
             }
         ),
         fx: (
-            get: {
-                ~cfg_effects !? { |fx| (
-                    rev_mode: fx.rev_mode, dly_mode: fx.dly_mode, bass: fx.rev_bass, treble: fx.rev_treble
-                ) }
-            },
+            get: { ~cfg_effects !? { |fx| var e = (); ~cfg_presets.fxKeys.do { |k| e[k] = fx[k] }; e } },
             set: { |fx|
-                if(~cfg_effects.notNil) {
-                    [
-                        [\rev_mode, \mode,   [\space_echo_rev], [\rev_mode]],
-                        [\dly_mode, \mode,   [\space_echo_dly], [\dly_mode]],
-                        [\bass,     \bass,   [\space_echo_rev, \space_echo_dly], [\rev_bass, \dly_bass]],
-                        [\treble,   \treble, [\space_echo_rev, \space_echo_dly], [\rev_treble, \dly_treble]]
-                    ].do { |row|
-                        fx[row[0]] !? { |v|
-                            row[2].do { |n| Ndef(n).set(row[1], v) };
-                            row[3].do { |k| ~cfg_effects[k] = v };
-                        };
-                    };
-                    ~mixerFx !? { |wid|
-                        wid[\revMode] !? { |p| ~uiPopupSet.(p, (~cfg_effects.rev_mode - 1).clip(0, 11)) };
-                        wid[\dlyMode] !? { |p| ~uiPopupSet.(p, (~cfg_effects.dly_mode - 1).clip(0, 11)) };
-                        wid[\bass]    !? { |r| ~uiRulerSet.(r, ~cfg_effects.rev_bass) };
-                        wid[\treble]  !? { |r| ~uiRulerSet.(r, ~cfg_effects.rev_treble) };
-                        { wid[\dlyGlyph] !? (_.refresh); wid[\revGlyph] !? (_.refresh) }.defer;
-                    };
+                if(~fxSet.notNil) {
+                    ~cfg_presets.fxKeys.do { |k| fx[k] !? { |v| ~fxSet.(k, v) } };
+                    ~mixerFxSync !? (_.value);
                 };
             }
         ),
@@ -169,8 +146,7 @@
                 };
             }
         ),
-        // the structure itself, not its seed: an edit of ~cfg_fp must not
-        // silently redraw a saved fingerprint
+        // the structure itself, not its seed: an edit of ~cfg_fp must not redraw it
         fingerprint: (
             get: { ~fpLive !? { |live| (on: live[\on] == true, fp: ~fpCurrent) } },
             set: { |f| ~fpLoad !? { |load| load.(f[\fp], f[\on]) } }
@@ -193,14 +169,11 @@
         )
     ),
 
-    // field and popup are two buttons wide: the bar sits on the button grid
     bar: { |self, parent, x, y, kind|
         var c = ~cfg_presets, fw = (c.btnW * 2) + c.gap, bx = x + fw + c.gap, y2 = y + c.btnH + c.gap;
         var b = (kind: kind.asSymbol), field;
         field = TextField(parent, Rect(x, y, fw, c.btnH)).string_("").font_(~uiMono.value);
-        // the OS style draws a rounded frame the palette cannot reach; a style
-        // sheet replaces it with the square one every drawn button has, and then
-        // owns the colours too (it paints white over .background_)
+        // a style sheet, not .background_: the OS frame ignores the palette (code-notes)
         field.setProperty(\styleSheet, ("QLineEdit { border: 1px solid %; border-radius: 0; padding: 0 6px;"
             + "background: %; color: %; selection-background-color: %; selection-color: %; }")
             .format(*[~uiPal.ink, ~uiPal.paper, ~uiPal.ink, ~uiPal.ink, ~uiPal.paper].collect(_.hexString)));

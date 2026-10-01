@@ -1,20 +1,9 @@
-// App/fingerprint.scd — NET · the fingerprint: a structure after the canon of
-// docs/architecture/structure-grid/ (rules 1–9, amendments 2026-09-28: the
-// braid of rule 11 — k strands, each closed by its return, so every glyph has
-// exactly one coupling in and one out) whose
-// nodes are the glyphs of the active machines. Folded into the weights of the
-// layer pairs, it is the law of chance of the matrix (cells.scd): which pair
-// may be thrown at all, how many cells it gets, how long its lines may run.
-// Pure logic: no server, no cells. Loads after lines, before cells.
-// API: ~fpGenerate.(complexity, links, symmetry, seed) · ~fpSet.(on) ·
-//      ~fpLoad.(export, on) · ~fpLaw.value · ~fpRender.(export)
-// Reference: docs/features/matrix-ru.md, «Фингерпринт».
+// App/fingerprint.scd — NET fingerprint: a braid structure folded into the law of chance; docs: docs/features/matrix-ru.md
 
 (
 // ===== CONFIG — edit here ============================================
-// every pair [a, b] is interpolated by its axis: complexity (the form) or
-// links (the swaps of the braid). The field is 22 × 18 cells: square on the
-// deck, whose cell is 18 × 22 px, and room for 20 glyphs in four lanes
+
+// field 22 × 18 cells: square on the deck (cell 18 × 22 px), room for 20 glyphs in four lanes
 ~cfg_fp = (
     nodes:       [5, 20],
     strands:     [1, 4],
@@ -32,9 +21,9 @@
     knobs:       (complexity: 0.9, links: 0.6, symmetry: 0.5)
 );
 
-
 // ===== LOGIC =========================================================
-// the canon's glyph <-> layer table; a layer without a glyph takes no part
+
+// a layer without a glyph takes no part
 ~fpClassOrder = [\alpha, \delta, \epsilon, \zeta, \theta];
 ~fpCharOf = (alpha: "█", delta: "▄", epsilon: "▓", zeta: "░", theta: "▒");
 ~fpLayerOf = Dictionary.new;
@@ -45,7 +34,7 @@
     single: (single: "┼", double: "╪"),
     double: (single: "╫", double: "╬")
 );
-~fpCrossChars = ["┼", "╪", "╫", "╬"];
+~fpCrossChars = ~fpCrossOf.values.collect(_.values).flatten;
 ~fpLineChars = (
     weak:   (vert: "│", horiz: "─", upRight: "└", upLeft: "┘", downRight: "┌", downLeft: "┐"),
     strong: (vert: "║", horiz: "═", upRight: "╚", upLeft: "╝", downRight: "╔", downLeft: "╗")
@@ -86,20 +75,13 @@
     }.join("\n")
 };
 
-
 // ----- the braid + coupling strength -----------------------------------
-// n glyphs on k lanes, the lanes differing by at most one glyph. Between two
-// tiers neighbouring lanes swap with swapProb: the coupling leaves its lane and
-// its neighbour's comes in. Each lane closes with one return from its lowest
-// glyph to its first (rule 11), so the couplings form a permutation: every
-// glyph has exactly one in and one out, lies on a cycle through the lanes its
-// strands visit, and every layer modulates as often as it is modulated. A
-// coupling that stays in its lane is strong, one that changes lane is weak; a
-// return takes the strength of its source's input
+
+// each lane closes with one return (rule 11): the couplings form a permutation, one in and one out
 ~fpBraid = { |n, k, swapProb|
     var len = Array.fill(k, { |lane| (n div: k) + (lane < (n % k)).binaryValue });
     var grid = Array.fill(k, { List[] }), nodes = List[], edges = List[], swaps = 0;
-    // a coupling leaves down; one from another lane enters by the side facing its parent
+    // one from another lane enters by the side facing its parent
     var addEdge = { |a, b|
         var e = (src: a, dst: b, strong: a.lane == b.lane,
             entry: case { a.lane == b.lane } { \up } { a.lane > b.lane } { \right } { \left });
@@ -133,14 +115,9 @@
     )
 };
 
-
 // ----- placement ------------------------------------------------------
-// the lanes stand evenly across the field and a glyph keeps its lane's column.
-// A glyph stands a run of rows below its parent and below the glyph above it
-// in its lane, short runs the most likely. Straight under the parent a run of
-// one would make them touch (rule 3); a swap is two couplings that cross, and
-// each needs a row of its own to turn in, so a glyph reached across lanes
-// stands at least three rows lower
+
+// run ≥ 2 under the parent (rule 3: no touching); ≥ 3 across lanes: each crossing coupling needs a turn row
 ~fpPlace = { |graph, cols|
     graph[\nodes].do { |n|
         var run = ~cfg_fp.runMin + ((~cfg_fp.runMax - ~cfg_fp.runMin + 1) * (1.0.rand ** 2.5)).floor;
@@ -152,59 +129,51 @@
     };
 };
 
-
 // ----- rasterization --------------------------------------------------
-// a failed routing is retried ON THE SAME graph (rasterTries) — culling on
-// collision would bias the draw. Every return is placed or the pass fails: a
-// lane left open would leave its last glyph without a coupling out.
-// Intersections come on a second pass, three per swap at most: its own two
-// couplings, and the returns running up its gap
+~fpEdgeCells = { |e, j|
+    var r1 = e.src[\row], r2 = e.dst[\row], x = e.src.col, c = e.dst.col, y = c + (x - c).sign;
+    var g = if(e.strong) { ~fpLineChars.strong } { ~fpLineChars.weak };
+    var out = List[];
+    if(x == c) { ~fpSpan.(r1 + 1, r2 - 1).do { |r| out.add([r, x, g.vert]) } } {
+        ~fpSpan.(r1 + 1, j - 1).do { |r| out.add([r, x, g.vert]) };
+        out.add([j, x, if(y > x) { g.upRight } { g.upLeft }]);
+        ~fpSpan.(x.min(y) + 1, x.max(y) - 1).do { |cc| out.add([j, cc, g.horiz]) };
+        out.add([j, y, if(y > x) { g.downLeft } { g.downRight }]);
+        ~fpSpan.(j + 1, r2 - 1).do { |r| out.add([r, y, g.vert]) };
+        out.add([r2, y, if(y > c) { g.upLeft } { g.upRight }]);
+    };
+    out
+};
+
+// the two axes of a return differ in strength (rule 7): a mixed corner marks a change of reading direction
+~fpReturnCells = { |e, x|
+    var r1 = e[\src][\row], r2 = e[\dst][\row], c = e[\src].col, strong = e[\strong];
+    var vert = if(strong) { "║" } { "│" }, horiz = if(strong) { "─" } { "═" };
+    var out = List[];
+    [r1, r2].do { |r| ~fpSpan.(c.min(x) + 1, c.max(x) - 1).do { |cc| out.add([r, cc, horiz]) } };
+    out.add([r1, x, if(x > c) { if(strong) { "╜" } { "╛" } } { if(strong) { "╙" } { "╘" } }]);
+    ~fpSpan.(r2 + 1, r1 - 1).do { |r| out.add([r, x, vert]) };
+    out.add([r2, x, if(x > c) { if(strong) { "╖" } { "╕" } } { if(strong) { "╓" } { "╒" } }]);
+    out
+};
+
+// a return leaves its last glyph by the side a swap did not come in by
+~fpReturnCols = { |e, cols|
+    var c = e[\src].col, taken = e[\src][\from][\entry];
+    (1 .. cols - 2).reject { |x| (x == c) or: { taken == if(x > c) { \right } { \left } } }.scramble
+};
+
+// a failed routing is retried ON THE SAME graph (rasterTries): culling on collision would bias the draw
 ~fpAttempt = { |graph, cols, rows|
-    var field, crossCount, cells, retCells, retCols, place, pass, edgesByReach, n = 0, routed = false;
+    var field, crossCount, place, pass, edgesByReach, n = 0, routed = false;
     var rets = graph[\rets], crossQuota = 3 * graph[\swaps];
-    var isV = { |s| (s == "│") or: { s == "║" } };
-    var isH = { |s| (s == "─") or: { s == "═" } };
+    var isV = { |s| (s == ~fpLineChars.weak.vert) or: { s == ~fpLineChars.strong.vert } };
+    var isH = { |s| (s == ~fpLineChars.weak.horiz) or: { s == ~fpLineChars.strong.horiz } };
 
     ~fpPlace.(graph, cols);
     edgesByReach = graph[\edges].sort { |a, b| (a.src.col - a.dst.col).abs > (b.src.col - b.dst.col).abs };
 
-    // a swap turns on row j: down its parent's lane, across, down beside its glyph
-    cells = { |e, j|
-        var r1 = e.src[\row], r2 = e.dst[\row], x = e.src.col, c = e.dst.col, y = c + (x - c).sign;
-        var g = if(e.strong) { ~fpLineChars.strong } { ~fpLineChars.weak };
-        var out = List[];
-        if(x == c) { ~fpSpan.(r1 + 1, r2 - 1).do { |r| out.add([r, x, g.vert]) } } {
-            ~fpSpan.(r1 + 1, j - 1).do { |r| out.add([r, x, g.vert]) };
-            out.add([j, x, if(y > x) { g.upRight } { g.upLeft }]);
-            ~fpSpan.(x.min(y) + 1, x.max(y) - 1).do { |cc| out.add([j, cc, g.horiz]) };
-            out.add([j, y, if(y > x) { g.downLeft } { g.downRight }]);
-            ~fpSpan.(j + 1, r2 - 1).do { |r| out.add([r, y, g.vert]) };
-            out.add([r2, y, if(y > c) { g.upLeft } { g.upRight }]);
-        };
-        out
-    };
-
-    // the two axes of a return differ in strength (rule 7); a mixed corner marks
-    // a change of reading direction. Both ends stand in one lane column c
-    retCells = { |e, x|
-        var r1 = e[\src][\row], r2 = e[\dst][\row], c = e[\src].col, strong = e[\strong];
-        var vert = if(strong) { "║" } { "│" }, horiz = if(strong) { "─" } { "═" };
-        var out = List[];
-        [r1, r2].do { |r| ~fpSpan.(c.min(x) + 1, c.max(x) - 1).do { |cc| out.add([r, cc, horiz]) } };
-        out.add([r1, x, if(x > c) { if(strong) { "╜" } { "╛" } } { if(strong) { "╙" } { "╘" } }]);
-        ~fpSpan.(r2 + 1, r1 - 1).do { |r| out.add([r, x, vert]) };
-        out.add([r2, x, if(x > c) { if(strong) { "╖" } { "╕" } } { if(strong) { "╓" } { "╒" } }]);
-        out
-    };
-
-    // a return leaves its last glyph by the side a swap did not come in by
-    retCols = { |e|
-        var c = e[\src].col, taken = e[\src][\from][\entry];
-        (1 .. cols - 2).reject { |x| (x == c) or: { taken == if(x > c) { \right } { \left } } }.scramble
-    };
-
-    // rule 8: an intersection is strictly a vertical through a horizontal within
-    // quota; allowCross = false is the planar law (and the whole of links = 0)
+    // rule 8: a crossing is only a vertical through a horizontal; allowCross = false is the planar law
     place = { |list, allowCross|
         var need = List[], fine = true;
         var crossFor = { |vSym, hSym|
@@ -242,9 +211,9 @@
         crossCount = 0;
         graph[\nodes].do { |g| field[g[\row]][g.col] = ~fpNodeMark };
         edgesByReach.do { |e|
-            if(fine) { fine = route.(~fpSpan.(e.src[\row] + 1, e.dst[\row] - 1).scramble, { |j| cells.(e, j) }) };
+            if(fine) { fine = route.(~fpSpan.(e.src[\row] + 1, e.dst[\row] - 1).scramble, { |j| ~fpEdgeCells.(e, j) }) };
         };
-        rets.do { |e| if(fine) { fine = route.(retCols.(e), { |x| retCells.(e, x) }) } };
+        rets.do { |e| if(fine) { fine = route.(~fpReturnCols.(e, cols), { |x| ~fpReturnCells.(e, x) }) } };
         fine
     };
 
@@ -266,10 +235,7 @@
     }
 };
 
-
 // ----- layers onto nodes: chance picks who is present, symmetry who talks to whom
-// the summed strength and the count of the couplings per pair of layers,
-// sparse: only pairs that have a coupling
 ~fpPairW = { |nodeLayers, edges|
     var w = IdentityDictionary.new, cnt = IdentityDictionary.new;
     edges.do { |e|
@@ -295,8 +261,7 @@
     if(den > 0) { num / den } { 1.0 }
 };
 
-// every layer gets n div L glyphs, chance picks which get one more; swaps
-// keep the histogram: only who sits where moves
+// swaps keep the histogram (only who sits where moves): each layer gets n div L glyphs or one more
 ~fpDeal = { |n, layers| layers.scramble.wrapExtend(n).scramble };
 
 ~fpAssign = { |n, edges, layers, target|
@@ -314,10 +279,11 @@
     nl
 };
 
-
 // ----- the act: one seed, one borrowed stream -------------------------
-~fpBuild = { |complexity = 0.4, links = 0.3, symmetry = 0.5, seed, layers|
-    var c = complexity.clip(0, 1), l = links.clip(0, 1), sy = symmetry.clip(0, 1);
+~fpBuild = { |complexity, links, symmetry, seed, layers|
+    var k0 = ~cfg_fp.knobs;
+    var c = (complexity ? k0.complexity).clip(0, 1), l = (links ? k0.links).clip(0, 1);
+    var sy = (symmetry ? k0.symmetry).clip(0, 1);
     var target = ~fpLerp.(~cfg_fp.nodes, c).round.asInteger.max(2);
     // a strand of one glyph would have to return into itself
     var k = ~fpLerp.(~cfg_fp.strands, c).round.asInteger.clip(1, target div: 2);
@@ -326,8 +292,7 @@
     layers = ~fpActive.(layers);
     seed = seed ?? { Date.seed };
     if(layers.isEmpty) { nil } {
-        // the language stream is BORROWED, not taken: a thread left reseeded
-        // would make every later dice a function of the last fingerprint seed
+        // the stream is BORROWED: a thread left reseeded would make later dice a function of the fp seed
         wasRand = thisThread.randData;
         thisThread.randSeed = seed;
         protect {
@@ -345,7 +310,7 @@
                 nodes: got[\nodes].collect { |p, i| [p[0], p[1], nl[i], p[2]] },
                 edges: got[\edges],
                 counts: (
-                    strands: got[\strands], nodes: nl.size, edges: got[\edges].size,
+                    strands: got[\strands], nodes: nl.size,
                     returns: got[\edges].count { |e| e[3] == 1 }, swaps: got[\swaps],
                     crosses: got[\field].sum { |row| row.count { |x| ~fpCrossChars.any { |y| y == x } } },
                     sigma: ~fpSigma.(nl, got[\edges]).round(0.001)
@@ -355,30 +320,26 @@
     }
 };
 
-
 // ----- the law --------------------------------------------------------
-// W[A][B]: the summed strength of the couplings from a glyph of A to one of B,
-// the diagonal included; M[A][B]: their mean strength. Pairs of layers outside
-// `layers` are not counted
+
+// W[A][B]: summed coupling strength from A's glyphs to B's, the diagonal included; M[A][B]: the mean
 ~fpWeights = { |fp, layers|
     var pw = ~fpPairW.(fp[\nodes].collect { |x| x[2].asSymbol }, fp[\edges]);
-    var w = IdentityDictionary.new, cnt = IdentityDictionary.new, m = IdentityDictionary.new, sum = 0;
-    layers = layers ?? { ~netLayers !? (_.value) } ?? { ~fpClassOrder };
+    var w = IdentityDictionary.new, cnt = IdentityDictionary.new, m = IdentityDictionary.new;
+    layers = ~fpActive.(layers);
     layers.do { |a|
         w[a] = IdentityDictionary.new; cnt[a] = IdentityDictionary.new; m[a] = IdentityDictionary.new;
         layers.do { |b|
             w[a][b] = (pw[\W][a] !? { |r| r[b] }) ? 0;
             cnt[a][b] = (pw[\n][a] !? { |r| r[b] }) ? 0;
             m[a][b] = if(cnt[a][b] > 0) { w[a][b] / cnt[a][b] } { 0 };
-            sum = sum + w[a][b];
         };
     };
-    (W: w, M: m, n: cnt, sum: sum)
+    (W: w, M: m, n: cnt)
 };
 
-~fpLaw = {
-    if((~fpLive[\on] == true) and: { ~fpCurrent.notNil }) { ~fpWeights.(~fpCurrent) }
-};
+~fpOn = { (~fpLive[\on] == true) and: { ~fpCurrent.notNil } };
+~fpLaw = { if(~fpOn.value) { ~fpWeights.(~fpCurrent) } };
 
 
 // ----- live state -----------------------------------------------------

@@ -1,11 +1,8 @@
-// App/lib.scd — NET · the machines. Every machine publishes its parameters,
-// its inner variables and its output as audio-rate sources (\src ports, the
-// `tap` bus), and takes audio-rate modulation into the same parameters,
-// variables and one audio input (\dst ports, the `mod` bus). What connects a
-// source to a destination is cells.scd; the geometry of a column is lines.scd.
-// No CONFIG: a machine's settings are its own ~spec_<class>.
+// App/lib.scd — NET machines: ports, buses, registry ~netMachine, base values; docs: docs/architecture/app/code-notes.md
 
 (
+var netMap, netUnmap, netAlloc;
+
 ~ungSpecs  = ~ungSpecs  ? ();
 ~ungVals   = ~ungVals   ? ();
 ~netBus    = ~netBus    ? ();
@@ -15,8 +12,7 @@
 ~netLayers = {
     (~activeLayers ? ~ungSpecs.keys.asArray.sort).select { |l| ~ungSpecs[l].notNil }
 };
-// a port is [layer, key]; `side` is \src or \dst. Both sides list the same
-// parameters and variables in the same order — only the last port differs
+// both sides list the same ports in the same order — only the last port (\out / \in) differs
 ~netPorts = { |spec, side|
     spec.params.collect(_.key) ++ (spec[\vars] ? []).collect(_.key) ++ [if(side == \src) { \out } { \in }]
 };
@@ -24,8 +20,7 @@
     ~netLayers.value.collect { |l| ~netPorts.(~ungSpecs[l], side).collect { |k| [l, k] } }.flatten(1)
 };
 ~netTag = { |port| (port[0] ++ "." ++ port[1]).asSymbol };
-// a machine outside ~netLayers has no row and no column: its cells take no
-// part in the geometry, so they must not sound either
+// a machine outside ~netLayers has no row or column: its cells are out of the geometry, so must not sound
 ~netPortIndex = { |l, k, side|
     var sp = ~ungSpecs[l], b = ~netBus[l];
     if(sp.isNil or: { b.isNil } or: { ~netLayers.value.includes(l).not }) { nil } {
@@ -33,20 +28,19 @@
     }
 };
 
-// the same arithmetic on numbers and on UGens: ControlSpec:map rounds and
-// clips in the language and is not safe to hand a UGen
-~netMap = { |sp, u|
+// ControlSpec:map rounds and clips in the language and is not safe to hand a UGen
+netMap = { |sp, u|
     if(sp.warp.isKindOf(ExponentialWarp)) {
         sp.minval * ((sp.maxval / sp.minval) ** u)
     } { sp.minval + (u * (sp.maxval - sp.minval)) }
 };
-~netUnmap = { |sp, x|
+netUnmap = { |sp, x|
     if(sp.warp.isKindOf(ExponentialWarp)) {
         (x / sp.minval).log / (sp.maxval / sp.minval).log
     } { (x - sp.minval) / (sp.maxval - sp.minval) }
 };
 
-~netAlloc = { |name, n|
+netAlloc = { |name, n|
     var b = ~netBus[name];
     if(b.isNil or: { b[\n] != n }) {
         b !? { b[\tap].free; b[\mod].free };
@@ -56,20 +50,11 @@
     b
 };
 
-// a machine spec: `params` and `vars` are pairs `key: [ControlSpec args]`,
-// `level` is the fixed output trim, `fade` the Ndef crossfade. The body gets
-// `io` and returns its stereo signal:
-//   io.par(\key)          -> the parameter, live, in its own units
-//   io.node(\key, sig)    -> an inner variable made public: tapped and modulated
-//   io.feed               -> the audio that other machines pour into this one
-//   io.nyq                -> the usable top of the band
-// level, LeakDC and Limiter belong to the field, not to the body.
-// everything the closure needs is captured here: the Ndef builds the graph
-// outside this environment
+// everything the closure needs is captured here: the Ndef builds the graph outside this environment
 ~netMachine = { |spec, body|
     var entries = { |pairs| pairs.clump(2).collect { |kv| (key: kv[0], spec: kv[1].asSpec) } };
     var name, level, srcKeys, dstKeys, n, bus, tapIdx, modIdx;
-    var map = ~netMap, unmap = ~netUnmap;
+    var map = netMap, unmap = netUnmap;
     var specs = (), vspecs = ();
     spec = spec.copy.putAll((params: entries.(spec.params), vars: entries.(spec[\vars] ? [])));
     name = spec.name;
@@ -77,7 +62,7 @@
     srcKeys = ~netPorts.(spec, \src);
     dstKeys = ~netPorts.(spec, \dst);
     n = srcKeys.size;
-    bus = ~netAlloc.(name, n);
+    bus = netAlloc.(name, n);
     tapIdx = bus[\tap].index;
     modIdx = bus[\mod].index;
     spec.params.do { |p| specs[p.key] = p.spec };
@@ -129,7 +114,6 @@
     ~netRewire.value;
 };
 
-
 // ----- parameters (base values; modulation rides on top in the graph) -----
 ~netParam = { |layer, key|
     ~ungSpecOf.(layer) !? { |sp| sp.params.detect { |p| p.key == key } }
@@ -151,7 +135,7 @@
     (~ungVals[layer] !? { |d| d[key] }) ?? { ~netParam.(layer, key) !? { |p| p.spec.default } }
 };
 ~netDefaults = { |layer|
-    ~ungSpecOf.(layer).params.do { |p| ~setParam.(layer, p.key, p.spec.default) };
+    ~ungSpecOf.(layer) !? { |sp| sp.params.do { |p| ~setParam.(layer, p.key, p.spec.default) } };
 };
 ~netDiceBase = { |layer, amt = 1.0|
     ~ungSpecOf.(layer).params.do { |p|

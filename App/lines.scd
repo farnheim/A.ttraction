@@ -1,27 +1,15 @@
-// App/lines.scd — NET · the geometry of one column, in rows. A column is an
-// array of entries (row:, len:, fixed:) sorted by row, on a rail of n rows;
-// `len` is a signed line length in rows: + runs down, − runs up. A line stops
-// at the frame and at the next entry and shares a gap with the line coming the
-// other way; a row under a line takes no entry. `fixed` lengths are never
-// moved, the others are being placed. A wall (a glyph of the graph) is a run of
-// rows that stops a line as the frame does and takes no entry: it enters the
-// column as fixed entries of length 0 (~linesWall), so every path below meets
-// it as a neighbour. No cells, no server, no chance: entries are the caller's
-// scratch copies and may carry any payload.
-// Reference: docs/features/matrix-ru.md.
+// App/lines.scd — NET geometry of one matrix column in rows: range, accept, deal, walls; docs: docs/features/matrix-ru.md
+
+(
+// declared first as sclang demands: the closures below keep them after the block ends
+var eps = 1e-9, sorted, lower, gapsOf, roomOf, coveredIn, share;
 
 // ===== CONFIG — edit here ============================================
-(
-// private to this file: the closures below keep them after the block ends
-var eps, sorted, lower, gapsOf, roomOf, coveredIn, share;
-
 ~cfg_lines = (
     lineRows: 10
 );
 
-
 // ===== LOGIC =========================================================
-eps = 1e-9;
 
 sorted = { |col| col.sort { |x, y| x[\row] < y[\row] } };
 
@@ -52,10 +40,13 @@ roomOf = { |col, r, n|
     ].collect { |x| if(x < eps) { 0 } { x.min(~cfg_lines.lineRows) } }
 };
 
+// the rows a line of `len` rows runs over, beyond its own
+~linesCover = { |len| (len.abs - eps).ceil.max(0).asInteger };
+
 coveredIn = { |col, r|
     col.any { |e|
         var k = (r - e[\row]) * e[\len].sign;
-        (k > 0) and: { (k - 1) < (e[\len].abs - eps) }
+        (k > 0) and: { k <= ~linesCover.(e[\len]) }
     }
 };
 
@@ -96,8 +87,7 @@ share = { |col, n|
     }
 };
 
-// `least` in rows: a neighbour being placed with no more room than that
-// could only ever get a line too short to exist
+// `least` (rows): a neighbour placed with no more room could only ever get a line too short to exist
 ~linesAccept = { |col, entry, n, least = 0|
     var r = entry[\row], i = lower.(col, r), trial;
     if(((i < col.size) and: { col[i][\row] == r }) or: { coveredIn.(col, r) }) { col } {
@@ -109,8 +99,7 @@ share = { |col, n|
     }
 };
 
-// the rooms are taken before any new line exists, so the deal is order-free;
-// lenFn gets the entry too, for whatever payload it carries
+// the rooms are taken before any new line exists, so the deal is order-free
 ~linesDeal = { |col, n, lenFn|
     var fresh = col.reject { |e| e[\fixed] };
     var rooms = fresh.collect { |e| roomOf.(col, e[\row], n) };
@@ -118,8 +107,6 @@ share = { |col, n|
     share.(col, n)
 };
 
-// a layout the field may hold: no two entries on one row, none under a line,
-// every line inside the room its neighbours leave it
 ~linesValid = { |col, n|
     col = sorted.(col.copy);
     col.every { |e, i|

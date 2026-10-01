@@ -1,6 +1,4 @@
-// App/ui.scd — UI kit: monochrome paper/ink, hand-drawn buttons, rulers and
-// popups (Qt widgets draw in the OS style and ignore the palette). Loads before
-// the windows; pure language side.
+// App/ui.scd — UI kit: paper/ink palette, hand-drawn widgets; docs: docs/architecture/app/code-notes.md
 
 (
 ~uiPal = (
@@ -11,9 +9,7 @@
 // type after splav.cc: text 14 · label 14 semibold · title 20 semibold, all × 10/14
 ~uiType  = ( text: 10, label: 10, title: 14 );
 ~uiMono  = { |size, bold = false| Font("IBM Plex Mono", size ? ~uiType.text, bold) };
-// a machine's glyph: a 30 × 36 pixel card cut into vertical bands, each solid
-// or a 1-px checker (lit where x + y is even) — drawn in device-sized pixels at
-// any scale, because a scaled checker smears into grey
+// drawn in device pixels at any scale: a scaled checker smears into grey
 ~uiGlyphs = (
     alpha:   [[0, 30, \solid]],
     delta:   [[0, 24, \solid], [24, 30, \dither]],
@@ -39,8 +35,7 @@
     })
 };
 
-// a box-drawing character as four arms [up, down, left, right], each 0, single
-// or double — drawn, not typeset: IBM Plex Mono is not sure to carry them
+// box characters drawn, not typeset: IBM Plex Mono is not sure to carry them
 ~uiBoxArms = Dictionary.newFrom([
     "│", [1, 1, 0, 0], "─", [0, 0, 1, 1], "┌", [0, 1, 0, 1], "┐", [0, 1, 1, 0], "└", [1, 0, 0, 1], "┘", [1, 0, 1, 0],
     "║", [2, 2, 0, 0], "═", [0, 0, 2, 2], "╔", [0, 2, 0, 2], "╗", [0, 2, 2, 0], "╚", [2, 0, 0, 2], "╝", [2, 0, 2, 0],
@@ -48,11 +43,8 @@
     "╘", [1, 0, 0, 2], "╙", [2, 0, 0, 1], "╛", [1, 0, 2, 0], "╜", [2, 0, 1, 0],
     "┼", [1, 1, 1, 1], "╬", [2, 2, 2, 2], "╪", [1, 1, 2, 2], "╫", [2, 2, 1, 1]
 ]);
-// filled bands, not strokes: a stroke of width 2 straddles the pixel grid.
-// In a corner each line of a double arm stops on the edge of the matching
-// line of the other arm (outer on outer, inner on inner), so ╔ closes instead
-// of crossing itself; straight arms and crosses run through the centre
-~uiBoxPen = { |x0, y0, w, h, sym, color, sw = 2, gap = 3|
+// filled bands, not strokes: a stroke of width 2 straddles the pixel grid
+~uiBoxPen = { |x0, y0, w, h, sym, color, sw, gap|
     var arms = ~uiBoxArms[sym], cx = w div: 2, cy = h div: 2, corner;
     var bands = { |v, c|
         var a = c - ((if(v == 2) { (2 * sw) + gap } { sw }) div: 2);
@@ -106,9 +98,7 @@
     [\c, 45.48, 220.79, 54.69, 236.15, 88.87, 236.15],
     [\m, 8.61, 36.1], [\l, 165.28, 36.1], [\l, 165.28, 0], [\l, 8.61, 0]
 ];
-// the mark stands on the title's baseline, as tall as a machine's glyph.
-// Qt centres the line box (ascent 1.025 + descent 0.275 em) in the rect, so the
-// baseline sits 0.375 em below its middle (IBM Plex Mono metrics)
+// baseline 0.375 em below the rect's middle: Qt centres the line box (code-notes)
 ~uiTitle = { |parent, rect, string|
     var size = ~uiType.title, markH = ~uiGlyphSize.y, k = markH / 272, w = (175 * k).ceil;
     var base = (rect.height / 2) + (size * 0.375), gap = (size * 0.6).round;
@@ -138,11 +128,7 @@
     };
     x0
 };
-// a page's content is one column of contentW centred in its host, with a
-// margin on both sides; the header's left and right items sit on the column's
-// edges (margin, margin + contentW). The host re-centres it when it resizes;
-// height nil = the host's height, followed on resize. Qt still sends a resize
-// while the window is tearing down, with no bounds left
+// Qt still sends a resize while the window tears down, with no bounds left
 ~uiPage = { |host, contentW, height, onMove, margin = 28|
     var pw = contentW + (margin * 2), page = CompositeView(host, Rect(0, 0, pw, height ? 1));
     var center = {
@@ -161,11 +147,10 @@
 // fixed number of decimals (round(0.01).asString drops trailing zeros)
 ~uiFmt = { |v, d = 2|
     var m = (10 ** d).asInteger, n = (v * m).round.asInteger;
-    if(n < 0, "−", "") ++ (n.abs div: m).asString ++ "." ++ (n.abs mod: m).asString.padLeft(d, "0");
+    if(n < 0, "−", "") ++ (n.abs div: m).asString
+        ++ if(d > 0) { "." ++ (n.abs mod: m).asString.padLeft(d, "0") } { "" };
 };
-// a button is a layout frame; Qt Button draws in the OS style (rounded
-// gradient) and ignores the palette, so it is drawn by hand. label is a string
-// or [off, on]; on = inverted (pressed state OR a permanently inverted primary)
+// drawn by hand: Qt Button draws in the OS style and ignores the palette
 ~uiBtn = { |parent, rect, label, action, on = false|
     var labels = if(label.isKindOf(String)) { [label, label] } { label };
     var b = ( on: on, enabled: true, pressed: false, act: action, labels: labels );
@@ -188,8 +173,7 @@
         var hit = (x >= 0) and: { y >= 0 } and: { x <= u.bounds.width } and: { y <= u.bounds.height };
         b[\pressed] = false;
         uv.refresh;
-        // only the sync hooks move `on` (~mixerRefreshMute and friends) — the
-        // button never toggles it itself, or model and view drift apart
+        // only the sync hooks move `on`, or model and view drift apart
         if(b[\enabled] and: hit) { b[\act].value(b) };
     });
     b;
@@ -197,19 +181,16 @@
 ~uiBtnSet    = { |b, on| b !? { b[\on] = on; { b[\view].refresh }.defer } };
 ~uiBtnEnable = { |b, flag| b !? { b[\enabled] = flag; { b[\view].refresh }.defer } };
 
-// a popup is a layout frame plus its own drop layer; PopUpMenu draws in the OS
-// style. The layer lives IN THE SAME window (creation order = stacking order),
-// so no second window needs focus; a transparent backdrop catches outside clicks
+// the drop layer lives in the same window, so no second window needs focus
 ~uiPopup = { |parent, rect, items, index = 0, action|
-    var p = ( items: items, index: index, act: action, enabled: true, hover: -1 );
+    var p = ( items: items, index: index, act: action, hover: -1 );
     var uv = UserView(parent, rect).background_(~uiPal.paper);
     p[\view] = uv;
     p[\parent] = parent;
     uv.drawFunc_({ |u|
         var w = u.bounds.width, h = u.bounds.height, font = ~uiMono.value;
         var str = ((p[\items] ? [])[p[\index]] ? "—").asString;
-        var col = if(p[\enabled]) { ~uiPal.ink } { ~uiPal.grey };
-        var cy = h / 2;
+        var col = ~uiPal.ink, cy = h / 2;
         Pen.strokeColor = col; Pen.width = 1;
         Pen.strokeRect(Rect(0.5, 0.5, w - 1, h - 1));
         ~uiPenText.(str, 9, cy - (str.bounds(font).height / 2), font, col);
@@ -217,7 +198,7 @@
         Pen.moveTo((w - 17)@(cy - 2.5)); Pen.lineTo((w - 9)@(cy - 2.5));
         Pen.lineTo((w - 13)@(cy + 3)); Pen.fill;
     });
-    uv.mouseDownAction_({ if(p[\enabled]) { ~uiPopupOpen.(p) } });
+    uv.mouseDownAction_({ ~uiPopupOpen.(p) });
     p;
 };
 ~uiPopupOpen = { |p|
@@ -264,13 +245,9 @@
         });
     };
 };
-~uiPopupSet    = { |p, idx| p !? { p[\index] = idx; { p[\view].refresh }.defer } };
-~uiPopupItems  = { |p, items| p !? { p[\items] = items; p[\index] = p[\index].clip(0, items.size - 1); { p[\view].refresh }.defer } };
-~uiPopupEnable = { |p, flag| p !? { p[\enabled] = flag; { p[\view].refresh }.defer } };
+~uiPopupSet = { |p, idx| p !? { p[\index] = idx; { p[\view].refresh }.defer } };
 
-// Pen.stringAtPoint places a string by its own ink box rounded to pixels: at
-// small sizes a monospaced column wobbles by the first letter. stringInRect
-// places it by the font's metrics, the same for every string
+// stringInRect, not stringAtPoint: the ink box makes a mono column wobble
 ~uiPenText = { |str, x, y, font, color, anchor = \left|
     var bw = str.bounds(font).width;
     var ax = switch(anchor, \right, { x - bw }, \middle, { x - (bw / 2) }, { x });
@@ -280,24 +257,17 @@
 ~uiRuler = { |parent, rect, spec, v0, action|
     var uv = UserView(parent, rect).background_(~uiPal.paper);
     var r = (
-        view: uv, spec: spec, norm: spec.unmap(v0 ? spec.default).clip(0, 1),
-        act: action, enabled: true, fmt: { |v| ~uiFmt.(v, 3) }
+        view: uv, spec: spec, norm: spec.unmap(v0 ? spec.default).clip(0, 1), act: action
     );
-    // r[\spec], never the captured argument: ~uiRulerSet already reads the slot,
-    // so a ruler whose spec was swapped (koppelfeld gain strips, whose ceiling is
-    // the class of the CURRENT destination) would otherwise act through the spec
-    // it was born with while drawing the new one
     var apply = { |px|
-        if(r[\enabled]) {
-            r[\norm] = ((px - 4) / (uv.bounds.width - 8)).clip(0, 1);
-            uv.refresh;
-            r[\valTxt] !? { |t| t.string_(r[\fmt].(r[\spec].map(r[\norm]))) };
-            r[\act].value(r[\spec].map(r[\norm]));
-        };
+        r[\norm] = ((px - 4) / (uv.bounds.width - 8)).clip(0, 1);
+        uv.refresh;
+        r[\valTxt] !? { |t| t.string_(r[\fmt].(spec.map(r[\norm]))) };
+        r[\act].value(spec.map(r[\norm]));
     };
     uv.drawFunc_({ |u|
         var w = u.bounds.width, y = (u.bounds.height * 0.5).round, x = 4 + (r[\norm] * (w - 8));
-        var col = if(r[\enabled]) { ~uiPal.ink } { ~uiPal.grey };
+        var col = ~uiPal.ink;
         Pen.width = 1; Pen.strokeColor = col;
         Pen.line(4@y, (w - 4)@y); Pen.stroke;
         Pen.strokeColor = ~uiPal.grey;
@@ -329,22 +299,17 @@
     r[\norm] = r[\spec].unmap(v).clip(0, 1);
     { r[\view].refresh; r[\valTxt] !? { |t| t.string_(r[\fmt].(v)) } }.defer;
 };
-~uiRulerEnable = { |r, on| r[\enabled] = on; { r[\view].refresh }.defer };
-
-// space echo: three tape heads (mode masks from effects) + a spring on reverb
 ~uiDrawEcho = { |u, mode|
-    var h1 = [1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0], h2 = [0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0];
-    var h3 = [0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0], rv = [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
-    var m = ((mode ? 1) - 1).clip(0, 11), y = u.bounds.height / 2;
+    var m = ~echoModeIndex.(mode), y = u.bounds.height / 2;
     Pen.strokeColor = ~uiPal.ink; Pen.width = 1;
     Pen.line(2@y, 52@y); Pen.stroke;
-    [h1, h2, h3].do { |hm, i|
+    ~echoModes.heads.do { |hm, i|
         var r = Rect(6 + (i * 16), y - 7, 9, 14);
         Pen.width = 1.2;
         Pen.fillColor = if(hm[m] == 1) { ~uiPal.ink } { ~uiPal.paper };
         Pen.fillRect(r); Pen.strokeRect(r);
     };
-    if(rv[m] == 1) {
+    if(~echoModes.rev[m] == 1) {
         Pen.width = 1.3; Pen.moveTo(55@y);
         [58@(y - 6), 61@(y + 6), 64@(y - 6), 67@(y + 6), 70@(y - 6), 73@y].do { |p| Pen.lineTo(p) };
         Pen.stroke;

@@ -1,6 +1,4 @@
-// App/synths/alpha.scd — machine `alpha`: ten tuned combs in oil, struck by
-// contact noise and a metal bank.
-
+// App/synths/alpha.scd — machine `alpha`: tuned combs in oil (§C.1)
 
 // ===== CONFIG — edit here ============================================
 (
@@ -47,7 +45,6 @@
     ]
 );
 
-
 // ===== LOGIC =========================================================
 ~netMachine.(~spec_alpha, { |io|
     var notes = (1..10).collect { |i| io.par(("n" ++ i).asSymbol) };
@@ -63,7 +60,7 @@
     ticks = HPF.ar(ticks, io.par(\bright));
 
     mDet   = io.node(\mDet, LFNoise0.ar([7, 9, 11, 13, 6, 8, 10, 12, 5]).range(0.985, 1.015));
-    mFreqs = (#[413, 661, 977, 1490, 2137, 3001, 4313, 5897, 7639] * mDet).clip(20, 18000);
+    mFreqs = (#[413, 661, 977, 1490, 2137, 3001, 4313, 5897, 7639] * mDet).clip(20, io.nyq);
     mRings = io.par(\metalRing) * #[0.8, 0.9, 1.0, 1.0, 0.95, 0.88, 0.78, 0.66, 0.55];
     mAmps  = #[0.4, 0.55, 0.7, 0.9, 1.0, 0.92, 0.78, 0.62, 0.46];
     mThump = Ringz.ar(contacts, io.node(\thump, 132 * LFNoise0.ar(4).range(0.98, 1.02)), 0.035)

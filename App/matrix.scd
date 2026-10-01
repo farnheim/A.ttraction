@@ -1,16 +1,4 @@
-// App/matrix.scd — the two pages of the field, drawn with the ui kit.
-// ~openMatrix: every source (row) against every destination (column); a cell
-//   is a bar across its row with a line — down = positive, up = negative, one
-//   row per 1 / lineRows of depth. The lines are the geometry of the field
-//   (lines.scd, cells.scd): a depth never leaves the cell's range. click = +0.3 (shift: −0.3), turned
-//   round or cut to the room there is; drag = the line's end follows the
-//   cursor; right-click or alt-click = off. Click a row/column label = dice
-//   it, right-click = clear it. Under the fingerprint the graph of the layers
-//   stands on the grid (graph.scd): its glyphs, and between them the arrows of
-//   the law, a dash for a weak pair; a line
-//   is drawn at its effective depth. The mouse does nothing to the graph.
-// ~openMachines: the base value of every parameter of every machine.
-
+// App/matrix.scd — the Matrix and Machines pages; docs: docs/features/matrix-ru.md
 
 // ===== CONFIG — edit here ============================================
 (
@@ -21,14 +9,18 @@
     headH:  132,
     rowH:   22,
     colW:   292,
-    idSeed: 9401
+    idSeed: 9401,
+    clickDepth: 0.3,
+    // dice of the base values: Matrix (all machines), a machine's dice, its nudge
+    diceBases:  0.35,
+    diceBase:   1.0,
+    nudge:      0.2
 );
 
 
 // ===== LOGIC =========================================================
 ~netCloseViews = {
     [~matWin, ~macWin].do { |w| w !? { |x| { try { x.close } }.defer } };
-    ~matWin = nil; ~macWin = nil;
 };
 
 ~netIds = { |n|
@@ -41,9 +33,8 @@
     ids
 };
 
-// a vertex in pixels of the grid: its glyph cell and its centre
 ~netDrawGraph = { |lw, lh, c|
-    var span = ~graphSpan.value, vs = ~graphVerts.value, law = ~fpLaw.value, pal = ~uiPal;
+    var span = ~cfg_graph.span, vs = ~graphVerts.value, law = ~fpLaw.value, pal = ~uiPal;
     var at = IdentityDictionary.new, gs = ~uiGlyphSize;
     var mid = (~cfg_fp.strongW + ~cfg_fp.weakW) / 2, reach = (span.maxItem * c / 2) + 3;
     vs.do { |v| at[v[\layer]] = (lw + ((v[\col] + (span[1] / 2)) * c)) @ (lh + ((v[\row] + (span[0] / 2)) * c)) };
@@ -82,7 +73,6 @@
 };
 
 
-
 // ----- the matrix page ----------------------------------------------
 ~netBuildMatrix = {
     var cv = ~cfg_view, pal = ~uiPal, c = cv.cell, lh = cv.labelH, hh = cv.headH;
@@ -92,8 +82,9 @@
     var ids = ~netIds.(srcs.size + dsts.size), srcId = ids.keep(srcs.size), dstId = ids.drop(srcs.size);
     var cw = lw + (dsts.size * c) + 12, ch = lh + (srcs.size * c) + 12;
     var presetW = (~cfg_presets.btnW * 3) + (~cfg_presets.gap * 2);
+    var labelW = 58, rulerW = 120, rulerStep = 258;
     var gw = dsts.size * c, gh = srcs.size * c, frameW = lw + gw + 1;
-    var headW = (3 * 258) + 58 + 120 + 6 + 64 + 16 + presetW;
+    var headW = (3 * rulerStep) + labelW + rulerW + 6 + 64 + 16 + presetW;
     var scr = Window.availableBounds;
     var ww = (frameW.max(headW) + 56).min(scr.width - 40), wh = (ch + hh + 16).min(scr.height - 40);
     var contentW = frameW.max(headW).min(ww - 56), right = 28 + contentW, ox = 28;
@@ -142,7 +133,7 @@
         ~uiBtnSet.(b, ~netDrift.(b[\on].not));
     }, ~netLive.drift > 0); x = x + 74;
     ~uiBtn.(page, Rect(x, 64, 104, 24), "dice bases", {
-        ~netLayers.value.do { |l| ~netDiceBase.(l, 0.35) };
+        ~netLayers.value.do { |l| ~netDiceBase.(l, cv.diceBases) };
     });
 
     x = 28;
@@ -152,8 +143,8 @@
         ["wander",  ControlSpec(0, 1),             ~netLive.wander,      { |v| ~netWander.(v, nil) }],
         ["wander Hz", ControlSpec(0.01, 400, \exp), ~netLive.wanderRate, { |v| ~netWander.(nil, v) }]
     ].do { |row|
-        ~uiRulerRow.(page, x, 96, 58, 120, row[0], row[1], row[2], row[3], ~netFmt);
-        x = x + 258;
+        ~uiRulerRow.(page, x, 96, labelW, rulerW, row[0], row[1], row[2], row[3], ~netFmt);
+        x = x + rulerStep;
     };
 
     ~preset.bar(page, right - presetW, 64, \matrix);
@@ -193,7 +184,7 @@
 
         Pen.fillColor = pal.ink;
         ~netCells.do { |cell|
-            var r = srcPos[~netTag.(cell[\src])], k = dstPos[~netTag.(cell[\dst])], d = cell[\eff] ? cell[\depth];
+            var r = srcPos[~netTag.(cell[\src])], k = dstPos[~netTag.(cell[\dst])], d = cell[\depth];
             var x0, y0, top, bottom, len;
             if(r.notNil and: { k.notNil }) {
                 x0 = lw + (k * c); y0 = lh + (r * c);
@@ -222,12 +213,12 @@
                 d0 = ~netDepth.(a[0], a[1], b[0], b[1]);
                 if(d0 == 0) {
                     rg = ~netRange.(a[0], a[1], b[0], b[1]);
-                    if(rg.notNil and: { rg.any { |x| x.abs > least } }) {
+                    if(rg.notNil and: { rg.any { |v| v.abs > least } }) {
                         d0 = case
                             { mod.isShift and: { rg[0] < least.neg } } { rg[0] }
                             { mod.isShift.not and: { rg[1] <= least } } { rg[0] }
                             { rg[1] };
-                        ~netSet.(a[0], a[1], b[0], b[1], d0.clip(-0.3, 0.3));
+                        ~netSet.(a[0], a[1], b[0], b[1], d0.clip(cv.clickDepth.neg, cv.clickDepth));
                         d0 = ~netDepth.(a[0], a[1], b[0], b[1]);
                     };
                 };
@@ -281,7 +272,6 @@
 };
 ~openMatrix = { { ~netBuildMatrix.value }.defer };
 
-
 // ----- the machines page --------------------------------------------
 ~netBuildMachines = {
     var cv = ~cfg_view, pal = ~uiPal, layers = ~netLayers.value, rowH = cv.rowH, colW = cv.colW;
@@ -297,10 +287,7 @@
     ~macWin = win;
     scroll = ScrollView(win, Rect(0, 0, ww, wh)).hasBorder_(false).background_(pal.paper).resize_(5);
     view = CompositeView(scroll, Rect(0, 0, cw, ch)).background_(pal.paper);
-    // the canvas never shrinks below its content (the scroll bars stay) but grows
-    // with a larger window, so the rules on it reach the window edge
-    // Qt still sends a resize while the window is tearing down, when the scroll
-    // view has no inner bounds left
+    // Qt still sends a resize while the window tears down, with no inner bounds left
     scroll.onResize_({ |sv|
         var ib = sv.innerBounds;
         if(ib.notNil and: { view.isClosed.not }) { view.resizeTo(ib.width.max(cw), ib.height.max(ch)) };
@@ -318,8 +305,8 @@
         ~uiGlyph.(page, Rect(x0, 80, ~uiGlyphSize.x, ~uiGlyphSize.y), l);
         ~uiText.(page, Rect(x0 + 24, 79, 200, 20), l.asString, ~uiType.label, pal.ink, true);
         ~uiBtn.(page, Rect(x0, 110, 84, 24), "defaults", { ~netDefaults.(l) });
-        ~uiBtn.(page, Rect(x0 + 90, 110, 84, 24), "dice", { ~netDiceBase.(l, 1.0) });
-        ~uiBtn.(page, Rect(x0 + 180, 110, 84, 24), "nudge", { ~netDiceBase.(l, 0.2) });
+        ~uiBtn.(page, Rect(x0 + 90, 110, 84, 24), "dice", { ~netDiceBase.(l, cv.diceBase) });
+        ~uiBtn.(page, Rect(x0 + 180, 110, 84, 24), "nudge", { ~netDiceBase.(l, cv.nudge) });
         ~preset.bar(page, x0, 140, l);
         params.do { |p, i|
             rulers[l][p.key] = ~uiRulerRow.(page, x0, top + (i * rowH), 88, 118,

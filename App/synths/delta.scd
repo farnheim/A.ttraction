@@ -1,7 +1,4 @@
-// App/synths/delta.scd — machine `delta`: five pulse voices, each through a
-// five-formant bank and a four-mode plate bank in parallel, `metal` crossfades
-// the two.
-
+// App/synths/delta.scd — machine `delta`: choir voices through formants and plates (§C.4); docs: docs/features/delta/dsp-spec.md
 
 // ===== CONFIG — edit here ============================================
 (
@@ -10,11 +7,11 @@
     level: 0.9,
     fade: 4,
     params: [
-        f1: [24, 96, \lin, 0, 48.71],
-        f2: [24, 96, \lin, 0, 53.71],
-        f3: [24, 96, \lin, 0, 60.72],
-        f4: [24, 96, \lin, 0, 65.71],
-        f5: [24, 96, \lin, 0, 72.72],
+        f1: [24, 96, \lin, 0, 49.30],
+        f2: [24, 96, \lin, 0, 54.28],
+        f3: [24, 96, \lin, 0, 61.30],
+        f4: [24, 96, \lin, 0, 66.28],
+        f5: [24, 96, \lin, 0, 73.30],
         voiced:      [0.0, 1.0, \lin, 0, 0.8],
         breath:      [0.0, 1.0, \lin, 0, 0.3],
         bright:      [1.0, 40.0, \exp, 0, 9.0],
@@ -48,7 +45,6 @@
         pan:       [-1.0, 1.0]
     ]
 );
-
 
 // ===== LOGIC =========================================================
 ~netMachine.(~spec_delta, { |io|

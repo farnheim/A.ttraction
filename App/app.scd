@@ -1,6 +1,4 @@
-// App/app.scd — NET: boot, the field, the machines, the out, the two pages.
-// Run the whole block. Stop: Cmd-. · full reset: ~appCleanup.value(true).
-
+// App/app.scd — NET entry point: run the whole block; docs: docs/architecture/app/code-notes.md
 
 // ===== CONFIG — edit here ============================================
 (
@@ -16,17 +14,12 @@
     dice:         false    // throw a random matrix at start
 );
 
-
 // ===== LOGIC =========================================================
 ~appDir = thisProcess.nowExecutingPath.dirname;
 
-// an ar port holds a wire buffer for the life of the graph; the default 64 makes
-// a machine SILENT with only a quiet "SynthDef not found"; takes effect from boot
+// server headroom for ar ports, cells and delay lines: see code-notes, app.scd
 s.options.numWireBufs = 2048;
-// every cell and every delay line of the field lives in real-time memory; the
-// default 8 MB runs out at a few hundred cells with a loud "alloc failed"
 s.options.memSize = 2 ** 18;
-// one cell is one node: the default 1024 caps the matrix at ~1000 cells silently
 s.options.maxNodes = 2 ** 14;
 
 ~appCleanup = { |verbose = true|
@@ -37,15 +30,17 @@ s.options.maxNodes = 2 ** 14;
     ~netBus !? { |d| d.do { |b| b[\tap].free; b[\mod].free } };
     ~netBus = ();
     if(~mixRecOn == true) { s.stopRecording; ~mixRecOn = false };
-    ~mixerWin !? { |w| { try { w.close } }.defer; ~mixerWin = nil };
+    // ~mixerWin stays set: its onClose resets the globals only while they still point at it
+    ~mixerWin !? { |w| { try { w.close } }.defer };
     [~busDry, ~busFxSendRev, ~busFxSendDly, ~busFxReturn, ~busTape].do { |b| b !? { b.free } };
     ~busDry = nil; ~busFxSendRev = nil; ~busFxSendDly = nil; ~busFxReturn = nil; ~busTape = nil;
     ~tapeStage = nil; ~tapeGui = nil; ~mixerRebuildMaster = nil;
+    ~cfg_mixer = nil; ~cfg_tape = nil; ~mixMuted = nil; ~mixSoloCur = nil;
     ~netGroup = nil;
-    ~netLive = nil;
+    ~netLive = nil; ~netHooks = (); ~netViews = ();
     ~fpCurrent = nil; ~fpLive = nil; ~fpViews = ();
     ~graphLive = nil;
-    ~ungSpecs = ();
+    ~ungSpecs = (); ~ungVals = ();
     s.freeAll;
     if(verbose) { "NET — очистка выполнена.".postln };
 };
@@ -54,13 +49,7 @@ s.waitForBoot({
     var files;
 
     ~appCleanup.value(false);
-    (~appDir +/+ "lib.scd").load;
-    (~appDir +/+ "lines.scd").load;
-    (~appDir +/+ "fingerprint.scd").load;
-    (~appDir +/+ "cells.scd").load;
-    (~appDir +/+ "graph.scd").load;
-    (~appDir +/+ "ui.scd").load;
-    (~appDir +/+ "presets.scd").load;
+    #["lib", "lines", "fingerprint", "cells", "graph", "ui", "presets"].do { |f| (~appDir +/+ f ++ ".scd").load };
     s.sync;
 
     files = (~appDir +/+ "synths" +/+ "*.scd").pathMatch.sort;
@@ -83,7 +72,7 @@ s.waitForBoot({
     if(~cfg_app.enableMixer) { (~appDir +/+ "mixer.scd").load; s.sync };
     ~netRewire.value;
 
-    if(~cfg_app.autoPreset and: { ~preset.names(\project).any { |n| n == "default" } }) {
+    if(~cfg_app.autoPreset and: { ~preset.names(\project).includesEqual("default") }) {
         ~preset.load(\project, "default");
     };
     if(~cfg_app.dice) { ~netDice.value };
@@ -98,9 +87,4 @@ s.waitForBoot({
 });
 )
 
-
-// ===== CLEANUP — run separately for a full reset =====================
-
-// (
-// ~appCleanup.value(true);
-// )
+// full reset: ~appCleanup.value(true);

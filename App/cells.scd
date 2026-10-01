@@ -1,11 +1,4 @@
-// App/cells.scd — NET · the cells of the matrix. A cell is one synth: source
-// port -> depth -> destination port. A row is a source, a column a
-// destination; the geometry of a column (lines.scd) bounds every depth, from
-// a hand, a throw of the dice or a preset alike. ~netWrite is the one door to
-// the store and its nodes; everything else plans and passes through it. A cell
-// holds its depth x; its node plays the effective depth, x unless the cell
-// lies in a cloud of the graph (graph.scd).
-// Reference: docs/features/matrix-ru.md.
+// App/cells.scd — NET matrix cells: the store, its one write door ~netWrite, hand and chance; docs: docs/features/matrix-ru.md
 
 // ===== CONFIG — edit here ============================================
 (
@@ -13,28 +6,25 @@
     diceDensity: 0.03,
     diceDepth:   0.5,
     minDepth:    0.0005,
-    // start values of the two hands: the live ones (~netLive) survive a re-run
-    // of this file, as the cells and their nodes do
+    // start values only: the live ones (~netLive) survive a re-run of this file, as cells and nodes do
     wander:      0.0,
     wanderRate:  0.3,
     drift:       0,
     driftPeriod: 3.0,
-    cellLag:     0.08
+    cellLag:     0.08,
+    // the per-cell rate factor is fixed by the cell's key, so a preset plays back as it was saved
+    rateSpread:  [0.25, 4.0],
+    lineDensity: 4,
+    mutateShare: 0.1,
+    mutateTries: 20
 );
-
 
 // ===== LOGIC =========================================================
 ~netCells = ~netCells ? Dictionary.new;
 ~netViews = ~netViews ? ();
 ~netLive  = ~netLive ? (wander: ~cfg_net.wander, wanderRate: ~cfg_net.wanderRate, drift: ~cfg_net.drift);
 
-// the Routine of the drift before 2026-09-27 outlives a re-run of this file
-// and would keep re-dealing the field; remove once no old session is left
-~netDriftTask !? { |t| t.stop; ~netDriftTask = nil };
-
-// the effective depth stays inside [0, x]: wander and drift only thin it, so
-// a line on the page is the ceiling of what the cell can ever do.
-// LFNoise2 overshoots ±1 a little, hence the clip
+// depth only thins inside [0, x] (a line is the cell's ceiling); LFNoise2 overshoots ±1, hence the clip
 SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, drift = 0, dper = 3,
     rmul = 1, lagT = 0.08|
     var h = wander.lag(0.1) * 0.5;
@@ -66,30 +56,31 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     var di = ~netPortIndex.(c[\dst][0], c[\dst][1], \dst);
     c[\node] !? { |nd| nd.free; c[\node] = nil };
     if(si.notNil and: { di.notNil } and: { s.serverRunning }) {
-        c[\node] = Synth(\net_cell, [src: si, dst: di, depth: c[\eff], rmul: c[\rmul]] ++ ~netHands.value,
+        c[\node] = Synth(\net_cell, [src: si, dst: di, depth: c[\depth], rmul: c[\rmul]] ++ ~netHands.value,
             ~netEnsureGroup.value);
     };
 };
 
-// `eff` is the effective depth (nil = the depth itself): only the graph's
-// refresh hands one in
-~netWrite = { |src, dst, depth, eff|
+~netRateOf = { |key|
+    var lo = ~cfg_net.rateSpread[0], hi = ~cfg_net.rateSpread[1];
+    lo * ((hi / lo) ** ((key.asString.hash.abs % 10007) / 10006))
+};
+
+~netWrite = { |src, dst, depth|
     var key = ~netCellKey.(src, dst), c = ~netCells[key];
     depth = depth.clip(-1, 1);
-    eff = (eff ? depth).clip(-1, 1);
     case
     { depth.abs < ~cfg_net.minDepth } {
         ~netCells.removeAt(key) !? { |x| x[\node] !? { |nd| nd.free } };
     }
     { c.isNil } {
-        c = ( src: src, dst: dst, depth: depth, eff: eff, rmul: exprand(0.25, 4.0) );
+        c = ( src: src, dst: dst, depth: depth, rmul: ~netRateOf.(key) );
         ~netCells[key] = c;
         ~netSpawn.(c);
     }
     {
         c[\depth] = depth;
-        c[\eff] = eff;
-        if(c[\node].notNil) { c[\node].set(\depth, eff) } { ~netSpawn.(c) };
+        if(c[\node].notNil) { c[\node].set(\depth, depth) } { ~netSpawn.(c) };
     };
 };
 ~netApply = { |triples| triples.do { |t| ~netWrite.(t[0], t[1], t[2]) } };
@@ -98,18 +89,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
         .reject { |c| skip.notNil and: { skip.includes(c) } }
         .collect { |c| [c[\src], c[\dst], c[\depth]] }
 };
-~netCellsWhere = { |side, port|
-    var tag = ~netTag.(port);
-    ~netCells.values.select { |c| ~netTag.(c[side]) == tag }
-};
-
-// every change of the field ends here: the graph re-deals its clouds first,
-// so a view never draws a depth the nodes do not play
-~netChanged = {
-    ~graphRefresh !? (_.value);
-    ~netViews.do { |f| f.value };
-};
-// after a throw the glyphs come to the new clouds (graph.scd)
+~netChanged = { ~netViews.do { |f| f.value } };
 ~netThrown = { ~graphPlace !? (_.value) };
 
 ~netClear = { |notify = true|
@@ -128,7 +108,6 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 
 
 // ----- cells <-> columns of lines.scd ---------------------------------
-// walls: destination tag -> the rows its glyphs close, [[r0, r1], …]
 ~netFrame = {
     var rows = IdentityDictionary.new, cols = IdentitySet.new;
     ~netAllPorts.(\src).do { |p, i| rows[~netTag.(p)] = i };
@@ -149,10 +128,13 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     [order, groups]
 };
 
+// the shortest line that may exist, in rows
+~netLeast = { ~cfg_net.minDepth * ~cfg_lines.lineRows };
+
 ~netPlan = { |cands, lenFn, skip|
     var f = ~netFrame.value, fixed = ~netColumns.(f, ~netTriples.(skip), true)[1];
     var fresh = ~netColumns.(f, cands.reject { |ab| ab[0] == ab[1] }.collect { |ab| ab ++ [0] }, false);
-    var least = ~cfg_net.minDepth * ~cfg_lines.lineRows, plan = List.new;
+    var least = ~netLeast.value, plan = List.new;
     fresh[0].do { |k|
         var col = ~linesWall.((fixed[k] ? []).asArray, f[\walls][k]);
         fresh[1][k].do { |e| col = ~linesAccept.(col, e, f[\n], least) };
@@ -163,10 +145,9 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     plan
 };
 
-// capOf: entry -> the share of `depth` its pair may reach (nil = all of it)
-~netDealRandom = { |depth, capOf|
+~netDealRandom = { |depth, law|
     var cap = (depth ? ~cfg_net.diceDepth).abs.min(1) * ~cfg_lines.lineRows;
-    var least = ~cfg_net.minDepth * ~cfg_lines.lineRows;
+    var least = ~netLeast.value, capOf = ~netCapOf.(law);
     { |up, down, e|
         var sg = case { (up > least) and: { down > least } } { [-1, 1].choose }
             { down > least } { 1 } { up > least } { -1 } { 0 };
@@ -186,6 +167,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 
 
 // ----- the hand ---------------------------------------------------------
+
 // `range` is the cell's range when the caller holds it already (a drag)
 ~netPut = { |sl, sk, dl, dk, depth, range|
     var src = ~netPort.(sl, sk), dst = ~netPort.(dl, dk);
@@ -194,11 +176,10 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 };
 ~netSet = { |sl, sk, dl, dk, depth, range| ~netPut.(sl, sk, dl, dk, depth, range); ~netChanged.value };
 ~netDepth = { |sl, sk, dl, dk|
-    ~netCells[~netCellKey.([sl, sk], [dl, dk])] !? { |c| c[\depth] } ? 0
+    ~netCells[~netCellKey.(~netPort.(sl, sk), ~netPort.(dl, dk))] !? { |c| c[\depth] } ? 0
 };
 
-// straight to the store, not through the hand: a preset is the state it
-// records, and ~netPut would clip each cell against the ones read before it
+// straight to the store, not through the hand: ~netPut would clip each cell against the ones read before
 ~netLoad = { |triples|
     ~netClear.(false);
     ~netApply.(triples.collect { |t| [~netPort.(*t[0]), ~netPort.(*t[1]), t[2]] });
@@ -206,28 +187,25 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 
 
 // ----- chance ---------------------------------------------------------
-// the law of chance is the fingerprint's (fingerprint.scd) when it is on; with
-// no law every path below is the plain one, draw for draw, so a seed thrown
-// before the fingerprint existed throws the same matrix
+
+// with no law every path is the plain one, draw for draw: a pre-fingerprint seed throws the same matrix
 ~netLaw = { ~fpLaw !? (_.value) };
 
-// the ports grouped by layer, one block per pair of layers the law lets talk
 ~netBlocks = { |srcs, dsts, law|
     var group = { |ports|
         var d = IdentityDictionary.new, order = List.new;
         ports.do { |p| if(d[p[0]].isNil) { d[p[0]] = List.new; order.add(p[0]) }; d[p[0]].add(p) };
         order.collect { |l| [l, d[l]] }
     };
-    var out = List.new;
-    group.(srcs).do { |ga| group.(dsts).do { |gb|
+    var out = List.new, gd = group.(dsts);
+    group.(srcs).do { |ga| gd.do { |gb|
         var w = (law[\W][ga[0]] !? { |r| r[gb[0]] }) ? 0;
         if(w > 0) { out.add([ga[1], gb[1], w]) };
     } };
     out
 };
 
-// under a law the expected count stays density · |srcs| · |dsts|, shared out
-// by weight — not by how many ports a layer has
+// under a law the expected count stays density · |srcs| · |dsts|, shared by weight, not by port count
 ~netCandidates = { |srcs, dsts, density, law|
     var cands = List.new, blocks, sum, n;
     if(law.isNil) {
@@ -252,8 +230,7 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     { x = blocks[blocks.collect(_[2]).normalizeSum.windex]; [x[0].choose, x[1].choose] }
 };
 
-// a pair the law says nothing of keeps the whole depth: only shake meets one,
-// a cell the hand or a preset put there
+// a pair the law says nothing of keeps the whole depth: only shake meets one (a hand or preset cell)
 ~netCapOf = { |law|
     law !? { |w| { |e|
         var a = e[\src][0], b = e[\dst][0];
@@ -261,51 +238,50 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
     } }
 };
 
-~netDice = { |density, depth, clear = true|
-    var srcs = ~netAllPorts.(\src), dsts = ~netAllPorts.(\dst), law = ~netLaw.value;
-    density = density ? ~cfg_net.diceDensity;
-    if(clear) { ~netClear.(false) };
-    ~netApply.(~netPlan.(~netCandidates.(srcs, dsts, density, law), ~netDealRandom.(depth, ~netCapOf.(law))));
+~netThrow = { |srcs, dsts, density, depth|
+    var law = ~netLaw.value;
+    ~netApply.(~netPlan.(~netCandidates.(srcs, dsts, density, law), ~netDealRandom.(depth, law)));
     ~netThrown.value;
     ~netChanged.value;
+    law
+};
+
+~netDice = { |density, depth, clear = true|
+    var law;
+    if(clear) { ~netClear.(false) };
+    law = ~netThrow.(~netAllPorts.(\src), ~netAllPorts.(\dst), density ? ~cfg_net.diceDensity, depth);
     ("net · dice · " ++ ~netCells.size ++ " cells" ++ if(law.notNil) { " · fingerprint" } { "" }).postln;
 };
 
 ~netClearLine = { |side, port, notify = true|
-    ~netCellsWhere.(side, port).do { |c| ~netWrite.(c[\src], c[\dst], 0) };
+    var tag = ~netTag.(port);
+    ~netCells.values.select { |c| ~netTag.(c[side]) == tag }.do { |c| ~netWrite.(c[\src], c[\dst], 0) };
     if(notify) { ~netChanged.value };
 };
 ~netDiceLine = { |side, port, density, depth|
-    var others = ~netAllPorts.(if(side == \src) { \dst } { \src }), law = ~netLaw.value;
-    density = (density ? ~cfg_net.diceDensity) * 4;
+    var others = ~netAllPorts.(if(side == \src) { \dst } { \src });
+    density = (density ? ~cfg_net.diceDensity) * ~cfg_net.lineDensity;
     ~netClearLine.(side, port, false);
-    ~netApply.(~netPlan.(
-        if(side == \src) { ~netCandidates.([port], others, density, law) } {
-            ~netCandidates.(others, [port], density, law)
-        },
-        ~netDealRandom.(depth, ~netCapOf.(law))));
-    ~netThrown.value;
-    ~netChanged.value;
+    if(side == \src) { ~netThrow.([port], others, density, depth) } { ~netThrow.(others, [port], density, depth) };
 };
 
-// a cell onto itself is never placed again (~netPlan): it must stand fixed,
-// or the lines of its column would run through it
+// a cell onto itself is never placed again (~netPlan): it stands fixed, or its column's lines run through it
 ~netShake = { |depth|
     var cells = ~netCells.values.asArray.reject { |c| c[\src] == c[\dst] };
     ~netApply.(~netPlan.(cells.collect { |c| [c[\src], c[\dst]] },
-        ~netDealRandom.(depth, ~netCapOf.(~netLaw.value)), IdentitySet.newFrom(cells)));
+        ~netDealRandom.(depth, ~netLaw.value), IdentitySet.newFrom(cells)));
     ~netChanged.value;
 };
 ~netMutate = { |n, depth|
     var cells = ~netCells.values.asArray, srcs = ~netAllPorts.(\src), dsts = ~netAllPorts.(\dst);
     var law = ~netLaw.value, blocks = law !? { |w| ~netBlocks.(srcs, dsts, w) }, made = 0, tries = 0, plan;
-    n = n ? (cells.size * 0.1).ceil.asInteger.max(1);
+    n = n ? (cells.size * ~cfg_net.mutateShare).ceil.asInteger.max(1);
     // a law that lets no pair talk could only remove: the matrix would shrink unseen
     if(blocks.isNil or: { blocks.notEmpty }) {
         cells.scramble.keep(n.min(cells.size)).do { |c| ~netWrite.(c[\src], c[\dst], 0) };
-        while { (made < n) and: { tries < 20 } } {
+        while { (made < n) and: { tries < ~cfg_net.mutateTries } } {
             plan = ~netPlan.(Array.fill(n - made, { ~netPickPair.(srcs, dsts, blocks) }).reject(_.isNil),
-                ~netDealRandom.(depth, ~netCapOf.(law)))
+                ~netDealRandom.(depth, law))
                 .select { |t| t[2].abs >= ~cfg_net.minDepth };
             ~netApply.(plan);
             made = made + plan.size;
@@ -336,5 +312,5 @@ SynthDef(\net_cell, { |src = 0, dst = 0, depth = 0, wander = 0, wrate = 0.3, dri
 ~netHandsSet.value;
 
 
-"cells — поле готово (~netDice, ~netSet, ~openMatrix, ~openMachines).".postln;
+"cells — поле готово (~netDice, ~netSet, ~netWander, ~netDrift).".postln;
 )

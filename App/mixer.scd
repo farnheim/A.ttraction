@@ -1,14 +1,8 @@
-// App/mixer.scd — MIXER: per-machine vol + two fx sends, one aggregator per
-// bus, master (LeakDC + Limiter), solo/mute, recorder, mixer window (~openMixer).
-// The output stage only: nothing here touches the field. The Deck also hosts
-// the fingerprint block (fingerprint.scd), which only sets the law of dice.
-
+// App/mixer.scd — the output stage and the Deck window (~openMixer); docs: docs/architecture/app/code-notes.md
 
 // ===== CONFIG — edit here ============================================
 (
-// vol -> master; sendRev/sendDly -> §K.1/§K.2 tables (independent by canon).
-// `? ()`: the live mix is STATE and survives a hot reload; the table only seeds
-// a fresh session (the auto-preset then overrides it)
+// `? ()`: the live mix is state and survives a hot reload; the table only seeds a fresh session
 ~cfg_mixer = ~cfg_mixer ? (
     master:  0.9,
 
@@ -22,31 +16,23 @@
     )
 );
 
-// fallback levels for a layer missing from the table (new synths/*.scd)
 ~mixerDefaultLevel = ( vol: 0.7, sendRev: 0.0, sendDly: 0.0 );
 
-// master-sum recorder: file format and dir (relative to project root)
 ~cfg_recorder = ( header: "wav", sample: "int24", dir: "recordings" );
 
-// the fingerprint canvas of the deck: a cell holds one whole glyph card (5:6,
-// so a line meets the glyph edge to edge); line width and the gap of a double
-// line in px
+// one glyph card (5:6) per cell, so a line meets the glyph edge to edge
 ~cfg_fpView = ( cell: 18 @ 22, line: 2, gap: 3 );
 
-
 // ===== LOGIC — routers + master + GUI ================================
-~mixerLayers = ~activeLayers ? ~ungSpecs.keys.asArray.sort;
+~mixerLayers = ~netLayers.value;
 
-// ensure a level entry for every active layer
 ~mixerLayers.do { |layer|
     if(~cfg_mixer.levels[layer].isNil) {
         ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy;
     };
 };
 
-// layer router = the channel fader: dry -> ~busDry only (the aggregator below
-// collects the sends — exactly ONE writer per bus); volumes belong to the
-// performer (2026-07-18)
+// dry -> ~busDry only: the sends are collected by the aggregators, ONE writer per bus
 ~mixerLayers.do { |layer|
     var routerKey = ("mix_" ++ layer).asSymbol;
     var lv = ~cfg_mixer.levels[layer];
@@ -59,10 +45,7 @@
     Ndef(routerKey).play(out: ~busDry.index, numChannels: 2);
 };
 
-// send aggregators: ONE PER BUS (the §K.1/§K.2 tables are independent), each the
-// sole writer of its bus (ReplaceOut: no accumulation); the send_<layer> param
-// names coincide — the Ndef tells them apart. Sends tap the ROUTER, not the
-// layer: post-fader, as on a console — vol, mute and solo carry the echo along
+// one aggregator per send bus, its sole writer (ReplaceOut); sends tap the router: post-fader
 ~mixerSendMix = {
     Mix(~mixerLayers.collect { |layer|
         var amt = NamedControl.kr(("send_" ++ layer).asSymbol, 0);
@@ -73,7 +56,6 @@
 Ndef(\fxsendRev, { ReplaceOut.ar(~busFxSendRev.index, ~mixerSendMix.value) });
 Ndef(\fxsendDly, { ReplaceOut.ar(~busFxSendDly.index, ~mixerSendMix.value) });
 
-// which -> aggregator Ndef key (~mixSet/~mixSolo/~mixUnsolo lookup)
 ~mixerSendAgg = ( sendRev: \fxsendRev, sendDly: \fxsendDly );
 
 ~mixerSendAgg.keysValuesDo { |which, aggKey|
@@ -86,9 +68,7 @@ Ndef(\fxsendDly, { ReplaceOut.ar(~busFxSendDly.index, ~mixerSendMix.value) });
     // NO .play: the body already writes via ReplaceOut, a monitor would be a SECOND writer
 };
 
-// master: (dry + fx return), LeakDC, tape (§K.6, tape.scd), Limiter. Everything
-// before the Limiter is ONE function: render_master's no-limiter probe calls it
-// too, so the probe cannot fall out of step with the master
+// everything before the Limiter is ONE function: render_master's probe calls it too
 ~mixerMasterPre = { |sig|
     sig = LeakDC.ar(sig);
     ~tapeStage !? { |stage| sig = stage.(sig) };
@@ -111,33 +91,26 @@ Ndef(\master).set(\amp, ~cfg_mixer.master);
 Ndef(\master).fadeTime = 1;
 Ndef(\master).play(out: 0, numChannels: 2);
 
-// GUI sync hook <- ~mixSet (set by the mixer window; nil without GUI)
-~mixerGuiSync = ~mixerGuiSync;
-
-// live setters for editing / MIDI / sequencer:
-// ~mixSet.(\alpha, \vol, 0.5) / ~mixSet.(\alpha, \sendRev, 0.8)
-// / ~mixSet.(\alpha, \sendDly, 0.2) / ~masterSet.(v)
+// which: \vol | \sendRev | \sendDly
 ~mixSet = { |layer, which = \vol, value|
     var agg = ~mixerSendAgg[which];
     if(~cfg_mixer.levels[layer].isNil) { ~cfg_mixer.levels[layer] = ~mixerDefaultLevel.copy };
     ~cfg_mixer.levels[layer][which] = value;
-    // for a muted / solo-hidden layer only the stored vol moves — unmute
-    // restores the value the slider shows right now
+    // a muted / solo-hidden layer only stores its vol: unmute restores what the slider shows
     if(agg.notNil) {
         Ndef(agg).set(("send_" ++ layer).asSymbol, value);
     } {
         if(~mixLayerAudible.(layer)) { Ndef(("mix_" ++ layer).asSymbol).set(\vol, value) };
     };
-    if(~mixerGuiSync.notNil) { ~mixerGuiSync.(layer, which, value) };
+    ~mixerGuiSync.(layer, which, value);
 };
 ~masterSet = { |value|
     Ndef(\master).set(\amp, value); ~cfg_mixer.master = value;
-    if(~mixerGuiSync.notNil) { ~mixerGuiSync.(\master, \amp, value) };
+    ~mixerGuiSync.(\master, \amp, value);
 };
 
-// mute and solo meet in ONE apply function; levels are read from ~cfg_mixer
-// (never overwritten with zeros) — clearing mute/solo restores the original mix
-~mixMuted = ~mixMuted ? ();   // layer -> true; survives reopen/reload
+// levels are never overwritten with zeros: clearing mute/solo restores the mix
+~mixMuted = ~mixMuted ? ();
 ~mixLayerAudible = { |layer|
     (~mixMuted[layer] != true) and: { ~mixSoloCur.isNil or: { ~mixSoloCur == layer } }
 };
@@ -154,11 +127,11 @@ Ndef(\master).play(out: 0, numChannels: 2);
 
 ~mixSolo = { |layer|
     ~mixSoloCur = layer; ~mixApplyLevels.value;
-    if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
+    ~mixerRefreshSolo.value;
 };
 ~mixUnsolo = {
     ~mixSoloCur = nil; ~mixApplyLevels.value;
-    if(~mixerRefreshSolo.notNil) { ~mixerRefreshSolo.value };
+    ~mixerRefreshSolo.value;
 };
 ~mixSoloToggle = { |layer|
     if(~mixSoloCur == layer) { ~mixUnsolo.value } { ~mixSolo.(layer) };
@@ -167,23 +140,20 @@ Ndef(\master).play(out: 0, numChannels: 2);
 ~mixMuteToggle = { |layer|
     ~mixMuted[layer] = (~mixMuted[layer] != true);
     ~mixApplyLevels.value;
-    if(~mixerRefreshMute.notNil) { ~mixerRefreshMute.value };
+    ~mixerRefreshMute.value;
 };
 ~mixAllMuted = { ~mixerLayers.every { |l| ~mixMuted[l] == true } };
 ~mixMuteAllToggle = {
     var mute = ~mixAllMuted.value.not;
     ~mixerLayers.do { |l| ~mixMuted[l] = mute };
     ~mixApplyLevels.value;
-    if(~mixerRefreshMute.notNil) { ~mixerRefreshMute.value };
+    ~mixerRefreshMute.value;
 };
 
-// restore mute/solo on freshly built routers/aggregators
 ~mixApplyLevels.value;
 
-// the recorder writes bus 0 from the TAIL of the root group (after
-// Ndef(\master)) — the file gets exactly what is heard
-~mixRecOn   = ~mixRecOn ? false;   // survives reload
-~mixRecPath = ~mixRecPath;
+// recorded from the tail of the root group, after Ndef(\master): exactly what is heard
+~mixRecOn = ~mixRecOn ? false;
 
 ~mixRecToggle = {
     if(~mixRecOn) {
@@ -204,18 +174,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerRecSync.value;
 };
 
-// update record-button visual from ~mixRecOn (no-op without window)
 
-
-// ===== GUI — Ungrund window (ui kit) ================================
+// ===== GUI — the Deck (ui kit) ======================================
 ~mixerEz = ~mixerEz ? (); ~mixerSoloBtn = ~mixerSoloBtn ? (); ~mixerMuteBtn = ~mixerMuteBtn ? ();
 ~mixerFx = ~mixerFx ? (); ~mixerFp = ~mixerFp ? ();
 
-// the fingerprint: its field on a canvas of cells, the three knobs of the
-// next generation, generate, the switch of the law, a status line
-~mixerFpHeight = { (~cfg_fp.rows * ~cfg_fpView.cell.y) + 20 };
-// the model stands in the middle of the canvas, whatever corner it grew in
-// and whatever field it was drawn on (a preset keeps its own text)
+// centred whatever field it was drawn on: a preset keeps its own text
 ~mixerFpCentre = { |cells, rows, cols|
     var r0 = inf, r1 = -inf, c0 = inf, c1 = -inf;
     cells.do { |row, r| row.do { |sym, c|
@@ -230,7 +194,7 @@ Ndef(\master).play(out: 0, numChannels: 2);
 };
 ~mixerFpBuild = { |page, x, y|
     var cw = ~cfg_fpView.cell.x, ch = ~cfg_fpView.cell.y, cols = ~cfg_fp.cols, rows = ~cfg_fp.rows;
-    var cx = x + (cols * cw) + 28, fmt2 = { |v| ~uiFmt.(v, 2) }, wid = ();
+    var cx = x + (cols * cw) + 28, wid = ();
     ~uiCap.(page, Rect(x, y, 400, 14), "fingerprint");
     wid[\canvas] = UserView(page, Rect(x, y + 20, cols * cw, rows * ch)).background_(~uiPal.paper).drawFunc_({ |u|
         var live = ~netLayers.value;
@@ -254,12 +218,12 @@ Ndef(\master).play(out: 0, numChannels: 2);
     });
     [\complexity, \links, \symmetry].do { |k, i|
         wid[k] = ~uiRulerRow.(page, cx, y + 20 + (i * 28), 90, 190, k.asString, ControlSpec(0, 1), ~fpLive[k],
-            { |v| ~fpLive[k] = v }, fmt2);
+            { |v| ~fpLive[k] = v }, ~uiFmt);
     };
     wid[\generate] = ~uiBtn.(page, Rect(cx, y + 116, 84, 24), "generate", { ~fpGenerate.(nil, nil, nil, Date.seed) });
     wid[\dice] = ~uiBtn.(page, Rect(cx + 90, y + 116, 84, 24), "→ dice", { ~fpSet.((~fpLive[\on] == true).not) },
         ~fpLive[\on] == true);
-    wid[\dice][\enabled] = ~fpCurrent.notNil;
+    ~uiBtnEnable.(wid[\dice], ~fpCurrent.notNil);
     wid[\status] = ~uiText.(page, Rect(cx, y + 152, 560, 20), ~mixerFpStatus.value, nil, ~uiPal.grey);
     ~mixerFp = wid;
     ~fpViews[\deck] = {
@@ -275,120 +239,106 @@ Ndef(\master).play(out: 0, numChannels: 2);
     };
 };
 
-~mixerBuild = {
-    var pal = ~uiPal, layers = ~mixerLayers, rowH = 28, tableY = 110;
-    var footY = tableY + (layers.size * rowH) + 6, fpY = footY + 44;
-    var fpBottom = if(~fpLive.notNil) { fpY + 20 + (~cfg_fp.rows * ~cfg_fpView.cell.y) };
+// presets beside the fingerprint, tape + master on the right: both end on the canvas's lower edge
+~mixerLayout = { |layers|
+    var rowH = 28, tableY = 110, footY = tableY + (layers.size * rowH) + 6, fpY = footY + 44;
+    var fpBottom = fpY + 20 + (~cfg_fp.rows * ~cfg_fpView.cell.y);
     var barH = (~cfg_presets.btnH * 2) + ~cfg_presets.gap;
-    // the presets stand in a column beside the fingerprint, the master and the
-    // tape stage over it on the right: both end on the canvas's lower edge.
-    // Without a fingerprint they stand in its place and under the echo
-    var presetX = if(fpBottom.notNil) { 28 + (~cfg_fp.cols * ~cfg_fpView.cell.x) + 28 } { 28 };
-    var presetY = fpBottom !? { |b| b - (108 + barH) } ? fpY;
     var fxX = 1010, fxY = 84, echoEnd = fxY + if(~cfg_effects.notNil) { 158 } { 0 };
     var tapeH = ~tapeGui !? { (~tapeGuiHeight ? 0) + 42 } ? 0;
-    var masterY = fpBottom !? { |b| (b - 44).max(echoEnd + tapeH) } ? (echoEnd + tapeH);
-    var tapeY = masterY - tapeH;
-    var leftH = fpBottom !? { |b| b + 28 } ? (presetY + 108 + barH + 28);
-    var right = fxX + 316, w = right + 28, h = leftH.max(masterY + 78).max(440);
-    var fmt2 = { |v| ~uiFmt.(v, 2) };
-    var fxModeItems = [
-        "1 · 1 tap", "2 · 2 tap", "3 · 1+2 tap", "4 · 1+2+3 echo",
-        "5 · 1 +rev", "6 · 2 +rev", "7 · 3 +rev", "8 · 1+2 +rev",
-        "9 · 2+3 +rev", "10 · 1+3 +rev", "11 · all +rev", "12 · rev only"
-    ];
-    var scr = Window.availableBounds, win, page, mkGlyph;
+    var masterY = (fpBottom - 44).max(echoEnd + tapeH), right = fxX + 316;
+    (
+        rowH: rowH, tableY: tableY, footY: footY, fpY: fpY,
+        presetX: 28 + (~cfg_fp.cols * ~cfg_fpView.cell.x) + 28, presetY: fpBottom - (108 + barH),
+        fxX: fxX, fxY: fxY, tapeY: masterY - tapeH, masterY: masterY,
+        right: right, w: right + 28, h: (fpBottom + 28).max(masterY + 78).max(440),
+        cols: [[\vol, 172, "vol"], [\sendRev, 372, "rev"], [\sendDly, 572, "dly"]], muteX: 776, soloX: 832
+    )
+};
+
+~mixerBuildTable = { |page, lay, layers|
+    var y0 = lay.tableY - 26;
+    ~uiCap.(page, Rect(28, y0, 100, 14), "machine");
+    lay.cols.do { |c| ~uiCap.(page, Rect(c[1], y0, 100, 14), c[2]) };
+    ~uiCap.(page, Rect(lay.muteX, y0, 44, 14), "mute");
+    ~uiCap.(page, Rect(lay.soloX, y0, 44, 14), "solo");
+    layers.do { |layer, i|
+        var y = lay.tableY + (i * lay.rowH), lv = ~cfg_mixer.levels[layer] ? ~mixerDefaultLevel;
+        ~uiGlyph.(page, Rect(28, y + 1, ~uiGlyphSize.x, ~uiGlyphSize.y), layer);
+        ~uiText.(page, Rect(52, y, 110, 20), layer.asString, ~uiType.label, ~uiPal.ink, true);
+        ~mixerEz[layer] = ();
+        lay.cols.do { |c|
+            ~mixerEz[layer][c[0]] = ~uiRulerRow.(page, c[1], y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv[c[0]]),
+                lv[c[0]], { |v| ~mixSet.(layer, c[0], v) }, ~uiFmt);
+        };
+        ~mixerMuteBtn[layer] = ~uiBtn.(page, Rect(lay.muteX, y - 2, 44, 24), "⊘",
+            { ~mixMuteToggle.(layer) }, ~mixMuted[layer] == true);
+        ~mixerSoloBtn[layer] = ~uiBtn.(page, Rect(lay.soloX, y - 2, 44, 24), "◎",
+            { ~mixSoloToggle.(layer) }, ~mixSoloCur == layer);
+    };
+    ~mixerMuteAllBtn = ~uiBtn.(page, Rect(lay.muteX, lay.footY, 44, 24), "⊘",
+        { ~mixMuteAllToggle.value }, ~mixAllMuted.value);
+    ~mixerSoloAllBtn = ~uiBtn.(page, Rect(lay.soloX, lay.footY, 44, 24), "◎",
+        { ~mixUnsolo.value }, ~mixSoloCur.notNil);
+};
+
+~mixerBuildFx = { |page, x, y|
+    var mode = { |inst, row|
+        var key = (inst ++ "_mode").asSymbol, gy = y + 20 + (row * 32), glyph;
+        ~uiText.(page, Rect(x, gy + 2, 40, 20), if(inst == \dly) { "echo" } { "rev" });
+        glyph = UserView(page, Rect(x + 42, gy, 76, 24)).background_(~uiPal.paper)
+            .drawFunc_({ |u| ~uiDrawEcho.(u, ~cfg_effects[key]) });
+        ~mixerFx[(inst ++ "Glyph").asSymbol] = glyph;
+        ~mixerFx[(inst ++ "Mode").asSymbol] = ~uiPopup.(page, Rect(x + 126, gy, 190, 24), ~echoModes.names,
+            ~echoModeIndex.(~cfg_effects[key]), { |idx| ~fxSet.(key, idx + 1); glyph.refresh });
+    };
+    var tone = { |key, row|
+        ~mixerFx[key] = ~uiRulerRow.(page, x, y + 86 + (row * 28), 42, 190, key.asString,
+            ControlSpec(-1, 1, \lin, 0, ~cfg_effects[key]), ~cfg_effects[key], { |v| ~fxSet.(key, v) }, ~uiFmt);
+    };
+    ~uiCap.(page, Rect(x, y, 380, 14), "echo");
+    mode.(\dly, 0);
+    mode.(\rev, 1);
+    tone.(\bass, 0);
+    tone.(\treble, 1);
+};
+
+~mixerBuildMaster = { |page, x, y|
+    ~uiCap.(page, Rect(x, y, 380, 14), "master");
+    ~mixerEz[\master] = ~uiRulerRow.(page, x, y + 22, 42, 130, "vol",
+        ControlSpec(0, 1, \lin, 0, ~cfg_mixer.master), ~cfg_mixer.master, { |v| ~masterSet.(v) }, ~uiFmt);
+    ~mixerRecBtn = ~uiBtn.(page, Rect(x + 246, y + 20, 70, 24), ["● rec", "■ rec"],
+        { ~mixRecToggle.value }, ~mixRecOn);
+};
+
+~mixerBuild = {
+    var layers = ~mixerLayers, lay = ~mixerLayout.(layers), scr = Window.availableBounds, win, page;
+    var w = lay.w.min(scr.width), h = lay.h.min(scr.height);
 
     ~mixerWin !? { |x| try { x.close } };
-    w = w.min(scr.width); h = h.min(scr.height);
     win = Window("NET · deck", Rect(scr.left + ((scr.width - w) / 2).max(0), scr.top + 40, w, h))
-        .background_(pal.paper);
+        .background_(~uiPal.paper);
     ~mixerWin = win;
     ~mixerEz = (); ~mixerSoloBtn = (); ~mixerMuteBtn = (); ~mixerFx = ();
 
     ~uiRule.(win, Rect(0, 66, w, 1)).resize_(2);
-    page = ~uiPage.(win.view, right - 28);
+    page = ~uiPage.(win.view, lay.right - 28);
     ~uiTitle.(page, Rect(28, 20, 300, 36), "Deck");
-    ~uiNav.(page, right, 26, [["matrix", { ~openMatrix }], ["machines", { ~openMachines }]]);
-    ~uiRule.(page, Rect(fxX - 24, 67, 1, h - 67)).resize_(4);
+    ~uiNav.(page, lay.right, 26, [["matrix", { ~openMatrix }], ["machines", { ~openMachines }]]);
+    ~uiRule.(page, Rect(lay.fxX - 24, 67, 1, h - 67)).resize_(4);
 
-    ~uiCap.(page, Rect(28, tableY - 26, 100, 14), "machine");
-    ~uiCap.(page, Rect(172, tableY - 26, 100, 14), "vol");
-    ~uiCap.(page, Rect(372, tableY - 26, 100, 14), "rev");
-    ~uiCap.(page, Rect(572, tableY - 26, 100, 14), "dly");
-    ~uiCap.(page, Rect(776, tableY - 26, 44, 14), "mute");
-    ~uiCap.(page, Rect(832, tableY - 26, 44, 14), "solo");
-    layers.do { |layer, i|
-        var y = tableY + (i * rowH);
-        var lv = ~cfg_mixer.levels[layer] ? ~mixerDefaultLevel;
-        ~uiGlyph.(page, Rect(28, y + 1, ~uiGlyphSize.x, ~uiGlyphSize.y), layer);
-        ~uiText.(page, Rect(52, y, 110, 20), layer.asString, ~uiType.label, pal.ink, true);
-        ~mixerEz[layer] = (
-            vol: ~uiRulerRow.(page, 172, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.vol), lv.vol,
-                { |v| ~mixSet.(layer, \vol, v) }, fmt2),
-            sendRev: ~uiRulerRow.(page, 372, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.sendRev), lv.sendRev,
-                { |v| ~mixSet.(layer, \sendRev, v) }, fmt2),
-            sendDly: ~uiRulerRow.(page, 572, y, 0, 140, "", ControlSpec(0, 1, \lin, 0, lv.sendDly), lv.sendDly,
-                { |v| ~mixSet.(layer, \sendDly, v) }, fmt2)
-        );
-        ~mixerMuteBtn[layer] = ~uiBtn.(page, Rect(776, y - 2, 44, 24), "⊘",
-            { ~mixMuteToggle.(layer) }, ~mixMuted[layer] == true);
-        ~mixerSoloBtn[layer] = ~uiBtn.(page, Rect(832, y - 2, 44, 24), "◎",
-            { ~mixSoloToggle.(layer) }, ~mixSoloCur == layer);
-    };
-    ~mixerMuteAllBtn = ~uiBtn.(page, Rect(776, footY, 44, 24), "⊘", { ~mixMuteAllToggle.value }, ~mixAllMuted.value);
-    ~mixerSoloAllBtn = ~uiBtn.(page, Rect(832, footY, 44, 24), "◎", { ~mixUnsolo.value }, ~mixSoloCur.notNil);
-    if(~fpLive.notNil) { ~mixerFpBuild.(page, 28, fpY) };
-    ~uiCap.(page, Rect(presetX, presetY, 260, 14), "mixer preset");
-    ~preset.bar(page, presetX, presetY + 20, \mixer);
-    ~uiCap.(page, Rect(presetX, presetY + 88, 380, 14), "project · machines + mixer + matrix");
-    ~preset.bar(page, presetX, presetY + 108, \project);
-
-    mkGlyph = { |x, y, modeFn|
-        var uv = UserView(page, Rect(x, y, 76, 24)).background_(pal.paper);
-        uv.drawFunc_({ |u| ~uiDrawEcho.(u, modeFn.value) });
-        uv
-    };
-    if(~cfg_effects.notNil) {
-        var dlyGl, revGl;
-        ~uiCap.(page, Rect(fxX, fxY, 380, 14), "echo");
-        ~uiText.(page, Rect(fxX, fxY + 22, 40, 20), "echo");
-        dlyGl = mkGlyph.(fxX + 42, fxY + 20, { ~cfg_effects.dly_mode });
-        ~mixerFx[\dlyMode] = ~uiPopup.(page, Rect(fxX + 126, fxY + 20, 190, 24), fxModeItems,
-            (~cfg_effects.dly_mode - 1).clip(0, 11), { |idx|
-                Ndef(\space_echo_dly).set(\mode, idx + 1);
-                ~cfg_effects.dly_mode = idx + 1;
-                dlyGl.refresh;
-            });
-        ~uiText.(page, Rect(fxX, fxY + 54, 40, 20), "rev");
-        revGl = mkGlyph.(fxX + 42, fxY + 52, { ~cfg_effects.rev_mode });
-        ~mixerFx[\revMode] = ~uiPopup.(page, Rect(fxX + 126, fxY + 52, 190, 24), fxModeItems,
-            (~cfg_effects.rev_mode - 1).clip(0, 11), { |idx|
-                Ndef(\space_echo_rev).set(\mode, idx + 1);
-                ~cfg_effects.rev_mode = idx + 1;
-                revGl.refresh;
-            });
-        ~mixerFx[\bass] = ~uiRulerRow.(page, fxX, fxY + 86, 42, 190, "bass",
-            ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_bass), ~cfg_effects.rev_bass, { |v|
-                [\space_echo_rev, \space_echo_dly].do { |n| Ndef(n).set(\bass, v) };
-                ~cfg_effects.rev_bass = v; ~cfg_effects.dly_bass = v;
-            }, fmt2);
-        ~mixerFx[\treble] = ~uiRulerRow.(page, fxX, fxY + 114, 42, 190, "treble",
-            ControlSpec(-1, 1, \lin, 0, ~cfg_effects.rev_treble), ~cfg_effects.rev_treble, { |v|
-                [\space_echo_rev, \space_echo_dly].do { |n| Ndef(n).set(\treble, v) };
-                ~cfg_effects.rev_treble = v; ~cfg_effects.dly_treble = v;
-            }, fmt2);
-        ~mixerFx[\dlyGlyph] = dlyGl; ~mixerFx[\revGlyph] = revGl;
-    };
+    ~mixerBuildTable.(page, lay, layers);
+    ~mixerFpBuild.(page, 28, lay.fpY);
+    ~uiCap.(page, Rect(lay.presetX, lay.presetY, 260, 14), "mixer preset");
+    ~preset.bar(page, lay.presetX, lay.presetY + 20, \mixer);
+    ~uiCap.(page, Rect(lay.presetX, lay.presetY + 88, 380, 14), "project · machines + mixer + matrix");
+    ~preset.bar(page, lay.presetX, lay.presetY + 108, \project);
+    if(~cfg_effects.notNil) { ~mixerBuildFx.(page, lay.fxX, lay.fxY) };
     ~tapeGui !? { |gui|
-        ~uiCap.(page, Rect(fxX, tapeY, 380, 14), "tape");
-        gui.(page, fxX, tapeY + 20);
+        ~uiCap.(page, Rect(lay.fxX, lay.tapeY, 380, 14), "tape");
+        gui.(page, lay.fxX, lay.tapeY + 20);
     };
-    ~uiCap.(page, Rect(fxX, masterY, 380, 14), "master");
-    ~mixerEz[\master] = ~uiRulerRow.(page, fxX, masterY + 22, 42, 130, "vol",
-        ControlSpec(0, 1, \lin, 0, ~cfg_mixer.master), ~cfg_mixer.master, { |v| ~masterSet.(v) }, fmt2);
-    ~mixerRecBtn = ~uiBtn.(page, Rect(fxX + 246, masterY + 20, 70, 24), ["● rec", "■ rec"],
-        { ~mixRecToggle.value }, ~mixRecOn);
+    ~mixerBuildMaster.(page, lay.fxX, lay.masterY);
 
     win.onClose_({
         if(~mixerWin === win) {
@@ -406,6 +356,13 @@ Ndef(\master).play(out: 0, numChannels: 2);
     ~mixerEz[layer] !? { |row|
         if(layer == \master) { ~uiRulerSet.(row, value) } { row[which] !? { |r| ~uiRulerSet.(r, value) } };
     };
+};
+~mixerFxSync = {
+    [\dly, \rev].do { |inst|
+        ~mixerFx[(inst ++ "Mode").asSymbol] !? { |p| ~uiPopupSet.(p, ~echoModeIndex.(~cfg_effects[(inst ++ "_mode").asSymbol])) };
+        ~mixerFx[(inst ++ "Glyph").asSymbol] !? { |g| { g.refresh }.defer };
+    };
+    [\bass, \treble].do { |k| ~mixerFx[k] !? { |r| ~uiRulerSet.(r, ~cfg_effects[k]) } };
 };
 ~mixerRefreshMute = {
     ~mixerMuteBtn.keysValuesDo { |l, b| ~uiBtnSet.(b, ~mixMuted[l] == true) };
